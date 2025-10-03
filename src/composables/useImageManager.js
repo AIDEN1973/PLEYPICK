@@ -38,20 +38,111 @@ export function useImageManager() {
     }
   }
 
-  // Supabase Storage 버킷 존재 여부 확인
+  // Supabase Storage 버킷 존재 여부 확인 (개선된 버전)
   const checkBucketExists = async () => {
     try {
-      const { data, error } = await supabase.storage.listBuckets()
-      if (error) {
-        console.error('Failed to list buckets:', error)
-        return false
+      // 현재 사용자 세션 확인
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        console.error('Session error:', sessionError)
+        return true // 세션 오류 시에도 업로드 시도
       }
       
-      const bucketExists = data.some(bucket => bucket.id === 'lego_parts_images')
-      console.log('Bucket lego_parts_images exists:', bucketExists)
-      return bucketExists
+      if (!session) {
+        console.warn('No active session. User needs to be authenticated.')
+        return true // 인증 없이도 업로드 시도
+      }
+      
+      console.log('Current user:', session.user?.email)
+      
+      // 버킷 존재 여부를 실제 업로드로 확인
+      try {
+        const { data, error } = await supabase.storage.listBuckets()
+        if (error) {
+          console.warn('Failed to list buckets, but bucket might still exist:', error.message)
+          return true // 목록 조회 실패 시에도 업로드 시도
+        }
+        
+        console.log('Available buckets:', data.map(b => b.id))
+        
+        const bucketExists = data.some(bucket => bucket.id === 'lego_parts_images')
+        console.log('Bucket lego_parts_images exists:', bucketExists)
+        return bucketExists
+      } catch (listError) {
+        console.warn('Bucket list check failed, but bucket might still exist:', listError.message)
+        return true // 목록 조회 실패 시에도 업로드 시도
+      }
     } catch (err) {
-      console.error('Error checking bucket:', err)
+      console.warn('Error checking bucket, but bucket might still exist:', err.message)
+      return true // 오류 시에도 업로드 시도
+    }
+  }
+
+  // 이미지 해시 생성 함수 (중복 검사용)
+  const generateImageHash = async (blob) => {
+    try {
+      const arrayBuffer = await blob.arrayBuffer()
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer)
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+      return hashHex
+    } catch (err) {
+      console.warn('Failed to generate image hash:', err.message)
+      return null
+    }
+  }
+
+  // 이미지 중복 검사 함수
+  const checkImageDuplicate = async (imageHash, partNum, colorId) => {
+    try {
+      const { data, error } = await supabase
+        .from('image_metadata')
+        .select('supabase_url, file_path, file_name')
+        .eq('part_num', partNum)
+        .eq('color_id', colorId)
+        .not('supabase_url', 'is', null)
+
+      if (error) {
+        console.warn('Duplicate check failed:', error.message)
+        return null
+      }
+
+      // 동일한 부품+색상 조합이 이미 존재하는지 확인
+      if (data && data.length > 0) {
+        console.log(`Duplicate found for part ${partNum} color ${colorId}:`, data[0])
+        return data[0] // 기존 이미지 정보 반환
+      }
+
+      return null // 중복 없음
+    } catch (err) {
+      console.warn('Error checking image duplicate:', err.message)
+      return null
+    }
+  }
+
+  // 파일명 중복 검사 함수 (원본 파일명 기반)
+  const checkFilenameDuplicate = async (filename, path = '') => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('lego_parts_images')
+        .list(path || 'images', {
+          search: filename
+        })
+      
+      if (error) {
+        console.warn('File existence check failed:', error.message)
+        return false // 오류 시 중복 없음으로 처리
+      }
+      
+      // 파일이 존재하면 중복
+      if (data && data.length > 0) {
+        console.log(`Duplicate filename found: ${filename}`)
+        return true
+      }
+      
+      return false // 중복 없음
+    } catch (err) {
+      console.warn('File existence check failed:', err.message)
       return false
     }
   }
@@ -63,14 +154,18 @@ export function useImageManager() {
 
     try {
       if (USE_SUPABASE_STORAGE) {
-        // 버킷 존재 여부 확인
-        const bucketExists = await checkBucketExists()
-        if (!bucketExists) {
-          throw new Error('Supabase Storage bucket "lego_parts_images" not found. Please create it first.')
+        // 버킷 존재 여부 확인 (인증 없이도 시도)
+        try {
+          const bucketExists = await checkBucketExists()
+          if (!bucketExists) {
+            console.warn('Bucket check failed, but attempting upload anyway...')
+          }
+        } catch (err) {
+          console.warn('Bucket check failed, but attempting upload anyway:', err.message)
         }
 
-        // Supabase Storage 사용
-        const fileName = `${Date.now()}-${file.name}`
+        // 고유한 파일명 생성
+        const fileName = await generateUniqueFileName(file.name, path)
         const filePath = path ? `${path}/${fileName}` : `images/${fileName}`
         
         const { data, error: uploadError } = await supabase.storage
@@ -120,57 +215,90 @@ export function useImageManager() {
     }
   }
 
-  // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수
+  // URL에서 원본 파일명 추출 함수
+  const extractOriginalFilename = (imageUrl) => {
+    try {
+      // URL에서 파일명 추출
+      const urlParts = imageUrl.split('/')
+      const filename = urlParts[urlParts.length - 1]
+      
+      // 파일명이 없거나 확장자가 없으면 기본값 사용
+      if (!filename || !filename.includes('.')) {
+        const extension = imageUrl.split('.').pop() || 'jpg'
+        return `image_${Date.now()}.${extension}`
+      }
+      
+      return filename
+    } catch (err) {
+      console.warn('Failed to extract filename from URL:', err.message)
+      return `image_${Date.now()}.jpg`
+    }
+  }
+
+  // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수 (파일명 기반 중복 검사)
   const processRebrickableImage = async (imageUrl, partNum, colorId = null) => {
     try {
-      // 파일명 생성
-      const extension = imageUrl.split('.').pop() || 'jpg'
-      const filename = colorId 
-        ? `${partNum}_${colorId}.${extension}`
-        : `${partNum}.${extension}`
+      // 원본 URL에서 파일명 추출
+      const originalFilename = extractOriginalFilename(imageUrl)
+      console.log(`Original filename from URL: ${originalFilename}`)
       
-      // 업로드 경로 설정
+      // 업로드 경로 설정 (부품별 폴더)
       const uploadPath = `lego/parts/${partNum}`
+      
+      // 1. 파일명 중복 검사 수행
+      const isDuplicate = await checkFilenameDuplicate(originalFilename, uploadPath)
+      if (isDuplicate) {
+        console.log(`Skipping duplicate filename: ${originalFilename}`)
+        return {
+          originalUrl: imageUrl,
+          uploadedUrl: null, // 중복으로 업로드하지 않음
+          filename: originalFilename,
+          path: uploadPath,
+          isDuplicate: true
+        }
+      }
       
       try {
         // 이미지 다운로드 시도
         const blob = await downloadImage(imageUrl)
         
-        // 파일 생성
-        const file = new File([blob], filename, { type: blob.type })
+        // 파일 생성 (원본 파일명 사용)
+        const file = new File([blob], originalFilename, { type: blob.type })
         
-        // 서버에 업로드
+        // 서버에 업로드 (원본 파일명 그대로 사용)
         const result = await uploadImage(file, uploadPath)
+        
+        console.log(`Successfully uploaded: ${originalFilename}`)
         
         return {
           originalUrl: imageUrl,
           uploadedUrl: result.url,
-          filename: filename,
-          path: uploadPath
+          filename: originalFilename, // 원본 파일명 반환
+          path: result.path
         }
       } catch (downloadErr) {
         console.warn('Direct download failed, using alternative method:', downloadErr.message)
         
         try {
           // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
-          const result = await uploadImageFromUrl(imageUrl, filename, uploadPath)
+          const result = await uploadImageFromUrl(imageUrl, originalFilename, uploadPath)
           
           return {
             originalUrl: imageUrl,
             uploadedUrl: result.url,
-            filename: filename,
-            path: uploadPath
+            filename: result.filename,
+            path: result.path
           }
         } catch (serverErr) {
           console.warn('Server upload failed, using local storage:', serverErr.message)
           
           // 대체 방법 2: 로컬 저장소에 이미지 정보 저장
-          const localResult = await saveImageLocally(imageUrl, filename, uploadPath)
+          const localResult = await saveImageLocally(imageUrl, originalFilename, uploadPath)
           
           return {
             originalUrl: imageUrl,
             uploadedUrl: localResult.url,
-            filename: filename,
+            filename: originalFilename,
             path: uploadPath,
             isLocal: true
           }
@@ -186,10 +314,14 @@ export function useImageManager() {
   const uploadImageFromUrl = async (imageUrl, filename, uploadPath) => {
     try {
       if (USE_SUPABASE_STORAGE) {
-        // 버킷 존재 여부 확인
-        const bucketExists = await checkBucketExists()
-        if (!bucketExists) {
-          throw new Error('Supabase Storage bucket "lego_parts_images" not found. Please create it first.')
+        // 버킷 존재 여부 확인 (인증 없이도 시도)
+        try {
+          const bucketExists = await checkBucketExists()
+          if (!bucketExists) {
+            console.warn('Bucket check failed, but attempting upload anyway...')
+          }
+        } catch (err) {
+          console.warn('Bucket check failed, but attempting upload anyway:', err.message)
         }
 
         // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
@@ -218,8 +350,8 @@ export function useImageManager() {
         const blob = await response.blob()
         const file = new File([blob], filename, { type: blob.type })
         
-        // Supabase Storage에 업로드
-        const fileName = `${Date.now()}-${filename}`
+        // 원본 파일명 그대로 사용
+        const fileName = filename
         const filePath = uploadPath ? `${uploadPath}/${fileName}` : `images/${fileName}`
         
         const { data, error: uploadError } = await supabase.storage
@@ -285,6 +417,7 @@ export function useImageManager() {
       throw err
     }
   }
+
 
   // 로컬 저장소에 이미지 정보 저장
   const saveImageLocally = async (imageUrl, filename, uploadPath) => {
@@ -352,6 +485,8 @@ export function useImageManager() {
     uploadImageFromUrl,
     saveImageLocally,
     saveImageMetadata,
-    checkBucketExists
+    checkBucketExists,
+    extractOriginalFilename,
+    checkFilenameDuplicate
   }
 }

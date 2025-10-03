@@ -332,10 +332,12 @@ export default {
         
         console.log('Image processed:', result)
         
-        if (result.isLocal) {
+        if (result.isDuplicate) {
+          successMessage.value = `부품 ${part.part.part_num} 이미지가 이미 존재합니다. (파일명 중복으로 건너뛰기)`
+        } else if (result.isLocal) {
           successMessage.value = `부품 ${part.part.part_num} 이미지가 로컬에 저장되었습니다. (서버 업로드 대기 중)`
         } else {
-          successMessage.value = `부품 ${part.part.part_num} 이미지가 성공적으로 처리되었습니다.`
+          successMessage.value = `부품 ${part.part.part_num} 이미지가 성공적으로 업로드되었습니다.`
         }
       } catch (err) {
         console.error('Failed to process image:', err)

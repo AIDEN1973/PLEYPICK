@@ -103,23 +103,49 @@ export function useDatabase() {
     error.value = null
 
     try {
-      const { data, error: dbError } = await supabase
+      // 먼저 기존 데이터 확인
+      const { data: existingData, error: checkError } = await supabase
         .from('set_parts')
-        .upsert({
-          set_id: setId,
-          part_id: partId,
-          color_id: colorId,
-          quantity: quantity,
-          is_spare: isSpare,
-          element_id: elementId,
-          num_sets: numSets
-        }, {
-          onConflict: 'set_id,part_id,color_id'
-        })
-        .select()
+        .select('id')
+        .eq('set_id', setId)
+        .eq('part_id', partId)
+        .eq('color_id', colorId)
+        .eq('element_id', elementId)
 
-      if (dbError) throw dbError
-      return data[0]
+      if (checkError) throw checkError
+
+      if (existingData && existingData.length > 0) {
+        // 기존 데이터가 있으면 업데이트
+        const { data, error: updateError } = await supabase
+          .from('set_parts')
+          .update({
+            quantity: quantity,
+            is_spare: isSpare,
+            num_sets: numSets
+          })
+          .eq('id', existingData[0].id)
+          .select()
+
+        if (updateError) throw updateError
+        return data[0]
+      } else {
+        // 기존 데이터가 없으면 새로 삽입
+        const { data, error: insertError } = await supabase
+          .from('set_parts')
+          .insert({
+            set_id: setId,
+            part_id: partId,
+            color_id: colorId,
+            quantity: quantity,
+            is_spare: isSpare,
+            element_id: elementId,
+            num_sets: numSets
+          })
+          .select()
+
+        if (insertError) throw insertError
+        return data[0]
+      }
     } catch (err) {
       error.value = err.message
       throw err
