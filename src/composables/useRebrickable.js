@@ -53,16 +53,40 @@ export function useRebrickable() {
     return await apiCall(`/lego/sets/${setNum}/`)
   }
 
-  // 세트의 부품 목록 조회
-  const getSetParts = async (setNum, page = 1, pageSize = 100) => {
-    const params = new URLSearchParams({
-      page: page.toString(),
-      page_size: pageSize.toString(),
-      inc_part_details: '1',
-      inc_color_details: '1'
-    })
+  // 세트의 부품 목록 조회 (모든 부품 가져오기)
+  const getSetParts = async (setNum) => {
+    const allParts = []
+    let page = 1
+    const pageSize = 1000 // 최대 페이지 크기로 설정
     
-    return await apiCall(`/lego/sets/${setNum}/parts/?${params}`)
+    while (true) {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: pageSize.toString(),
+        inc_part_details: '1',
+        inc_color_details: '1'
+      })
+      
+      const response = await apiCall(`/lego/sets/${setNum}/parts/?${params}`)
+      
+      if (response.results && response.results.length > 0) {
+        allParts.push(...response.results)
+        
+        // 더 이상 페이지가 없으면 중단
+        if (!response.next) {
+          break
+        }
+        
+        page++
+      } else {
+        break
+      }
+    }
+    
+    return {
+      count: allParts.length,
+      results: allParts
+    }
   }
 
   // 부품 정보 조회

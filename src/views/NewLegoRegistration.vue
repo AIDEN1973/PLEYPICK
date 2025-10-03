@@ -65,7 +65,7 @@
             <p><strong>테마:</strong> {{ selectedSet.theme_id }}</p>
             <div class="action-buttons">
               <button @click="loadSetParts" :disabled="loadingParts" class="btn btn-primary">
-                {{ loadingParts ? '부품 로딩 중...' : '부품 목록 보기' }}
+                {{ loadingParts ? '모든 부품 로딩 중...' : '모든 부품 목록 보기' }}
               </button>
               <button @click="saveSetToDatabase" :disabled="saving" class="btn btn-secondary">
                 {{ saving ? '저장 중...' : '데이터베이스에 저장' }}
@@ -283,10 +283,13 @@ export default {
       
       loadingParts.value = true
       try {
+        console.log(`Loading all parts for set ${selectedSet.value.set_num}...`)
         const result = await getSetPartsAPI(selectedSet.value.set_num)
         setParts.value = result.results || []
+        console.log(`Loaded ${setParts.value.length} parts`)
       } catch (err) {
         console.error('Failed to load parts:', err)
+        error.value = `부품 로딩 중 오류가 발생했습니다: ${err.message}`
       } finally {
         loadingParts.value = false
       }
