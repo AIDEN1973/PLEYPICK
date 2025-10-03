@@ -8,6 +8,7 @@
         <router-link to="/" class="nav-link">홈</router-link>
         <router-link to="/login" class="nav-link" v-if="!user">로그인</router-link>
         <router-link to="/dashboard" class="nav-link" v-if="user">대시보드</router-link>
+        <router-link to="/lego-manager" class="nav-link" v-if="user">레고 관리</router-link>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>
     </nav>

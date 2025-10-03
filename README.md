@@ -1,18 +1,35 @@
-# BrickBox
+# BrickBox - 레고 부품 검수 시스템
 
-Vue.js와 Supabase를 기반으로 한 현대적인 웹 애플리케이션입니다.
+Vue.js, Supabase, 그리고 Rebrickable API를 기반으로 한 레고 부품 검수 및 관리 시스템입니다.
 
-## 🚀 기능
+## 🚀 핵심 기능
 
+### 🔍 레고 세트 관리
+- **Rebrickable API 연동**: [Rebrickable API](https://rebrickable.com/api/v3/docs/?key=d966442dee02b69a7d05a63805216a85)를 통한 레고 세트 검색 및 정보 조회
+- **세트 정보 등록**: 프랜차이즈 본사 관리자가 레고 세트 정보를 데이터베이스에 저장
+- **부품 목록 관리**: 각 세트에 포함된 부품들의 상세 정보 관리
+
+### 🖼️ 이미지 관리 시스템
+- **자동 이미지 다운로드**: Rebrickable에서 부품 이미지를 자동으로 다운로드
+- **이미지 업로드**: `vanessa2.godohosting.com` 서버에 이미지 업로드
+- **일괄 처리**: 여러 부품 이미지를 한 번에 처리하는 기능
+
+### 🗄️ 데이터베이스 관리
+- **Supabase 연동**: PostgreSQL 기반 데이터베이스
+- **관계형 데이터**: 세트, 부품, 색상, 이미지 간의 관계 관리
+- **작업 로그**: 모든 작업에 대한 상세 로그 기록
+
+### 🎨 사용자 인터페이스
 - **Vue.js 3**: Composition API를 사용한 반응형 사용자 인터페이스
-- **Supabase 인증**: 안전한 사용자 인증 및 세션 관리
 - **반응형 디자인**: 모든 디바이스에서 완벽하게 작동
-- **현대적인 UI**: 깔끔하고 직관적인 사용자 경험
+- **관리자 대시보드**: 직관적인 관리 인터페이스
 
 ## 🛠️ 기술 스택
 
 - **Frontend**: Vue.js 3, Vue Router, Vite
 - **Backend**: Supabase (PostgreSQL, 인증, 실시간)
+- **API 연동**: Rebrickable API (레고 데이터)
+- **이미지 서버**: vanessa2.godohosting.com
 - **스타일링**: CSS3, Flexbox, Grid
 
 ## 📦 설치 및 실행
@@ -72,6 +89,19 @@ src/
 1. **홈페이지** (`/`): 애플리케이션 소개 및 기능 안내
 2. **로그인** (`/login`): 사용자 인증 및 회원가입
 3. **대시보드** (`/dashboard`): 인증된 사용자 전용 페이지
+4. **레고 관리** (`/lego-manager`): 레고 세트 및 부품 관리 시스템
+
+## 📊 데이터베이스 스키마
+
+시스템은 다음과 같은 주요 테이블을 포함합니다:
+
+- **lego_sets**: 레고 세트 정보
+- **lego_parts**: 레고 부품 정보
+- **lego_colors**: 색상 정보
+- **set_parts**: 세트-부품 관계
+- **part_images**: 부품 이미지 관리
+- **admin_users**: 관리자 사용자
+- **operation_logs**: 작업 로그
 
 ## 🚀 배포
 
