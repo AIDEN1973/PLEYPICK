@@ -56,7 +56,7 @@ CREATE TABLE lego_parts (
     molds TEXT[], -- 몰드 정보 배열
     alternates TEXT[], -- 대체 부품 배열
     
-    -- 외부 시스템 연동
+    -- 외부 시스템 연동 (실제 구조에 맞게)
     external_ids JSONB, -- BrickLink, BrickOwl, LEGO 등의 외부 ID
     print_of VARCHAR(50),
     
@@ -80,7 +80,7 @@ CREATE TABLE lego_colors (
     -- 색상 속성 (실제 API에서 확인된 필드만)
     is_trans BOOLEAN DEFAULT FALSE,
     
-    -- 외부 시스템 연동
+    -- 외부 시스템 연동 (실제 구조에 맞게)
     external_ids JSONB, -- BrickLink, BrickOwl, LEGO 등의 외부 ID
     
     -- 시스템 필드
