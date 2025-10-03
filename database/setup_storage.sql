@@ -1,11 +1,11 @@
 -- Supabase Storage 설정
 -- 이 스크립트는 Supabase Dashboard의 SQL Editor에서 실행하세요
 
--- 1. lego-images 버킷 생성
+-- 1. lego_parts_images 버킷 생성
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
-  'lego-images',
-  'lego-images',
+  'lego_parts_images',
+  'lego_parts_images',
   true,
   52428800, -- 50MB 제한
   ARRAY['image/jpeg', 'image/png', 'image/gif', 'image/webp']
@@ -13,27 +13,27 @@ VALUES (
 
 -- 2. 버킷에 대한 RLS 정책 설정
 -- 모든 사용자가 읽기 가능
-CREATE POLICY "Public read access for lego-images" ON storage.objects
-FOR SELECT USING (bucket_id = 'lego-images');
+CREATE POLICY "Public read access for lego_parts_images" ON storage.objects
+FOR SELECT USING (bucket_id = 'lego_parts_images');
 
 -- 인증된 사용자만 업로드 가능
-CREATE POLICY "Authenticated users can upload to lego-images" ON storage.objects
+CREATE POLICY "Authenticated users can upload to lego_parts_images" ON storage.objects
 FOR INSERT WITH CHECK (
-  bucket_id = 'lego-images' 
+  bucket_id = 'lego_parts_images' 
   AND auth.role() = 'authenticated'
 );
 
 -- 인증된 사용자만 업데이트 가능
-CREATE POLICY "Authenticated users can update lego-images" ON storage.objects
+CREATE POLICY "Authenticated users can update lego_parts_images" ON storage.objects
 FOR UPDATE USING (
-  bucket_id = 'lego-images' 
+  bucket_id = 'lego_parts_images' 
   AND auth.role() = 'authenticated'
 );
 
 -- 인증된 사용자만 삭제 가능
-CREATE POLICY "Authenticated users can delete lego-images" ON storage.objects
+CREATE POLICY "Authenticated users can delete lego_parts_images" ON storage.objects
 FOR DELETE USING (
-  bucket_id = 'lego-images' 
+  bucket_id = 'lego_parts_images' 
   AND auth.role() = 'authenticated'
 );
 

@@ -38,6 +38,24 @@ export function useImageManager() {
     }
   }
 
+  // Supabase Storage 버킷 존재 여부 확인
+  const checkBucketExists = async () => {
+    try {
+      const { data, error } = await supabase.storage.listBuckets()
+      if (error) {
+        console.error('Failed to list buckets:', error)
+        return false
+      }
+      
+      const bucketExists = data.some(bucket => bucket.id === 'lego_parts_images')
+      console.log('Bucket lego_parts_images exists:', bucketExists)
+      return bucketExists
+    } catch (err) {
+      console.error('Error checking bucket:', err)
+      return false
+    }
+  }
+
   // 이미지 업로드 함수 (Supabase Storage 또는 외부 서버)
   const uploadImage = async (file, path = '') => {
     uploading.value = true
@@ -45,12 +63,18 @@ export function useImageManager() {
 
     try {
       if (USE_SUPABASE_STORAGE) {
+        // 버킷 존재 여부 확인
+        const bucketExists = await checkBucketExists()
+        if (!bucketExists) {
+          throw new Error('Supabase Storage bucket "lego_parts_images" not found. Please create it first.')
+        }
+
         // Supabase Storage 사용
         const fileName = `${Date.now()}-${file.name}`
         const filePath = path ? `${path}/${fileName}` : `images/${fileName}`
         
         const { data, error: uploadError } = await supabase.storage
-          .from('lego-images')
+          .from('lego_parts_images')
           .upload(filePath, file)
 
         if (uploadError) {
@@ -59,13 +83,13 @@ export function useImageManager() {
 
         // 공개 URL 생성
         const { data: urlData } = supabase.storage
-          .from('lego-images')
+          .from('lego_parts_images')
           .getPublicUrl(filePath)
 
         return {
           url: urlData.publicUrl,
           path: filePath,
-          bucket: 'lego-images'
+          bucket: 'lego_parts_images'
         }
       } else {
         // 외부 서버 사용 (기존 방식)
@@ -162,10 +186,33 @@ export function useImageManager() {
   const uploadImageFromUrl = async (imageUrl, filename, uploadPath) => {
     try {
       if (USE_SUPABASE_STORAGE) {
+        // 버킷 존재 여부 확인
+        const bucketExists = await checkBucketExists()
+        if (!bucketExists) {
+          throw new Error('Supabase Storage bucket "lego_parts_images" not found. Please create it first.')
+        }
+
         // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
-        const response = await fetch(imageUrl)
-        if (!response.ok) {
-          throw new Error(`Failed to download image: ${response.status}`)
+        let response
+        try {
+          // 프록시를 통해 이미지 다운로드
+          let proxyUrl = imageUrl
+          if (imageUrl.includes('cdn.rebrickable.com')) {
+            const path = imageUrl.replace('https://cdn.rebrickable.com', '')
+            proxyUrl = `/api/proxy${path}`
+          }
+          
+          response = await fetch(proxyUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to download image: ${response.status}`)
+          }
+        } catch (proxyErr) {
+          console.warn('Proxy download failed, trying direct download:', proxyErr.message)
+          // 프록시 실패 시 직접 다운로드 시도
+          response = await fetch(imageUrl)
+          if (!response.ok) {
+            throw new Error(`Failed to download image: ${response.status}`)
+          }
         }
         
         const blob = await response.blob()
@@ -176,7 +223,7 @@ export function useImageManager() {
         const filePath = uploadPath ? `${uploadPath}/${fileName}` : `images/${fileName}`
         
         const { data, error: uploadError } = await supabase.storage
-          .from('lego-images')
+          .from('lego_parts_images')
           .upload(filePath, file)
 
         if (uploadError) {
@@ -185,13 +232,13 @@ export function useImageManager() {
 
         // 공개 URL 생성
         const { data: urlData } = supabase.storage
-          .from('lego-images')
+          .from('lego_parts_images')
           .getPublicUrl(filePath)
 
         return {
           url: urlData.publicUrl,
           path: filePath,
-          bucket: 'lego-images'
+          bucket: 'lego_parts_images'
         }
       } else {
         // 외부 서버 사용 (기존 방식)
@@ -304,6 +351,7 @@ export function useImageManager() {
     processMultipleImages,
     uploadImageFromUrl,
     saveImageLocally,
-    saveImageMetadata
+    saveImageMetadata,
+    checkBucketExists
   }
 }
