@@ -324,12 +324,17 @@ export default {
           uploaded_url: result.uploadedUrl,
           local_path: result.path,
           filename: result.filename,
-          download_status: 'completed',
-          upload_status: 'completed'
+          download_status: result.isLocal ? 'pending' : 'completed',
+          upload_status: result.isLocal ? 'pending' : 'completed'
         })
         
         console.log('Image processed:', result)
-        successMessage.value = `부품 ${part.part.part_num} 이미지가 성공적으로 처리되었습니다.`
+        
+        if (result.isLocal) {
+          successMessage.value = `부품 ${part.part.part_num} 이미지가 로컬에 저장되었습니다. (서버 업로드 대기 중)`
+        } else {
+          successMessage.value = `부품 ${part.part.part_num} 이미지가 성공적으로 처리되었습니다.`
+        }
       } catch (err) {
         console.error('Failed to process image:', err)
         error.value = `이미지 처리 중 오류가 발생했습니다: ${err.message}`

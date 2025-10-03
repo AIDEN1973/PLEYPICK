@@ -1,19 +1,27 @@
 import { ref } from 'vue'
 
 const UPLOAD_SERVER = 'https://vanessa2.godohosting.com'
+const UPLOAD_PROXY = '/api/upload'
 
 export function useImageManager() {
   const uploading = ref(false)
   const downloading = ref(false)
   const error = ref(null)
 
-  // 이미지 다운로드 함수
+  // 이미지 다운로드 함수 (프록시 사용)
   const downloadImage = async (imageUrl, filename) => {
     downloading.value = true
     error.value = null
 
     try {
-      const response = await fetch(imageUrl)
+      // Rebrickable CDN URL을 프록시 URL로 변환
+      let proxyUrl = imageUrl
+      if (imageUrl.includes('cdn.rebrickable.com')) {
+        const path = imageUrl.replace('https://cdn.rebrickable.com', '')
+        proxyUrl = `/api/proxy${path}`
+      }
+      
+      const response = await fetch(proxyUrl)
       if (!response.ok) {
         throw new Error(`Failed to download image: ${response.status}`)
       }
@@ -28,7 +36,7 @@ export function useImageManager() {
     }
   }
 
-  // 이미지 업로드 함수
+  // 이미지 업로드 함수 (프록시 사용)
   const uploadImage = async (file, path = '') => {
     uploading.value = true
     error.value = null
@@ -40,7 +48,8 @@ export function useImageManager() {
         formData.append('path', path)
       }
 
-      const response = await fetch(`${UPLOAD_SERVER}/upload`, {
+      // 프록시를 통해 업로드
+      const response = await fetch(`${UPLOAD_PROXY}/upload`, {
         method: 'POST',
         body: formData
       })
@@ -62,29 +71,116 @@ export function useImageManager() {
   // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수
   const processRebrickableImage = async (imageUrl, partNum, colorId = null) => {
     try {
-      // 이미지 다운로드
-      const blob = await downloadImage(imageUrl)
-      
       // 파일명 생성
       const extension = imageUrl.split('.').pop() || 'jpg'
       const filename = colorId 
         ? `${partNum}_${colorId}.${extension}`
         : `${partNum}.${extension}`
       
-      // 파일 생성
-      const file = new File([blob], filename, { type: blob.type })
-      
       // 업로드 경로 설정
       const uploadPath = `lego/parts/${partNum}`
       
-      // 서버에 업로드
-      const result = await uploadImage(file, uploadPath)
-      
-      return {
+      try {
+        // 이미지 다운로드 시도
+        const blob = await downloadImage(imageUrl)
+        
+        // 파일 생성
+        const file = new File([blob], filename, { type: blob.type })
+        
+        // 서버에 업로드
+        const result = await uploadImage(file, uploadPath)
+        
+        return {
+          originalUrl: imageUrl,
+          uploadedUrl: result.url,
+          filename: filename,
+          path: uploadPath
+        }
+      } catch (downloadErr) {
+        console.warn('Direct download failed, using alternative method:', downloadErr.message)
+        
+        try {
+          // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
+          const result = await uploadImageFromUrl(imageUrl, filename, uploadPath)
+          
+          return {
+            originalUrl: imageUrl,
+            uploadedUrl: result.url,
+            filename: filename,
+            path: uploadPath
+          }
+        } catch (serverErr) {
+          console.warn('Server upload failed, using local storage:', serverErr.message)
+          
+          // 대체 방법 2: 로컬 저장소에 이미지 정보 저장
+          const localResult = await saveImageLocally(imageUrl, filename, uploadPath)
+          
+          return {
+            originalUrl: imageUrl,
+            uploadedUrl: localResult.url,
+            filename: filename,
+            path: uploadPath,
+            isLocal: true
+          }
+        }
+      }
+    } catch (err) {
+      error.value = err.message
+      throw err
+    }
+  }
+
+  // 서버를 통해 이미지 다운로드 및 업로드 (프록시 사용)
+  const uploadImageFromUrl = async (imageUrl, filename, uploadPath) => {
+    try {
+      const response = await fetch(`${UPLOAD_PROXY}/upload-from-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageUrl: imageUrl,
+          filename: filename,
+          path: uploadPath
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Server upload failed: ${response.status}`)
+      }
+
+      const result = await response.json()
+      return result
+    } catch (err) {
+      error.value = err.message
+      throw err
+    }
+  }
+
+  // 로컬 저장소에 이미지 정보 저장
+  const saveImageLocally = async (imageUrl, filename, uploadPath) => {
+    try {
+      // 로컬 저장소에 이미지 정보 저장
+      const imageData = {
         originalUrl: imageUrl,
-        uploadedUrl: result.url,
         filename: filename,
-        path: uploadPath
+        path: uploadPath,
+        timestamp: new Date().toISOString(),
+        status: 'pending'
+      }
+
+      // localStorage에 저장
+      const existingImages = JSON.parse(localStorage.getItem('pendingImages') || '[]')
+      existingImages.push(imageData)
+      localStorage.setItem('pendingImages', JSON.stringify(existingImages))
+
+      // 로컬 URL 생성 (실제로는 원본 URL을 반환)
+      const localUrl = imageUrl
+
+      return {
+        url: localUrl,
+        local: true,
+        pending: true
       }
     } catch (err) {
       error.value = err.message
@@ -123,6 +219,8 @@ export function useImageManager() {
     downloadImage,
     uploadImage,
     processRebrickableImage,
-    processMultipleImages
+    processMultipleImages,
+    uploadImageFromUrl,
+    saveImageLocally
   }
 }
