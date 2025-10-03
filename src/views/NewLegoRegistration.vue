@@ -428,6 +428,7 @@ export default {
       saving,
       error,
       successMessage,
+      isLocalData,
       searchSets,
       selectSet,
       loadSetParts,
