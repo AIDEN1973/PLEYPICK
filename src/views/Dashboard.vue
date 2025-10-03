@@ -23,19 +23,19 @@
       
       <div class="actions-grid">
         <div class="action-card">
+          <h3>신규 레고 등록</h3>
+          <p>Rebrickable API를 통해 새로운 레고 세트를 검색하고 등록하세요.</p>
+          <router-link to="/new-lego" class="btn btn-primary">신규 등록</router-link>
+        </div>
+        <div class="action-card">
+          <h3>저장된 레고 관리</h3>
+          <p>데이터베이스에 저장된 레고 세트들을 관리하세요.</p>
+          <router-link to="/saved-lego" class="btn btn-secondary">저장된 레고</router-link>
+        </div>
+        <div class="action-card">
           <h3>프로필 관리</h3>
           <p>사용자 정보를 확인하고 수정하세요.</p>
-          <button class="btn btn-primary">프로필 보기</button>
-        </div>
-        <div class="action-card">
-          <h3>설정</h3>
-          <p>애플리케이션 설정을 관리하세요.</p>
-          <button class="btn btn-secondary">설정 열기</button>
-        </div>
-        <div class="action-card">
-          <h3>데이터 관리</h3>
-          <p>Supabase 데이터베이스와 상호작용하세요.</p>
-          <button class="btn btn-secondary">데이터 보기</button>
+          <button class="btn btn-secondary">프로필 보기</button>
         </div>
       </div>
       

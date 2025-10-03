@@ -83,11 +83,6 @@ CREATE TABLE lego_parts (
     is_counterpart BOOLEAN DEFAULT FALSE,
     is_spare BOOLEAN DEFAULT FALSE,
     
-    -- Rebrickable API 특수 필드들
-    prints TEXT[], -- 프린트 정보 배열
-    molds TEXT[], -- 몰드 정보 배열
-    alternates TEXT[], -- 대체 부품 배열
-    
     -- 외부 시스템 연동
     external_ids JSONB, -- BrickLink, BrickOwl, LEGO 등의 외부 ID
     print_of VARCHAR(50),
@@ -206,9 +201,6 @@ CREATE TABLE set_parts (
     set_id UUID REFERENCES lego_sets(id) ON DELETE CASCADE,
     part_id UUID REFERENCES lego_parts(id) ON DELETE CASCADE,
     color_id UUID REFERENCES lego_colors(id) ON DELETE CASCADE,
-    
-    -- Rebrickable API 특수 필드
-    inv_part_id BIGINT UNIQUE, -- 인벤토리 부품 ID
     
     -- 수량 정보
     quantity INTEGER NOT NULL DEFAULT 1,
@@ -332,7 +324,6 @@ CREATE INDEX idx_set_parts_set_id ON set_parts(set_id);
 CREATE INDEX idx_set_parts_part_id ON set_parts(part_id);
 CREATE INDEX idx_set_parts_color_id ON set_parts(color_id);
 CREATE INDEX idx_set_parts_element_id ON set_parts(element_id);
-CREATE INDEX idx_set_parts_inv_part_id ON set_parts(inv_part_id);
 
 -- 이미지 테이블 인덱스
 CREATE INDEX idx_part_images_part_id ON part_images(part_id);

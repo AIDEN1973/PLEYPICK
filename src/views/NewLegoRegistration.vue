@@ -1,8 +1,8 @@
 <template>
   <div class="lego-set-manager">
     <div class="header">
-      <h1>레고 세트 관리</h1>
-      <p>Rebrickable API를 통해 레고 세트와 부품 정보를 관리합니다.</p>
+      <h1>신규 레고 등록</h1>
+      <p>Rebrickable API를 통해 새로운 레고 세트를 검색하고 데이터베이스에 등록합니다.</p>
     </div>
 
     <!-- 세트 검색 -->
@@ -24,6 +24,10 @@
     <!-- 검색 결과 -->
     <div v-if="searchResults.length > 0" class="search-results">
       <h3>검색 결과 ({{ searchResults.length }}개)</h3>
+      <div class="data-source-info">
+        <span v-if="isLocalData" class="source-badge local">📁 로컬 데이터베이스</span>
+        <span v-else class="source-badge api">🌐 Rebrickable API</span>
+      </div>
       <div class="sets-grid">
         <div 
           v-for="set in searchResults" 
@@ -133,6 +137,7 @@ import { ref, onMounted } from 'vue'
 import { useRebrickable } from '../composables/useRebrickable'
 import { useImageManager } from '../composables/useImageManager'
 import { useDatabase } from '../composables/useDatabase'
+import { supabase } from '../composables/useSupabase'
 
 export default {
   name: 'LegoSetManager',
@@ -142,7 +147,7 @@ export default {
       error, 
       searchSets: searchSetsAPI, 
       getSet, 
-      getSetParts 
+      getSetParts: getSetPartsAPI 
     } = useRebrickable()
     
     const { 
@@ -157,7 +162,9 @@ export default {
       saveLegoColor,
       saveSetPart,
       savePartImage,
-      saveOperationLog
+      saveOperationLog,
+      getLegoSets,
+      getSetParts
     } = useDatabase()
 
     const searchQuery = ref('')
@@ -167,25 +174,107 @@ export default {
     const loadingParts = ref(false)
     const saving = ref(false)
     const successMessage = ref('')
+    const isLocalData = ref(false)
 
     const searchSets = async () => {
       if (!searchQuery.value.trim()) return
       
       try {
-        const result = await searchSetsAPI(searchQuery.value)
-        searchResults.value = result.results || []
+        // 1. 먼저 Supabase에서 검색
+        const localResults = await searchLocalSets(searchQuery.value)
+        
+        if (localResults.length > 0) {
+          searchResults.value = localResults
+          isLocalData.value = true
+          console.log('Found in local database:', localResults.length, 'sets')
+        } else {
+          // 2. 로컬에 없으면 Rebrickable API에서 검색
+          console.log('Not found locally, searching Rebrickable API...')
+          const result = await searchSetsAPI(searchQuery.value)
+          searchResults.value = result.results || []
+          isLocalData.value = false
+        }
       } catch (err) {
         console.error('Search failed:', err)
       }
     }
 
+    // 로컬 데이터베이스에서 세트 검색
+    const searchLocalSets = async (query) => {
+      try {
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('*')
+          .or(`set_num.ilike.%${query}%,name.ilike.%${query}%`)
+          .order('created_at', { ascending: false })
+          .limit(20)
+
+        if (error) throw error
+        return data || []
+      } catch (err) {
+        console.error('Local search failed:', err)
+        return []
+      }
+    }
+
     const selectSet = async (set) => {
       try {
-        const result = await getSet(set.set_num)
-        selectedSet.value = result
-        setParts.value = []
+        // 1. 먼저 로컬 데이터베이스에서 확인
+        const localSet = await getLocalSet(set.set_num)
+        
+        if (localSet) {
+          selectedSet.value = localSet
+          console.log('Loaded from local database')
+          
+          // 로컬 부품 정보도 로드
+          const localParts = await getLocalSetParts(localSet.id)
+          setParts.value = localParts
+        } else {
+          // 2. 로컬에 없으면 Rebrickable API에서 가져오기
+          console.log('Not found locally, fetching from Rebrickable API...')
+          const result = await getSet(set.set_num)
+          selectedSet.value = result
+          setParts.value = []
+        }
       } catch (err) {
         console.error('Failed to get set details:', err)
+      }
+    }
+
+    // 로컬 데이터베이스에서 세트 정보 가져오기
+    const getLocalSet = async (setNum) => {
+      try {
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('*')
+          .eq('set_num', setNum)
+          .single()
+
+        if (error && error.code !== 'PGRST116') throw error
+        return data
+      } catch (err) {
+        console.error('Failed to get local set:', err)
+        return null
+      }
+    }
+
+    // 로컬 데이터베이스에서 세트 부품 정보 가져오기
+    const getLocalSetParts = async (setId) => {
+      try {
+        const { data, error } = await supabase
+          .from('set_parts')
+          .select(`
+            *,
+            lego_parts(*),
+            lego_colors(*)
+          `)
+          .eq('set_id', setId)
+
+        if (error) throw error
+        return data || []
+      } catch (err) {
+        console.error('Failed to get local set parts:', err)
+        return []
       }
     }
 
@@ -194,7 +283,7 @@ export default {
       
       loadingParts.value = true
       try {
-        const result = await getSetParts(selectedSet.value.set_num)
+        const result = await getSetPartsAPI(selectedSet.value.set_num)
         setParts.value = result.results || []
       } catch (err) {
         console.error('Failed to load parts:', err)
@@ -416,6 +505,31 @@ export default {
 .search-results h3 {
   margin-bottom: 1rem;
   color: #333;
+}
+
+.data-source-info {
+  margin-bottom: 1rem;
+}
+
+.source-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.source-badge.local {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.source-badge.api {
+  background: #d1ecf1;
+  color: #0c5460;
+  border: 1px solid #bee5eb;
 }
 
 .sets-grid {

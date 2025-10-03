@@ -8,7 +8,10 @@
         <router-link to="/" class="nav-link">홈</router-link>
         <router-link to="/login" class="nav-link" v-if="!user">로그인</router-link>
         <router-link to="/dashboard" class="nav-link" v-if="user">대시보드</router-link>
-        <router-link to="/lego-manager" class="nav-link" v-if="user">레고 관리</router-link>
+        <div v-if="user" class="lego-menu">
+          <router-link to="/new-lego" class="nav-link">신규 레고 등록</router-link>
+          <router-link to="/saved-lego" class="nav-link">저장된 레고</router-link>
+        </div>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>
     </nav>
@@ -77,6 +80,28 @@ body {
   display: flex;
   gap: 1rem;
   align-items: center;
+}
+
+.lego-menu {
+  display: flex;
+  gap: 0.5rem;
+  position: relative;
+}
+
+.lego-menu::before {
+  content: '';
+  position: absolute;
+  left: -0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1px;
+  height: 20px;
+  background: rgba(255,255,255,0.3);
+}
+
+.lego-menu .nav-link {
+  font-size: 0.9rem;
+  padding: 0.4rem 0.8rem;
 }
 
 .nav-link {
