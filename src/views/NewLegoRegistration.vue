@@ -153,7 +153,8 @@ export default {
     const { 
       downloadingImages, 
       processRebrickableImage, 
-      processMultipleImages 
+      processMultipleImages,
+      saveImageMetadata
     } = useImageManager()
 
     const {
@@ -316,17 +317,18 @@ export default {
           part.color.id
         )
         
-        // 이미지 정보를 데이터베이스에 저장
-        await savePartImage({
-          part_id: part.part.id, // 실제로는 데이터베이스에서 가져온 ID를 사용해야 함
-          color_id: part.color.id,
-          original_url: part.part.part_img_url,
-          uploaded_url: result.uploadedUrl,
-          local_path: result.path,
-          filename: result.filename,
-          download_status: result.isLocal ? 'pending' : 'completed',
-          upload_status: result.isLocal ? 'pending' : 'completed'
-        })
+        // 이미지 메타데이터를 Supabase에 저장
+        if (result.url) {
+          await saveImageMetadata({
+            original_url: part.part.part_img_url,
+            supabase_url: result.url,
+            file_path: result.path,
+            file_name: result.filename,
+            part_num: part.part.part_num,
+            color_id: part.color.id,
+            set_num: selectedSet.value?.set_num
+          })
+        }
         
         console.log('Image processed:', result)
         

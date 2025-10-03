@@ -1,7 +1,9 @@
 import { ref } from 'vue'
+import { supabase } from './useSupabase'
 
 const UPLOAD_SERVER = 'https://vanessa2.godohosting.com'
 const UPLOAD_PROXY = '/api/upload'
+const USE_SUPABASE_STORAGE = true // Supabase Storage 사용 여부
 
 export function useImageManager() {
   const uploading = ref(false)
@@ -36,30 +38,56 @@ export function useImageManager() {
     }
   }
 
-  // 이미지 업로드 함수 (프록시 사용)
+  // 이미지 업로드 함수 (Supabase Storage 또는 외부 서버)
   const uploadImage = async (file, path = '') => {
     uploading.value = true
     error.value = null
 
     try {
-      const formData = new FormData()
-      formData.append('image', file)
-      if (path) {
-        formData.append('path', path)
+      if (USE_SUPABASE_STORAGE) {
+        // Supabase Storage 사용
+        const fileName = `${Date.now()}-${file.name}`
+        const filePath = path ? `${path}/${fileName}` : `images/${fileName}`
+        
+        const { data, error: uploadError } = await supabase.storage
+          .from('lego-images')
+          .upload(filePath, file)
+
+        if (uploadError) {
+          throw new Error(`Supabase upload failed: ${uploadError.message}`)
+        }
+
+        // 공개 URL 생성
+        const { data: urlData } = supabase.storage
+          .from('lego-images')
+          .getPublicUrl(filePath)
+
+        return {
+          url: urlData.publicUrl,
+          path: filePath,
+          bucket: 'lego-images'
+        }
+      } else {
+        // 외부 서버 사용 (기존 방식)
+        const formData = new FormData()
+        formData.append('image', file)
+        if (path) {
+          formData.append('path', path)
+        }
+
+        // 프록시를 통해 업로드
+        const response = await fetch(`${UPLOAD_PROXY}/upload`, {
+          method: 'POST',
+          body: formData
+        })
+
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.status}`)
+        }
+
+        const result = await response.json()
+        return result
       }
-
-      // 프록시를 통해 업로드
-      const response = await fetch(`${UPLOAD_PROXY}/upload`, {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        throw new Error(`Upload failed: ${response.status}`)
-      }
-
-      const result = await response.json()
-      return result
     } catch (err) {
       error.value = err.message
       throw err
@@ -130,27 +158,81 @@ export function useImageManager() {
     }
   }
 
-  // 서버를 통해 이미지 다운로드 및 업로드 (프록시 사용)
+  // 서버를 통해 이미지 다운로드 및 업로드 (Supabase Storage 또는 외부 서버)
   const uploadImageFromUrl = async (imageUrl, filename, uploadPath) => {
     try {
-      const response = await fetch(`${UPLOAD_PROXY}/upload-from-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageUrl: imageUrl,
-          filename: filename,
-          path: uploadPath
-        })
-      })
+      if (USE_SUPABASE_STORAGE) {
+        // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
+        const response = await fetch(imageUrl)
+        if (!response.ok) {
+          throw new Error(`Failed to download image: ${response.status}`)
+        }
+        
+        const blob = await response.blob()
+        const file = new File([blob], filename, { type: blob.type })
+        
+        // Supabase Storage에 업로드
+        const fileName = `${Date.now()}-${filename}`
+        const filePath = uploadPath ? `${uploadPath}/${fileName}` : `images/${fileName}`
+        
+        const { data, error: uploadError } = await supabase.storage
+          .from('lego-images')
+          .upload(filePath, file)
 
-      if (!response.ok) {
-        throw new Error(`Server upload failed: ${response.status}`)
+        if (uploadError) {
+          throw new Error(`Supabase upload failed: ${uploadError.message}`)
+        }
+
+        // 공개 URL 생성
+        const { data: urlData } = supabase.storage
+          .from('lego-images')
+          .getPublicUrl(filePath)
+
+        return {
+          url: urlData.publicUrl,
+          path: filePath,
+          bucket: 'lego-images'
+        }
+      } else {
+        // 외부 서버 사용 (기존 방식)
+        const response = await fetch(`${UPLOAD_PROXY}/upload-from-url`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            imageUrl: imageUrl,
+            filename: filename,
+            path: uploadPath
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`Server upload failed: ${response.status}`)
+        }
+
+        const result = await response.json()
+        return result
+      }
+    } catch (err) {
+      error.value = err.message
+      throw err
+    }
+  }
+
+  // 이미지 메타데이터를 Supabase에 저장
+  const saveImageMetadata = async (imageData) => {
+    try {
+      const { data, error } = await supabase
+        .from('image_metadata')
+        .insert([imageData])
+        .select()
+
+      if (error) {
+        throw new Error(`Failed to save image metadata: ${error.message}`)
       }
 
-      const result = await response.json()
-      return result
+      return data[0]
     } catch (err) {
       error.value = err.message
       throw err
@@ -221,6 +303,7 @@ export function useImageManager() {
     processRebrickableImage,
     processMultipleImages,
     uploadImageFromUrl,
-    saveImageLocally
+    saveImageLocally,
+    saveImageMetadata
   }
 }
