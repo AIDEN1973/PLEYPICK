@@ -103,6 +103,8 @@ export function useDatabase() {
     error.value = null
 
     try {
+      console.log(`Checking existing set-part relationship: set_id=${setId}, part_id=${partId}, color_id=${colorId}, element_id=${elementId}`)
+      
       // 먼저 기존 데이터 확인
       const { data: existingData, error: checkError } = await supabase
         .from('set_parts')
@@ -112,10 +114,14 @@ export function useDatabase() {
         .eq('color_id', colorId)
         .eq('element_id', elementId)
 
-      if (checkError) throw checkError
+      if (checkError) {
+        console.error('Error checking existing data:', checkError)
+        throw checkError
+      }
 
       if (existingData && existingData.length > 0) {
         // 기존 데이터가 있으면 업데이트
+        console.log(`Updating existing set-part relationship: ${existingData[0].id}`)
         const { data, error: updateError } = await supabase
           .from('set_parts')
           .update({
@@ -126,10 +132,15 @@ export function useDatabase() {
           .eq('id', existingData[0].id)
           .select()
 
-        if (updateError) throw updateError
+        if (updateError) {
+          console.error('Error updating set-part relationship:', updateError)
+          throw updateError
+        }
+        console.log('Set-part relationship updated successfully')
         return data[0]
       } else {
         // 기존 데이터가 없으면 새로 삽입
+        console.log('Inserting new set-part relationship')
         const { data, error: insertError } = await supabase
           .from('set_parts')
           .insert({
@@ -143,10 +154,15 @@ export function useDatabase() {
           })
           .select()
 
-        if (insertError) throw insertError
+        if (insertError) {
+          console.error('Error inserting set-part relationship:', insertError)
+          throw insertError
+        }
+        console.log('Set-part relationship inserted successfully')
         return data[0]
       }
     } catch (err) {
+      console.error('saveSetPart error:', err)
       error.value = err.message
       throw err
     } finally {

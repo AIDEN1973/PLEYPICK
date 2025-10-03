@@ -369,30 +369,57 @@ export default {
       if (!selectedSet.value) return
       
       saving.value = true
+      const savedParts = []
+      const failedParts = []
+      
       try {
         // 1. 세트 정보 저장
         const savedSet = await saveLegoSet(selectedSet.value)
         console.log('Set saved:', savedSet)
 
-        // 2. 부품 정보 저장
+        // 2. 부품 정보 저장 (각 부품별로 오류 처리)
         if (setParts.value.length > 0) {
-          for (const partData of setParts.value) {
-            // 부품 정보 저장
-            const savedPart = await saveLegoPart(partData.part)
-            
-            // 색상 정보 저장
-            const savedColor = await saveLegoColor(partData.color)
-            
-            // 세트-부품 관계 저장
-            await saveSetPart(
-              savedSet.id,
-              savedPart.id,
-              savedColor.id,
-              partData.quantity,
-              partData.is_spare || false,
-              partData.element_id,
-              partData.num_sets || 1
-            )
+          console.log(`Starting to save ${setParts.value.length} parts...`)
+          
+          for (let i = 0; i < setParts.value.length; i++) {
+            const partData = setParts.value[i]
+            try {
+              console.log(`Saving part ${i + 1}/${setParts.value.length}: ${partData.part.part_num}`)
+              
+              // 부품 정보 저장
+              const savedPart = await saveLegoPart(partData.part)
+              console.log(`Part saved: ${savedPart.part_num}`)
+              
+              // 색상 정보 저장
+              const savedColor = await saveLegoColor(partData.color)
+              console.log(`Color saved: ${savedColor.name}`)
+              
+              // 세트-부품 관계 저장
+              const savedSetPart = await saveSetPart(
+                savedSet.id,
+                savedPart.id,
+                savedColor.id,
+                partData.quantity,
+                partData.is_spare || false,
+                partData.element_id,
+                partData.num_sets || 1
+              )
+              console.log(`Set-part relationship saved for ${partData.part.part_num}`)
+              
+              savedParts.push({
+                part_num: partData.part.part_num,
+                color: partData.color.name,
+                quantity: partData.quantity
+              })
+              
+            } catch (partErr) {
+              console.error(`Failed to save part ${partData.part.part_num}:`, partErr)
+              failedParts.push({
+                part_num: partData.part.part_num,
+                color: partData.color.name,
+                error: partErr.message
+              })
+            }
           }
         }
 
@@ -401,15 +428,28 @@ export default {
           operation_type: 'set_import',
           target_type: 'set',
           target_id: savedSet.id,
-          status: 'success',
-          message: `세트 ${selectedSet.value.set_num} 및 부품 정보가 성공적으로 저장되었습니다.`,
+          status: savedParts.length === setParts.value.length ? 'success' : 'partial_success',
+          message: `세트 ${selectedSet.value.set_num} 저장 완료. 성공: ${savedParts.length}개, 실패: ${failedParts.length}개`,
           metadata: {
             set_num: selectedSet.value.set_num,
-            parts_count: setParts.value.length
+            total_parts: setParts.value.length,
+            saved_parts: savedParts.length,
+            failed_parts: failedParts.length,
+            failed_details: failedParts
           }
         })
 
-        successMessage.value = `세트 ${selectedSet.value.set_num} 및 ${setParts.value.length}개 부품 정보가 데이터베이스에 저장되었습니다.`
+        // 4. 결과 메시지
+        if (failedParts.length === 0) {
+          successMessage.value = `세트 ${selectedSet.value.set_num} 및 ${savedParts.length}개 부품 정보가 성공적으로 저장되었습니다.`
+        } else {
+          successMessage.value = `세트 ${selectedSet.value.set_num} 저장 완료. 성공: ${savedParts.length}개, 실패: ${failedParts.length}개`
+          error.value = `실패한 부품들: ${failedParts.map(p => `${p.part_num}(${p.color})`).join(', ')}`
+        }
+        
+        console.log(`Save completed: ${savedParts.length} successful, ${failedParts.length} failed`)
+        console.log('Failed parts details:', failedParts)
+        
       } catch (err) {
         console.error('Failed to save set:', err)
         error.value = `저장 중 오류가 발생했습니다: ${err.message}`
