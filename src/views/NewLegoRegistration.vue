@@ -180,22 +180,29 @@ export default {
       if (!searchQuery.value.trim()) return
       
       try {
-        // 1. 먼저 Supabase에서 검색
-        const localResults = await searchLocalSets(searchQuery.value)
+        // 임시로 API에서만 검색 (데이터베이스 스키마 생성 후 로컬 검색 활성화)
+        console.log('Searching Rebrickable API...')
+        const result = await searchSetsAPI(searchQuery.value)
+        searchResults.value = result.results || []
+        isLocalData.value = false
         
-        if (localResults.length > 0) {
-          searchResults.value = localResults
-          isLocalData.value = true
-          console.log('Found in local database:', localResults.length, 'sets')
-        } else {
-          // 2. 로컬에 없으면 Rebrickable API에서 검색
-          console.log('Not found locally, searching Rebrickable API...')
-          const result = await searchSetsAPI(searchQuery.value)
-          searchResults.value = result.results || []
-          isLocalData.value = false
-        }
+        // TODO: 데이터베이스 스키마 생성 후 로컬 검색 활성화
+        // 1. 먼저 Supabase에서 검색
+        // const localResults = await searchLocalSets(searchQuery.value)
+        // if (localResults.length > 0) {
+        //   searchResults.value = localResults
+        //   isLocalData.value = true
+        //   console.log('Found in local database:', localResults.length, 'sets')
+        // } else {
+        //   // 2. 로컬에 없으면 Rebrickable API에서 검색
+        //   console.log('Not found locally, searching Rebrickable API...')
+        //   const result = await searchSetsAPI(searchQuery.value)
+        //   searchResults.value = result.results || []
+        //   isLocalData.value = false
+        // }
       } catch (err) {
         console.error('Search failed:', err)
+        error.value = `검색 중 오류가 발생했습니다: ${err.message}`
       }
     }
 
@@ -219,25 +226,31 @@ export default {
 
     const selectSet = async (set) => {
       try {
-        // 1. 먼저 로컬 데이터베이스에서 확인
-        const localSet = await getLocalSet(set.set_num)
+        // 임시로 API에서만 가져오기 (데이터베이스 스키마 생성 후 로컬 검색 활성화)
+        console.log('Fetching from Rebrickable API...')
+        const result = await getSet(set.set_num)
+        selectedSet.value = result
+        setParts.value = []
         
-        if (localSet) {
-          selectedSet.value = localSet
-          console.log('Loaded from local database')
-          
-          // 로컬 부품 정보도 로드
-          const localParts = await getLocalSetParts(localSet.id)
-          setParts.value = localParts
-        } else {
-          // 2. 로컬에 없으면 Rebrickable API에서 가져오기
-          console.log('Not found locally, fetching from Rebrickable API...')
-          const result = await getSet(set.set_num)
-          selectedSet.value = result
-          setParts.value = []
-        }
+        // TODO: 데이터베이스 스키마 생성 후 로컬 검색 활성화
+        // 1. 먼저 로컬 데이터베이스에서 확인
+        // const localSet = await getLocalSet(set.set_num)
+        // if (localSet) {
+        //   selectedSet.value = localSet
+        //   console.log('Loaded from local database')
+        //   // 로컬 부품 정보도 로드
+        //   const localParts = await getLocalSetParts(localSet.id)
+        //   setParts.value = localParts
+        // } else {
+        //   // 2. 로컬에 없으면 Rebrickable API에서 가져오기
+        //   console.log('Not found locally, fetching from Rebrickable API...')
+        //   const result = await getSet(set.set_num)
+        //   selectedSet.value = result
+        //   setParts.value = []
+        // }
       } catch (err) {
         console.error('Failed to get set details:', err)
+        error.value = `세트 정보를 가져오는 중 오류가 발생했습니다: ${err.message}`
       }
     }
 
