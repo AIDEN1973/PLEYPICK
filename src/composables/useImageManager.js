@@ -120,29 +120,33 @@ export function useImageManager() {
     }
   }
 
-  // 파일명 중복 검사 함수 (원본 파일명 기반)
-  const checkFilenameDuplicate = async (filename, path = '') => {
+  // 부품별 이미지 중복 검사 함수 (부품번호 + 색상ID로 검사)
+  const checkPartImageDuplicate = async (partNum, colorId) => {
     try {
-      const { data, error } = await supabase.storage
-        .from('lego_parts_images')
-        .list(path || 'images', {
-          search: filename
-        })
+      console.log(`Checking for existing image: part_num=${partNum}, color_id=${colorId}`)
       
-      if (error) {
-        console.warn('File existence check failed:', error.message)
+      // image_metadata 테이블에서 해당 부품의 이미지가 이미 있는지 확인
+      const { data, error } = await supabase
+        .from('image_metadata')
+        .select('id, supabase_url')
+        .eq('part_num', partNum)
+        .eq('color_id', colorId)
+        .single()
+
+      if (error && error.code !== 'PGRST116') {
+        console.warn('Image existence check failed:', error.message)
         return false // 오류 시 중복 없음으로 처리
       }
       
-      // 파일이 존재하면 중복
-      if (data && data.length > 0) {
-        console.log(`Duplicate filename found: ${filename}`)
+      // 이미지가 존재하면 중복
+      if (data && data.supabase_url) {
+        console.log(`Existing image found for ${partNum} (color: ${colorId}): ${data.supabase_url}`)
         return true
       }
       
       return false // 중복 없음
     } catch (err) {
-      console.warn('File existence check failed:', err.message)
+      console.warn('Image existence check failed:', err)
       return false
     }
   }
@@ -164,8 +168,8 @@ export function useImageManager() {
           console.warn('Bucket check failed, but attempting upload anyway:', err.message)
         }
 
-        // 고유한 파일명 생성
-        const fileName = await generateUniqueFileName(file.name, path)
+        // 원본 파일명 사용
+        const fileName = file.name
         const filePath = path ? `${path}/${fileName}` : `images/${fileName}`
         
         const { data, error: uploadError } = await supabase.storage
@@ -245,10 +249,10 @@ export function useImageManager() {
       // 업로드 경로 설정 (부품별 폴더)
       const uploadPath = `lego/parts/${partNum}`
       
-      // 1. 파일명 중복 검사 수행
-      const isDuplicate = await checkFilenameDuplicate(originalFilename, uploadPath)
+      // 1. 부품별 이미지 중복 검사 수행
+      const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
       if (isDuplicate) {
-        console.log(`Skipping duplicate filename: ${originalFilename}`)
+        console.log(`Skipping duplicate image for part ${partNum} (color: ${colorId})`)
         return {
           originalUrl: imageUrl,
           uploadedUrl: null, // 중복으로 업로드하지 않음
@@ -487,6 +491,6 @@ export function useImageManager() {
     saveImageMetadata,
     checkBucketExists,
     extractOriginalFilename,
-    checkFilenameDuplicate
+    checkPartImageDuplicate
   }
 }

@@ -187,7 +187,7 @@
 
             <!-- 부품 목록 -->
             <div v-if="setParts.length > 0" class="parts-section">
-              <h3>부품 목록 ({{ setParts.length }}개)</h3>
+              <h3>부품 목록 ({{ uniquePartsCount }}개 고유 부품, 총 {{ setParts.length }}개 항목) - DB에서 로드됨</h3>
               <div class="parts-grid">
                 <div 
                   v-for="part in setParts" 
@@ -196,10 +196,17 @@
                 >
                   <div class="part-image">
                     <img 
-                      :src="part.lego_parts.part_img_url" 
+                      :src="part.supabase_image_url || part.lego_parts.part_img_url" 
                       :alt="part.lego_parts.name"
                       @error="handleImageError"
+                      :title="part.supabase_image_url ? 'Supabase Storage에서 로드됨' : 'Rebrickable CDN에서 로드됨'"
                     />
+                    <div v-if="part.supabase_image_url" class="image-source-badge">
+                      📦 Supabase
+                    </div>
+                    <div v-else class="image-source-badge">
+                      🌐 CDN
+                    </div>
                   </div>
                   <div class="part-info">
                     <h4>{{ part.lego_parts.name }}</h4>
@@ -333,10 +340,67 @@ export default {
     const selectSet = async (set) => {
       try {
         selectedSet.value = set
+        console.log(`🔍 DEBUG: Loading parts for set ${set.set_num} (ID: ${set.id})`)
         const parts = await getSetParts(set.id)
-        setParts.value = parts
+        console.log(`🔍 DEBUG: Loaded ${parts.length} parts from database`)
+        console.log(`🔍 DEBUG: First few parts:`, parts.slice(0, 3).map(p => ({
+          part_num: p.lego_parts.part_num,
+          color: p.lego_colors.name,
+          quantity: p.quantity
+        })))
+        
+        // 각 부품의 Supabase Storage 이미지 URL 조회
+        console.log(`🔍 DEBUG: Checking Supabase Storage images for ${parts.length} parts...`)
+        const partsWithImages = await Promise.all(parts.map(async (part) => {
+          try {
+            const imageUrl = await getSupabaseImageUrl(part.lego_parts.part_num, part.lego_colors.color_id)
+            if (imageUrl) {
+              console.log(`✅ Found Supabase image for ${part.lego_parts.part_num}: ${imageUrl}`)
+            } else {
+              console.log(`❌ No Supabase image for ${part.lego_parts.part_num}, using CDN`)
+            }
+            return {
+              ...part,
+              supabase_image_url: imageUrl
+            }
+          } catch (err) {
+            console.warn(`Failed to get Supabase image for ${part.lego_parts.part_num}:`, err)
+            return {
+              ...part,
+              supabase_image_url: null
+            }
+          }
+        }))
+        
+        const supabaseImageCount = partsWithImages.filter(p => p.supabase_image_url).length
+        console.log(`🔍 DEBUG: ${supabaseImageCount}/${parts.length} parts have Supabase Storage images`)
+        
+        setParts.value = partsWithImages
       } catch (err) {
         console.error('Failed to load set parts:', err)
+      }
+    }
+
+    // Supabase Storage에서 이미지 URL 조회
+    const getSupabaseImageUrl = async (partNum, colorId) => {
+      try {
+        // image_metadata 테이블에서 해당 부품의 Supabase Storage URL 조회
+        const { data, error } = await supabase
+          .from('image_metadata')
+          .select('supabase_url')
+          .eq('part_num', partNum)
+          .eq('color_id', colorId)
+          .single()
+
+        if (error) {
+          console.log(`No Supabase image found for ${partNum} (color: ${colorId})`)
+          return null
+        }
+
+        return data?.supabase_url || null
+      } catch (err) {
+        console.error('Error fetching Supabase image URL:', err)
+        return null
       }
     }
 
@@ -379,8 +443,27 @@ export default {
 
     // 이미지 오류 처리
     const handleImageError = (event) => {
-      event.target.src = '/placeholder-image.png'
+      const img = event.target
+      const part = setParts.value.find(p => 
+        p.supabase_image_url === img.src || p.lego_parts.part_img_url === img.src
+      )
+      
+      if (part && part.supabase_image_url && img.src === part.supabase_image_url) {
+        // Supabase 이미지 로드 실패 시 Rebrickable CDN으로 폴백
+        console.log(`Supabase image failed for ${part.lego_parts.part_num}, falling back to CDN`)
+        img.src = part.lego_parts.part_img_url
+      } else {
+        // 모든 이미지 로드 실패 시 플레이스홀더
+        img.src = '/placeholder-image.png'
+      }
     }
+
+    // 고유 부품 수 계산
+    const uniquePartsCount = computed(() => {
+      if (!setParts.value || setParts.value.length === 0) return 0
+      const uniqueParts = new Set(setParts.value.map(part => part.lego_parts.part_num))
+      return uniqueParts.size
+    })
 
     onMounted(() => {
       loadSavedSets()
@@ -410,7 +493,8 @@ export default {
       deleteSet,
       closeModal,
       formatDate,
-      handleImageError
+      handleImageError,
+      uniquePartsCount
     }
   }
 }
@@ -776,12 +860,25 @@ export default {
   margin-bottom: 0.5rem;
   background: white;
   border-radius: 6px;
+  position: relative;
 }
 
 .part-image img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+.image-source-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: bold;
 }
 
 .part-info h4 {

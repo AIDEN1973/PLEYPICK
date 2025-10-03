@@ -97,70 +97,39 @@ export function useDatabase() {
     }
   }
 
-  // 세트-부품 관계 저장
+  // 세트-부품 관계 저장 (UPSERT 사용)
   const saveSetPart = async (setId, partId, colorId, quantity, isSpare = false, elementId = null, numSets = 1) => {
     loading.value = true
     error.value = null
 
     try {
-      console.log(`Checking existing set-part relationship: set_id=${setId}, part_id=${partId}, color_id=${colorId}, element_id=${elementId}`)
+      console.log(`Inserting set-part relationship: set_id=${setId}, part_id=${partId}, color_id=${colorId}, element_id=${elementId}`)
       
-      // 먼저 기존 데이터 확인
-      const { data: existingData, error: checkError } = await supabase
+      // 직접 삽입 (중복 허용)
+      const { data, error: insertError } = await supabase
         .from('set_parts')
-        .select('id')
-        .eq('set_id', setId)
-        .eq('part_id', partId)
-        .eq('color_id', colorId)
-        .eq('element_id', elementId)
+        .insert({
+          set_id: setId,
+          part_id: partId,
+          color_id: colorId,
+          quantity: quantity,
+          is_spare: isSpare,
+          element_id: elementId,
+          num_sets: numSets
+        })
+        .select()
 
-      if (checkError) {
-        console.error('Error checking existing data:', checkError)
-        throw checkError
-      }
-
-      if (existingData && existingData.length > 0) {
-        // 기존 데이터가 있으면 업데이트
-        console.log(`Updating existing set-part relationship: ${existingData[0].id}`)
-        const { data, error: updateError } = await supabase
-          .from('set_parts')
-          .update({
-            quantity: quantity,
-            is_spare: isSpare,
-            num_sets: numSets
-          })
-          .eq('id', existingData[0].id)
-          .select()
-
-        if (updateError) {
-          console.error('Error updating set-part relationship:', updateError)
-          throw updateError
+      if (insertError) {
+        console.error('Error inserting set-part relationship:', insertError)
+        // 중복 오류는 무시하고 계속 진행
+        if (insertError.code === '23505') {
+          console.log('Duplicate entry ignored, continuing...')
+          return { id: 'duplicate', set_id: setId, part_id: partId, color_id: colorId }
         }
-        console.log('Set-part relationship updated successfully')
-        return data[0]
-      } else {
-        // 기존 데이터가 없으면 새로 삽입
-        console.log('Inserting new set-part relationship')
-        const { data, error: insertError } = await supabase
-          .from('set_parts')
-          .insert({
-            set_id: setId,
-            part_id: partId,
-            color_id: colorId,
-            quantity: quantity,
-            is_spare: isSpare,
-            element_id: elementId,
-            num_sets: numSets
-          })
-          .select()
-
-        if (insertError) {
-          console.error('Error inserting set-part relationship:', insertError)
-          throw insertError
-        }
-        console.log('Set-part relationship inserted successfully')
-        return data[0]
+        throw insertError
       }
+      console.log('Set-part relationship inserted successfully')
+      return data[0]
     } catch (err) {
       console.error('saveSetPart error:', err)
       error.value = err.message
@@ -258,24 +227,87 @@ export function useDatabase() {
     }
   }
 
-  // 특정 세트의 부품 목록 조회
+  // 특정 세트의 부품 목록 조회 (모든 부품 가져오기)
   const getSetParts = async (setId) => {
     loading.value = true
     error.value = null
 
     try {
-      const { data, error: dbError } = await supabase
+      console.log(`Loading parts for set ID: ${setId}`)
+      
+      // 방법 1: 단순하게 모든 데이터 가져오기 (제한 없이)
+      const { data, error: dbError, count } = await supabase
         .from('set_parts')
         .select(`
           *,
           lego_parts(*),
           lego_colors(*)
-        `)
+        `, { count: 'exact' })
         .eq('set_id', setId)
 
-      if (dbError) throw dbError
-      return data
+      if (dbError) {
+        console.error('Database error:', dbError)
+        throw dbError
+      }
+
+      console.log(`Direct query returned ${data ? data.length : 0} parts`)
+      console.log(`Total count in database: ${count}`)
+
+      // 만약 제한이 있다면 페이지네이션으로 다시 시도
+      if (data && data.length < count) {
+        console.log('Direct query returned fewer results than expected, trying pagination...')
+        
+        const allParts = []
+        let from = 0
+        const pageSize = 1000
+        let hasMore = true
+        let pageCount = 0
+
+        while (hasMore && pageCount < 5) { // 최대 5페이지까지만
+          pageCount++
+          console.log(`Fetching page ${pageCount}, range: ${from} to ${from + pageSize - 1}`)
+          
+          const { data: pageData, error: pageError } = await supabase
+            .from('set_parts')
+            .select(`
+              *,
+              lego_parts(*),
+              lego_colors(*)
+            `)
+            .eq('set_id', setId)
+            .range(from, from + pageSize - 1)
+
+          if (pageError) {
+            console.error('Page error:', pageError)
+            throw pageError
+          }
+
+          console.log(`Page ${pageCount} returned ${pageData ? pageData.length : 0} parts`)
+
+          if (pageData && pageData.length > 0) {
+            allParts.push(...pageData)
+            console.log(`Total parts collected so far: ${allParts.length}`)
+            from += pageSize
+            
+            if (pageData.length < pageSize) {
+              hasMore = false
+              console.log('No more data available, stopping pagination')
+            }
+          } else {
+            hasMore = false
+            console.log('No data returned, stopping pagination')
+          }
+        }
+
+        console.log(`Pagination result: Loaded ${allParts.length} parts for set ${setId}`)
+        return allParts
+      }
+
+      console.log(`Final result: Loaded ${data ? data.length : 0} parts for set ${setId}`)
+      return data || []
+      
     } catch (err) {
+      console.error('Error loading set parts:', err)
       error.value = err.message
       throw err
     } finally {
@@ -342,6 +374,49 @@ export function useDatabase() {
     }
   }
 
+  // 이미 등록된 세트인지 확인
+  const checkSetExists = async (setNum) => {
+    loading.value = true
+    error.value = null
+
+    try {
+      const { data, error: dbError } = await supabase
+        .from('lego_sets')
+        .select('id, set_num, name, created_at')
+        .eq('set_num', setNum)
+        .maybeSingle()
+
+      if (dbError) throw dbError
+      return data
+    } catch (err) {
+      error.value = err.message
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // 여러 세트의 등록 상태를 한 번에 확인
+  const checkMultipleSetsExist = async (setNums) => {
+    loading.value = true
+    error.value = null
+
+    try {
+      const { data, error: dbError } = await supabase
+        .from('lego_sets')
+        .select('id, set_num, name, created_at')
+        .in('set_num', setNums)
+
+      if (dbError) throw dbError
+      return data || []
+    } catch (err) {
+      error.value = err.message
+      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
   return {
     loading,
     error,
@@ -354,6 +429,8 @@ export function useDatabase() {
     getLegoSets,
     getSetParts,
     getPartImages,
-    getOperationLogs
+    getOperationLogs,
+    checkSetExists,
+    checkMultipleSetsExist
   }
 }

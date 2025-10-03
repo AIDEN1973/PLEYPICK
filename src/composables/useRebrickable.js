@@ -120,6 +120,90 @@ export function useRebrickable() {
     return await apiCall(`/lego/parts/?${params}`)
   }
 
+  // 미니피규어 검색
+  const searchMinifigs = async (query, page = 1, pageSize = 100) => {
+    const params = new URLSearchParams({
+      search: query,
+      page: page.toString(),
+      page_size: pageSize.toString()
+    })
+    
+    return await apiCall(`/lego/minifigs/?${params}`)
+  }
+
+  // 특정 미니피규어 정보 조회
+  const getMinifig = async (figNum) => {
+    return await apiCall(`/lego/minifigs/${figNum}/`)
+  }
+
+  // 미니피규어의 부품 목록 조회
+  const getMinifigParts = async (figNum) => {
+    const allParts = []
+    let page = 1
+    const pageSize = 1000
+    
+    while (true) {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: pageSize.toString(),
+        inc_part_details: '1',
+        inc_color_details: '1'
+      })
+      
+      const response = await apiCall(`/lego/minifigs/${figNum}/parts/?${params}`)
+      
+      if (response.results && response.results.length > 0) {
+        allParts.push(...response.results)
+        
+        if (!response.next) {
+          break
+        }
+        
+        page++
+      } else {
+        break
+      }
+    }
+    
+    return {
+      count: allParts.length,
+      results: allParts
+    }
+  }
+
+  // 세트에 포함된 미니피규어 조회
+  const getSetMinifigs = async (setNum) => {
+    const allMinifigs = []
+    let page = 1
+    const pageSize = 1000
+    
+    while (true) {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        page_size: pageSize.toString()
+      })
+      
+      const response = await apiCall(`/lego/sets/${setNum}/minifigs/?${params}`)
+      
+      if (response.results && response.results.length > 0) {
+        allMinifigs.push(...response.results)
+        
+        if (!response.next) {
+          break
+        }
+        
+        page++
+      } else {
+        break
+      }
+    }
+    
+    return {
+      count: allMinifigs.length,
+      results: allMinifigs
+    }
+  }
+
   return {
     loading,
     error,
@@ -129,6 +213,10 @@ export function useRebrickable() {
     getPart,
     getPartColors,
     getColors,
-    getMultipleParts
+    getMultipleParts,
+    searchMinifigs,
+    getMinifig,
+    getMinifigParts,
+    getSetMinifigs
   }
 }
