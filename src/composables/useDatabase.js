@@ -97,15 +97,38 @@ export function useDatabase() {
     }
   }
 
-  // 세트-부품 관계 저장 (UPSERT 사용)
+  // 세트-부품 관계 저장 (중복 방지)
   const saveSetPart = async (setId, partId, colorId, quantity, isSpare = false, elementId = null, numSets = 1) => {
     loading.value = true
     error.value = null
 
     try {
       console.log(`Inserting set-part relationship: set_id=${setId}, part_id=${partId}, color_id=${colorId}, element_id=${elementId}`)
-      
-      // 직접 삽입 (중복 허용)
+
+      // 1) 기존 존재 여부 확인 (set_id + part_id + color_id 기준)
+      const { data: existing, error: existError } = await supabase
+        .from('set_parts')
+        .select('id, quantity')
+        .eq('set_id', setId)
+        .eq('part_id', partId)
+        .eq('color_id', colorId)
+        .maybeSingle()
+
+      if (existError) {
+        console.warn('Warning checking existing set-part:', existError)
+        // PGRST116: multiple or no rows when requesting object → 중복이 이미 존재하는 케이스로 간주하고 스킵
+        if (existError.code === 'PGRST116') {
+          console.log('Duplicate set-part detected by PGRST116, skipping insert')
+          return { id: 'duplicate', set_id: setId, part_id: partId, color_id: colorId }
+        }
+      }
+
+      if (existing) {
+        console.log('Duplicate set-part detected, skipping insert')
+        return { id: existing.id, set_id: setId, part_id: partId, color_id: colorId, quantity: existing.quantity }
+      }
+
+      // 2) 신규 삽입
       const { data, error: insertError } = await supabase
         .from('set_parts')
         .insert({

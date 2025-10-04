@@ -1,0 +1,35 @@
+-- 깔끔한 새 버킷 생성
+
+-- 1. 새 버킷 생성
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'lego_parts_images',
+  'lego_parts_images',
+  true,
+  10485760, -- 10MB
+  ARRAY['image/jpeg', 'image/png', 'image/webp']
+);
+
+-- 2. RLS 정책 생성
+-- 버킷 정책
+CREATE POLICY "Public read access for lego_parts_images" ON storage.objects
+FOR SELECT USING (bucket_id = 'lego_parts_images');
+
+CREATE POLICY "Public insert access for lego_parts_images" ON storage.objects
+FOR INSERT WITH CHECK (bucket_id = 'lego_parts_images');
+
+CREATE POLICY "Public update access for lego_parts_images" ON storage.objects
+FOR UPDATE USING (bucket_id = 'lego_parts_images');
+
+CREATE POLICY "Public delete access for lego_parts_images" ON storage.objects
+FOR DELETE USING (bucket_id = 'lego_parts_images');
+
+-- 3. 생성 확인
+SELECT id, name, public, file_size_limit, allowed_mime_types 
+FROM storage.buckets 
+WHERE id = 'lego_parts_images';
+
+SELECT policyname, cmd, roles 
+FROM pg_policies 
+WHERE schemaname = 'storage' AND tablename = 'objects' 
+AND policyname LIKE '%lego_parts_images%';

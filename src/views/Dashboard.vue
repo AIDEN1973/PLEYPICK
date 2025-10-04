@@ -33,6 +33,16 @@
           <router-link to="/saved-lego" class="btn btn-secondary">저장된 레고</router-link>
         </div>
         <div class="action-card">
+          <h3>실시간 부품 검수</h3>
+          <p>AI 기반 실시간 부품 검수 시스템을 사용하세요.</p>
+          <router-link to="/detection" class="btn btn-success">검수 시작</router-link>
+        </div>
+        <div class="action-card">
+          <h3>마스터 데이터 구축</h3>
+          <p>Rebrickable API에서 부품을 수집하고 LLM으로 분석하여 마스터 데이터베이스를 구축하세요.</p>
+          <router-link to="/master-builder" class="btn btn-warning">데이터 구축</router-link>
+        </div>
+        <div class="action-card">
           <h3>프로필 관리</h3>
           <p>사용자 정보를 확인하고 수정하세요.</p>
           <button class="btn btn-secondary">프로필 보기</button>

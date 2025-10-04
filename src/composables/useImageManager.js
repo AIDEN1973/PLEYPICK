@@ -67,6 +67,13 @@ export function useImageManager() {
         
         const bucketExists = data.some(bucket => bucket.id === 'lego_parts_images')
         console.log('Bucket lego_parts_images exists:', bucketExists)
+        
+        // 버킷이 없어도 업로드 시도 (권한 문제일 수 있음)
+        if (!bucketExists) {
+          console.warn('Bucket not found in list, but attempting upload anyway (permission issue possible)')
+          return true
+        }
+        
         return bucketExists
       } catch (listError) {
         console.warn('Bucket list check failed, but bucket might still exist:', listError.message)
@@ -131,7 +138,7 @@ export function useImageManager() {
         .select('id, supabase_url')
         .eq('part_num', partNum)
         .eq('color_id', colorId)
-        .single()
+        .maybeSingle()
 
       if (error && error.code !== 'PGRST116') {
         console.warn('Image existence check failed:', error.message)
@@ -168,13 +175,16 @@ export function useImageManager() {
           console.warn('Bucket check failed, but attempting upload anyway:', err.message)
         }
 
-        // 원본 파일명 사용
+        // 파일명을 partNum_colorId.jpg 형식으로 통일
         const fileName = file.name
-        const filePath = path ? `${path}/${fileName}` : `images/${fileName}`
+        const filePath = `images/${fileName}`
         
+        // 중복 파일 처리: 덮어쓰기 옵션 사용
         const { data, error: uploadError } = await supabase.storage
           .from('lego_parts_images')
-          .upload(filePath, file)
+          .upload(filePath, file, {
+            upsert: true // 파일이 이미 존재하면 덮어쓰기
+          })
 
         if (uploadError) {
           throw new Error(`Supabase upload failed: ${uploadError.message}`)
@@ -246,8 +256,8 @@ export function useImageManager() {
       const originalFilename = extractOriginalFilename(imageUrl)
       console.log(`Original filename from URL: ${originalFilename}`)
       
-      // 업로드 경로 설정 (부품별 폴더)
-      const uploadPath = `lego/parts/${partNum}`
+      // 업로드 경로 설정 (일관된 경로)
+      const uploadPath = `images`
       
       // 1. 부품별 이미지 중복 검사 수행
       const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
@@ -266,18 +276,19 @@ export function useImageManager() {
         // 이미지 다운로드 시도
         const blob = await downloadImage(imageUrl)
         
-        // 파일 생성 (원본 파일명 사용)
-        const file = new File([blob], originalFilename, { type: blob.type })
+        // 파일명을 partNum_colorId.jpg 형식으로 통일
+        const fileName = `${partNum}_${colorId}.jpg`
+        const file = new File([blob], fileName, { type: 'image/jpeg' })
         
         // 서버에 업로드 (원본 파일명 그대로 사용)
         const result = await uploadImage(file, uploadPath)
         
-        console.log(`Successfully uploaded: ${originalFilename}`)
+        console.log(`Successfully uploaded: ${fileName}`)
         
         return {
           originalUrl: imageUrl,
           uploadedUrl: result.url,
-          filename: originalFilename, // 원본 파일명 반환
+          filename: fileName, // 통일된 파일명 반환
           path: result.path
         }
       } catch (downloadErr) {
@@ -358,13 +369,20 @@ export function useImageManager() {
         const fileName = filename
         const filePath = uploadPath ? `${uploadPath}/${fileName}` : `images/${fileName}`
         
+        // 중복 파일 처리: 덮어쓰기 옵션 사용
+        console.log(`📤 Supabase Storage 업로드 시도: ${filePath}`)
         const { data, error: uploadError } = await supabase.storage
           .from('lego_parts_images')
-          .upload(filePath, file)
+          .upload(filePath, file, {
+            upsert: true // 파일이 이미 존재하면 덮어쓰기
+          })
 
         if (uploadError) {
+          console.error(`❌ Supabase 업로드 실패:`, uploadError)
           throw new Error(`Supabase upload failed: ${uploadError.message}`)
         }
+        
+        console.log(`✅ Supabase 업로드 성공:`, data)
 
         // 공개 URL 생성
         const { data: urlData } = supabase.storage

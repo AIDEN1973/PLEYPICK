@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-const REBRICKABLE_API_KEY = 'd966442dee02b69a7d05a63805216a85'
+const REBRICKABLE_API_KEY = import.meta.env.VITE_REBRICKABLE_API_KEY
 const REBRICKABLE_BASE_URL = 'https://rebrickable.com/api/v3'
 
 export function useRebrickable() {
@@ -13,6 +13,9 @@ export function useRebrickable() {
     error.value = null
 
     try {
+      if (!REBRICKABLE_API_KEY) {
+        throw new Error('Missing VITE_REBRICKABLE_API_KEY')
+      }
       const url = `${REBRICKABLE_BASE_URL}${endpoint}`
       const response = await fetch(url, {
         headers: {

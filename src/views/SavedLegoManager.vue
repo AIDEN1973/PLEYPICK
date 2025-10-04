@@ -194,7 +194,7 @@
                   :key="`${part.lego_parts.part_num}-${part.lego_colors.color_id}`"
                   class="part-card"
                 >
-                  <div class="part-image">
+                  <div class="part-image" @mouseenter="showMetadata(part)" @mouseleave="hideMetadata">
                     <img 
                       :src="part.supabase_image_url || part.lego_parts.part_img_url" 
                       :alt="part.lego_parts.name"
@@ -206,6 +206,50 @@
                     </div>
                     <div v-else class="image-source-badge">
                       🌐 CDN
+                    </div>
+                    
+                    <!-- 메타데이터 툴팁 -->
+                    <div v-if="hoveredPart && hoveredPart.lego_parts.part_num === part.lego_parts.part_num && hoveredPart.lego_colors.color_id === part.lego_colors.color_id" 
+                         class="metadata-tooltip">
+                      <div class="tooltip-content">
+                        <h4>🧠 LLM 분석 결과</h4>
+                        <div v-if="part.metadata" class="metadata-details">
+                          <p><strong>형태:</strong> {{ part.metadata.shape }}</p>
+                          <p><strong>기능:</strong> {{ part.metadata.function }}</p>
+                          <p><strong>연결방식:</strong> {{ part.metadata.connection }}</p>
+                          <p><strong>중심 스터드:</strong> {{ part.metadata.center_stud ? '있음' : '없음' }}</p>
+                          <p><strong>홈:</strong> {{ part.metadata.groove ? '있음' : '없음' }}</p>
+                          <p><strong>신뢰도:</strong> {{ Math.round(part.metadata.confidence * 100) }}%</p>
+                          <div v-if="part.metadata.recognition_hints" class="recognition-hints">
+                            <p><strong>인식 힌트:</strong></p>
+                            <ul>
+                              <li v-if="part.metadata.recognition_hints.top_view">
+                                <strong>위에서:</strong> {{ part.metadata.recognition_hints.top_view }}
+                              </li>
+                              <li v-if="part.metadata.recognition_hints.side_view">
+                                <strong>옆에서:</strong> {{ part.metadata.recognition_hints.side_view }}
+                              </li>
+                              <li v-if="part.metadata.recognition_hints.unique_features">
+                                <strong>고유 특징:</strong> {{ part.metadata.recognition_hints.unique_features.join(', ') }}
+                              </li>
+                            </ul>
+                          </div>
+                          <div v-if="part.metadata.similar_parts && part.metadata.similar_parts.length > 0" class="similar-parts">
+                            <p><strong>유사 부품:</strong> {{ part.metadata.similar_parts.join(', ') }}</p>
+                          </div>
+                          <div v-if="part.metadata.distinguishing_features && part.metadata.distinguishing_features.length > 0" class="distinguishing-features">
+                            <p><strong>구별 특징:</strong> {{ part.metadata.distinguishing_features.join(', ') }}</p>
+                          </div>
+                          <div v-if="part.metadata.feature_text" class="feature-text">
+                            <p><strong>특징 설명:</strong></p>
+                            <p class="feature-description">{{ part.metadata.feature_text }}</p>
+                          </div>
+                        </div>
+                        <div v-else class="no-metadata">
+                          <p>🤖 LLM 분석 데이터가 없습니다</p>
+                          <p class="small-text">이 부품은 아직 AI 분석이 완료되지 않았습니다.</p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div class="part-info">
@@ -259,6 +303,7 @@ export default {
     const years = ref([])
     const selectedTheme = ref('')
     const selectedYear = ref('')
+    const hoveredPart = ref(null)
 
     // 통계 정보
     const totalSets = computed(() => savedSets.value.length)
@@ -351,7 +396,18 @@ export default {
         
         // 각 부품의 Supabase Storage 이미지 URL 조회
         console.log(`🔍 DEBUG: Checking Supabase Storage images for ${parts.length} parts...`)
-        const partsWithImages = await Promise.all(parts.map(async (part) => {
+        // (part_num, color_id) 기준으로 중복 제거 (최초 항목만 유지)
+        const seenKeys = new Set()
+        const deduped = []
+        for (const p of parts) {
+          const key = `${p.lego_parts.part_num}__${p.lego_colors.color_id}`
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key)
+            deduped.push(p)
+          }
+        }
+
+        const partsWithImages = await Promise.all(deduped.map(async (part) => {
           try {
             const imageUrl = await getSupabaseImageUrl(part.lego_parts.part_num, part.lego_colors.color_id)
             if (imageUrl) {
@@ -359,15 +415,21 @@ export default {
             } else {
               console.log(`❌ No Supabase image for ${part.lego_parts.part_num}, using CDN`)
             }
+            
+            // LLM 분석 메타데이터 로드
+            const metadata = await getPartMetadata(part.lego_parts.part_num, part.lego_colors.color_id)
+            
             return {
               ...part,
-              supabase_image_url: imageUrl
+              supabase_image_url: imageUrl,
+              metadata: metadata
             }
           } catch (err) {
             console.warn(`Failed to get Supabase image for ${part.lego_parts.part_num}:`, err)
             return {
               ...part,
-              supabase_image_url: null
+              supabase_image_url: null,
+              metadata: null
             }
           }
         }))
@@ -390,7 +452,7 @@ export default {
           .select('supabase_url')
           .eq('part_num', partNum)
           .eq('color_id', colorId)
-          .single()
+          .maybeSingle()
 
         if (error) {
           console.log(`No Supabase image found for ${partNum} (color: ${colorId})`)
@@ -402,6 +464,44 @@ export default {
         console.error('Error fetching Supabase image URL:', err)
         return null
       }
+    }
+
+    // LLM 분석 메타데이터 조회
+    const getPartMetadata = async (partNum, colorId) => {
+      try {
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('feature_json, feature_text, confidence')
+          .eq('part_id', partNum)
+          .eq('color_id', colorId)
+          .maybeSingle()
+
+        if (error) {
+          console.log(`No metadata found for ${partNum} (color: ${colorId})`)
+          return null
+        }
+
+        if (!data) return null
+
+        return {
+          ...data.feature_json,
+          feature_text: data.feature_text,
+          confidence: data.confidence
+        }
+      } catch (err) {
+        console.error('Error fetching part metadata:', err)
+        return null
+      }
+    }
+
+    // 메타데이터 툴팁 표시
+    const showMetadata = (part) => {
+      hoveredPart.value = part
+    }
+
+    // 메타데이터 툴팁 숨기기
+    const hideMetadata = () => {
+      hoveredPart.value = null
     }
 
     // 세트 상세보기
@@ -482,6 +582,7 @@ export default {
       years,
       selectedTheme,
       selectedYear,
+      hoveredPart,
       totalSets,
       totalParts,
       processedImages,
@@ -494,7 +595,9 @@ export default {
       closeModal,
       formatDate,
       handleImageError,
-      uniquePartsCount
+      uniquePartsCount,
+      showMetadata,
+      hideMetadata
     }
   }
 }
@@ -861,6 +964,7 @@ export default {
   background: white;
   border-radius: 6px;
   position: relative;
+  cursor: pointer;
 }
 
 .part-image img {
@@ -945,6 +1049,89 @@ export default {
   margin-top: 1rem;
 }
 
+/* 메타데이터 툴팁 스타일 */
+.metadata-tooltip {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.tooltip-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1rem;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  max-width: 350px;
+  min-width: 300px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.tooltip-content h4 {
+  margin: 0 0 0.75rem 0;
+  font-size: 1rem;
+  color: #fff;
+  text-align: center;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
+  padding-bottom: 0.5rem;
+}
+
+.metadata-details p {
+  margin: 0.5rem 0;
+  color: #f8f9fa;
+}
+
+.metadata-details strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.recognition-hints,
+.similar-parts,
+.distinguishing-features,
+.feature-text {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255,255,255,0.2);
+}
+
+.recognition-hints ul {
+  margin: 0.5rem 0;
+  padding-left: 1rem;
+}
+
+.recognition-hints li {
+  margin: 0.25rem 0;
+  color: #f8f9fa;
+}
+
+.feature-description {
+  background: rgba(255,255,255,0.1);
+  padding: 0.5rem;
+  border-radius: 6px;
+  margin-top: 0.5rem;
+  font-style: italic;
+  color: #e9ecef;
+}
+
+.no-metadata {
+  text-align: center;
+  color: #f8f9fa;
+}
+
+.no-metadata p {
+  margin: 0.5rem 0;
+}
+
+.small-text {
+  font-size: 0.8rem;
+  color: #dee2e6;
+}
+
 @media (max-width: 768px) {
   .filter-controls {
     flex-direction: column;
@@ -961,6 +1148,12 @@ export default {
   .sets-header {
     flex-direction: column;
     gap: 1rem;
+  }
+  
+  .tooltip-content {
+    max-width: 280px;
+    min-width: 250px;
+    font-size: 0.8rem;
   }
 }
 </style>

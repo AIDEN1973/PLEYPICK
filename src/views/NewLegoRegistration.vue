@@ -19,6 +19,22 @@
           {{ loading ? '검색 중...' : '검색' }}
         </button>
       </div>
+      
+      <!-- 마스터 데이터 구축 옵션 -->
+      <div class="master-data-option">
+        <label class="checkbox-label">
+          <input 
+            type="checkbox" 
+            v-model="buildMasterData"
+            :disabled="loading || processing"
+          />
+          <span class="checkmark"></span>
+          ⚡ 빠른 저장 (LLM 분석 건너뛰기)
+        </label>
+        <small class="form-help">
+          체크하면 기본 데이터만 저장하고 LLM 분석을 건너뜁니다. (기본값: LLM 분석 실행)
+        </small>
+      </div>
     </div>
 
     <!-- 검색 결과 (단일 제품 번호가 아닌 경우에만 표시) -->
@@ -237,6 +253,16 @@
       {{ successMessage }}
     </div>
 
+    <!-- 마스터 데이터 구축 진행률 -->
+    <div v-if="!buildMasterData && masterDataProgress > 0" class="master-data-progress">
+      <h4>🤖 마스터 데이터 구축 중...</h4>
+      <div class="progress">
+        <div class="progress-bar" :style="{ width: masterDataProgress + '%' }"></div>
+        <span>{{ masterDataProgress }}%</span>
+      </div>
+      <small>LLM 분석 및 임베딩 생성 중... (품질 유지)</small>
+    </div>
+
     <!-- 백그라운드 작업 상태 -->
     <div v-if="runningTasks.length > 0" class="background-tasks">
       <h4>백그라운드 작업 중</h4>
@@ -260,6 +286,12 @@ import { useImageManager } from '../composables/useImageManager'
 import { useDatabase } from '../composables/useDatabase'
 import { useBackgroundTasks } from '../composables/useBackgroundTasks'
 import { supabase } from '../composables/useSupabase'
+import { 
+  analyzePartWithLLM, 
+  generateTextEmbeddingsBatch, 
+  saveToMasterPartsDB,
+  checkExistingAnalysis 
+} from '../composables/useMasterPartsPreprocessing'
 
 export default {
   name: 'LegoSetManager',
@@ -314,6 +346,9 @@ export default {
     const partsStats = ref(null) // 부품 통계 정보
     const categorizedParts = ref(null) // 부품 분류 정보
     const setMinifigs = ref([]) // 세트의 미니피규어 정보
+    const buildMasterData = ref(false) // 마스터 데이터 구축 옵션 (기본값: false = LLM 분석 실행)
+    const masterDataProgress = ref(0) // 마스터 데이터 구축 진행률
+    const processing = ref(false) // 전체 처리 상태
 
     // 단일 제품 번호인지 확인하는 함수
     const isSingleSetNumber = (query) => {
@@ -589,7 +624,7 @@ export default {
           .from('lego_sets')
           .select('*')
           .eq('set_num', setNum)
-          .single()
+          .maybeSingle()
 
         if (error && error.code !== 'PGRST116') throw error
         return data
@@ -790,7 +825,7 @@ export default {
           .from('lego_sets')
           .select('id')
           .eq('set_num', selectedSet.value.set_num)
-          .single()
+          .maybeSingle()
         
         if (findError && findError.code !== 'PGRST116') {
           console.log('No existing set found, proceeding with save...')
@@ -824,12 +859,91 @@ export default {
       }
     }
 
+    // 기존 세트 중복 체크
+    const checkExistingSet = async (setNum) => {
+      try {
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('id, set_num, name, year, num_parts, created_at')
+          .eq('set_num', setNum)
+          .maybeSingle()
+        
+        if (error) {
+          console.log('Error checking existing set:', error)
+          return null
+        }
+        
+        return data
+      } catch (err) {
+        console.error('Failed to check existing set:', err)
+        return null
+      }
+    }
+
     const saveSetToDatabase = async () => {
       if (!selectedSet.value) return
       
+      // 1. 기존 세트 중복 체크
+      const existingSet = await checkExistingSet(selectedSet.value.set_num)
+      let isUpdate = false
+      
+      if (existingSet) {
+        const shouldUpdate = confirm(
+          `이미 등록된 세트가 있습니다!\n\n` +
+          `기존 세트: ${existingSet.name} (${existingSet.set_num})\n` +
+          `등록일: ${new Date(existingSet.created_at).toLocaleDateString('ko-KR')}\n` +
+          `부품 수: ${existingSet.num_parts}개\n\n` +
+          `새로운 세트: ${selectedSet.value.name}\n` +
+          `부품 수: ${selectedSet.value.num_parts}개\n\n` +
+          `기존 데이터를 업데이트하시겠습니까?`
+        )
+        
+        if (!shouldUpdate) {
+          console.log('User cancelled update')
+          return
+        }
+        
+        isUpdate = true
+        
+        // 기존 데이터 삭제 후 새로 저장
+        console.log('Deleting existing set data...')
+        try {
+          // 부품 관계 삭제
+          const { error: deletePartsError } = await supabase
+            .from('set_parts')
+            .delete()
+            .eq('set_id', existingSet.id)
+          
+          if (deletePartsError) {
+            console.warn('Failed to delete set_parts, but continuing with update:', deletePartsError)
+            // 삭제 실패해도 계속 진행 (중복 체크 로직이 처리)
+          } else {
+            console.log('Set parts deleted successfully')
+          }
+          
+          // 세트 정보 삭제
+          const { error: deleteSetError } = await supabase
+            .from('lego_sets')
+            .delete()
+            .eq('id', existingSet.id)
+          
+          if (deleteSetError) {
+            console.warn('Failed to delete lego_sets, but continuing with update:', deleteSetError)
+            // 삭제 실패해도 계속 진행
+          } else {
+            console.log('Lego set deleted successfully')
+          }
+          
+          console.log('Existing data deletion attempted')
+        } catch (err) {
+          console.error('Error during deletion, but continuing with update:', err)
+          // 삭제 실패해도 계속 진행 (중복 체크 로직이 처리)
+        }
+      }
+      
       // 백그라운드 작업으로 저장 시작
       const taskId = startBackgroundTask(
-        `세트 ${selectedSet.value.set_num} 저장`,
+        `세트 ${selectedSet.value.set_num} ${isUpdate ? '업데이트' : '저장'}`,
         async (task) => {
           const savedParts = []
           const failedParts = []
@@ -867,14 +981,41 @@ export default {
                   // 세트-부품 관계 저장
                   const savedSetPart = await saveSetPart(
                     savedSet.id,
-                    savedPart.id,
-                    savedColor.id,
+                    savedPart.part_num,  // part_id는 part_num (character varying)
+                    savedColor.color_id, // color_id는 integer
                     partData.quantity,
                     partData.is_spare || false,
                     partData.element_id,
                     partData.num_sets || 1
                   )
                   console.log(`Set-part relationship saved for ${partData.part.part_num}`)
+                  
+                  // 이미지 업로드 (백그라운드에서 실행)
+                  try {
+                    console.log(`🖼️ Uploading image for ${partData.part.part_num}...`)
+                    const imageResult = await processRebrickableImage(
+                      partData.part.part_img_url,
+                      partData.part.part_num,
+                      partData.color.id
+                    )
+                    
+                    if (imageResult.uploadedUrl) {
+                      console.log(`💾 Saving image metadata for ${partData.part.part_num}...`)
+                      await saveImageMetadata({
+                        original_url: partData.part.part_img_url,
+                        supabase_url: imageResult.uploadedUrl,
+                        file_path: imageResult.path,
+                        file_name: imageResult.filename,
+                        part_num: partData.part.part_num,
+                        color_id: partData.color.id,
+                        set_num: selectedSet.value?.set_num
+                      })
+                      console.log(`✅ Image metadata saved for ${partData.part.part_num}`)
+                    }
+                  } catch (imageError) {
+                    console.warn(`⚠️ Image upload failed for ${partData.part.part_num}:`, imageError)
+                    // 이미지 업로드 실패해도 부품 저장은 계속 진행
+                  }
                   
                   savedParts.push({
                     part_num: partData.part.part_num,
@@ -894,6 +1035,14 @@ export default {
               
               console.log(`🔍 DEBUG: Save completed - Success: ${savedParts.length}, Failed: ${failedParts.length}`)
               console.log(`🔍 DEBUG: Failed parts:`, failedParts)
+              
+              // 마스터 데이터 구축 (기본적으로 실행, 체크 시 건너뛰기)
+              if (!buildMasterData.value && savedParts.length > 0) {
+                console.log(`🤖 Starting automatic master data build for ${savedParts.length} parts...`)
+                await buildMasterDataForSet(setParts.value, selectedSet.value)
+              } else if (buildMasterData.value) {
+                console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+              }
             }
 
             // 3. 작업 로그 저장
@@ -929,7 +1078,10 @@ export default {
       )
       
       // 즉시 성공 메시지 표시 (백그라운드에서 작업 진행)
-      successMessage.value = `세트 ${selectedSet.value.set_num} 저장이 백그라운드에서 시작되었습니다. 페이지를 이동해도 작업이 계속됩니다.`
+      const message = isUpdate 
+        ? `세트 ${selectedSet.value.set_num} 업데이트가 백그라운드에서 시작되었습니다. 페이지를 이동해도 작업이 계속됩니다.`
+        : `세트 ${selectedSet.value.set_num} 저장이 백그라운드에서 시작되었습니다. 페이지를 이동해도 작업이 계속됩니다.`
+      successMessage.value = message
       
       // 작업 완료 후 결과 처리 (선택사항)
       setTimeout(async () => {
@@ -938,9 +1090,11 @@ export default {
           if (task && task.status === 'completed') {
             const result = task.result
             if (result.failedParts.length === 0) {
-              successMessage.value = `세트 ${result.setNum} 및 ${result.savedParts.length}개 부품 정보가 성공적으로 저장되었습니다.`
+              const action = isUpdate ? '업데이트' : '저장'
+              successMessage.value = `세트 ${result.setNum} 및 ${result.savedParts.length}개 부품 정보가 성공적으로 ${action}되었습니다.`
             } else {
-              successMessage.value = `세트 ${result.setNum} 저장 완료. 성공: ${result.savedParts.length}개, 실패: ${result.failedParts.length}개`
+              const action = isUpdate ? '업데이트' : '저장'
+              successMessage.value = `세트 ${result.setNum} ${action} 완료. 성공: ${result.savedParts.length}개, 실패: ${result.failedParts.length}개`
               error.value = `실패한 부품들: ${result.failedParts.map(p => `${p.part_num}(${p.color})`).join(', ')}`
             }
           }
@@ -984,6 +1138,91 @@ export default {
       }
     }
 
+    // 마스터 데이터 구축 함수
+    const buildMasterDataForSet = async (parts, set) => {
+      try {
+        console.log(`🤖 Starting master data build for set ${set.set_num}...`)
+        processing.value = true
+        masterDataProgress.value = 0
+        
+        // 1단계: LLM 분석
+        console.log(`🧠 Step 1: LLM analysis for ${parts.length} parts...`)
+        const analysisResults = []
+        const batchSize = 3 // 병렬 처리 배치 크기
+        
+        for (let i = 0; i < parts.length; i += batchSize) {
+          const batch = parts.slice(i, i + batchSize)
+          const batchPromises = batch.map(async (part, index) => {
+            try {
+              // 기존 분석 확인
+              const existing = await checkExistingAnalysis(part.part.part_num, part.color.id)
+              if (existing) {
+                console.log(`⏭️ Skipping existing analysis for ${part.part.part_num} (color: ${part.color.id}) - already analyzed`)
+                // 메타 정보 보강 (DB 저장 시 color_id 누락 방지)
+                return { ...existing, part: part.part, color: part.color }
+              }
+              
+              console.log(`🧠 Analyzing part ${i + index + 1}/${parts.length}: ${part.part.part_num}`)
+              const analysis = await analyzePartWithLLM(part)
+              // 메타 정보 포함하여 반환 (DB 저장에 color_id 반영)
+              return { ...analysis, part: part.part, color: part.color }
+            } catch (error) {
+              console.error(`❌ LLM analysis failed for ${part.part.part_num}:`, error)
+              return null
+            }
+          })
+          
+          const batchResults = await Promise.all(batchPromises)
+          analysisResults.push(...batchResults.filter(result => result !== null))
+          
+          // 진행률 업데이트
+          masterDataProgress.value = Math.round(((i + batchSize) / parts.length) * 50)
+          
+          // API 레이트 리밋 방지
+          if (i + batchSize < parts.length) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+        }
+        
+        console.log(`✅ LLM analysis completed: ${analysisResults.length} parts analyzed`)
+        
+        // 2단계: 임베딩 생성 (기존 임베딩이 없는 경우만)
+        console.log(`🔢 Step 2: Generating embeddings...`)
+        const needsEmbedding = analysisResults.filter(result => !result.embedding)
+        console.log(`📊 Parts needing embedding: ${needsEmbedding.length}/${analysisResults.length}`)
+        
+        const embeddingResults = await generateTextEmbeddingsBatch(needsEmbedding)
+        console.log(`✅ Embeddings generated: ${embeddingResults.length} parts`)
+        
+        // 3단계: 데이터베이스 저장
+        console.log(`💾 Step 3: Saving to database...`)
+        
+        // 임베딩 결과를 올바른 부품에 매핑
+        let embeddingIndex = 0
+        const combinedResults = analysisResults.map(analysis => {
+          if (!analysis.embedding && embeddingIndex < embeddingResults.length) {
+            return {
+              ...analysis,
+              embedding: embeddingResults[embeddingIndex++]
+            }
+          }
+          return analysis
+        })
+        
+        await saveToMasterPartsDB(combinedResults)
+        console.log(`✅ Master data saved to database`)
+        
+        masterDataProgress.value = 100
+        console.log(`🎉 Master data build completed for set ${set.set_num}!`)
+        
+      } catch (error) {
+        console.error(`❌ Master data build failed:`, error)
+        masterDataProgress.value = 0
+      } finally {
+        processing.value = false
+      }
+    }
+
     // 백그라운드 작업 상태
     const runningTasks = computed(() => getRunningTasks())
 
@@ -1002,6 +1241,9 @@ export default {
       partsCountValidation,
       partsStats,
       categorizedParts,
+      buildMasterData,
+      masterDataProgress,
+      processing,
       searchSets,
       selectSet,
       loadSetParts,
@@ -1485,6 +1727,74 @@ export default {
   padding: 1rem;
   border-radius: 8px;
   margin-top: 1rem;
+}
+
+/* 마스터 데이터 구축 옵션 스타일 */
+.master-data-option {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 500;
+  color: #495057;
+}
+
+.checkbox-label input[type="checkbox"] {
+  margin-right: 0.5rem;
+  transform: scale(1.2);
+}
+
+.form-help {
+  display: block;
+  margin-top: 0.5rem;
+  color: #6c757d;
+  font-size: 0.875rem;
+}
+
+/* 마스터 데이터 진행률 스타일 */
+.master-data-progress {
+  background: #e3f2fd;
+  border: 1px solid #2196f3;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.master-data-progress h4 {
+  margin: 0 0 0.5rem 0;
+  color: #1976d2;
+}
+
+.master-data-progress .progress {
+  position: relative;
+  background: #f5f5f5;
+  border-radius: 4px;
+  height: 24px;
+  margin: 0.5rem 0;
+}
+
+.master-data-progress .progress-bar {
+  background: linear-gradient(90deg, #2196f3, #21cbf3);
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.master-data-progress .progress span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-weight: bold;
+  font-size: 0.875rem;
 }
 
 .background-tasks {
