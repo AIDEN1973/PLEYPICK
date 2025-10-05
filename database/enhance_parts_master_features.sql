@@ -78,7 +78,28 @@ ADD COLUMN IF NOT EXISTS top2_margin DECIMAL(3,2) DEFAULT 0.0,
 ADD COLUMN IF NOT EXISTS review_ratio DECIMAL(3,2) DEFAULT 0.0,
 ADD COLUMN IF NOT EXISTS last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
 
--- 10. 인덱스 추가 (성능 최적화)
+-- 10. 운영용 품질 지표 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS image_quality_mu DECIMAL(5,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS image_quality_sigma DECIMAL(5,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS image_quality_lv DECIMAL(5,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS image_quality_snr DECIMAL(5,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS image_quality_resolution INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS image_quality_q DECIMAL(3,2) DEFAULT 1.0,
+ADD COLUMN IF NOT EXISTS tier_weights_geo DECIMAL(3,2) DEFAULT 0.6,
+ADD COLUMN IF NOT EXISTS tier_weights_struct DECIMAL(3,2) DEFAULT 0.2,
+ADD COLUMN IF NOT EXISTS tier_weights_sem DECIMAL(3,2) DEFAULT 0.2,
+ADD COLUMN IF NOT EXISTS score_geo DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS score_struct DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS score_sem DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS score_final DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS meta_em DECIMAL(3,2) DEFAULT 1.0,
+ADD COLUMN IF NOT EXISTS meta_penalty DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS meta_m DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS decision_status VARCHAR(20) DEFAULT 'pending',
+ADD COLUMN IF NOT EXISTS decision_threshold DECIMAL(3,2) DEFAULT 0.0;
+
+-- 11. 인덱스 추가 (성능 최적화)
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_tier ON parts_master_features(tier);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_orientation_sensitive ON parts_master_features(orientation_sensitive);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_complexity ON parts_master_features(semantic_complexity);
@@ -87,6 +108,9 @@ CREATE INDEX IF NOT EXISTS idx_parts_master_features_voting_score ON parts_maste
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_confusion_penalty ON parts_master_features(confusion_penalty);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_last_updated ON parts_master_features(last_updated);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_method ON parts_master_features(method);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_decision_status ON parts_master_features(decision_status);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_image_quality_q ON parts_master_features(image_quality_q);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_score_final ON parts_master_features(score_final);
 
 -- 6. 기존 데이터 업데이트 (기본값 설정)
 UPDATE parts_master_features 
