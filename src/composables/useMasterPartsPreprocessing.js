@@ -39,10 +39,9 @@ export async function analyzePartWithLLM(part) {
       console.warn('⚠️ OpenAI API key is missing, skipping LLM analysis')
       console.warn('🔍 Environment check:', {
         VITE_OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
-        process_env: process.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
         allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
       })
-      return createDefaultAnalysis(part)
+      return null // LLM 분석 스킵
     }
     
     if (import.meta.env.DEV) {
@@ -168,7 +167,7 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
     // 응답 구조 확인
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
       console.error('응답 구조 오류:', data)
-      return createDefaultAnalysis(part)
+      return null
     }
     
     // JSON 응답 강제 모드: content는 JSON 문자열이어야 함
@@ -190,7 +189,7 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
         parsed = JSON.parse(jsonText)
       } catch (err) {
         console.error('JSON 파싱 실패:', err)
-        return createDefaultAnalysis(part, partName, partNum)
+        return null
       }
     }
 
@@ -245,35 +244,35 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
     merged.part_num = partNum
     return merged
     
-  } catch (error) {
-    console.error('LLM 분석 실패:', error)
-    return createDefaultAnalysis(part)
-  }
+    } catch (error) {
+      console.error('LLM 분석 실패:', error)
+      return null // LLM 분석 실패 시 null 반환
+    }
 }
 
-// 기본 분석 결과 생성
-function createDefaultAnalysis(part, partName = null, partNum = null) {
-  const name = partName || part.part?.name || part.name || 'Unknown'
-  const num = partNum || part.part_num || part.part?.part_num || 'Unknown'
-  
-  return {
-    shape: `분석 실패: ${name}`,
-    center_stud: false,
-    groove: false,
-    connection: 'unknown',
-    function: 'unknown',
-    feature_text: `부품 ${num}의 자동 생성된 기본 설명`,
-    recognition_hints: {
-      top_view: '기본 형태',
-      side_view: '기본 형태',
-      unique_features: ['기본 특징']
-    },
-    similar_parts: [],
-    distinguishing_features: ['기본 특징'],
-    confidence: 0.1,
-    part_num: num
-  }
-}
+// 기본 분석 결과 생성 (더 이상 사용하지 않음 - LLM 실패 시 null 반환)
+// function createDefaultAnalysis(part, partName = null, partNum = null) {
+//   const name = partName || part.part?.name || part.name || 'Unknown'
+//   const num = partNum || part.part_num || part.part?.part_num || 'Unknown'
+//   
+//   return {
+//     shape: `분석 실패: ${name}`,
+//     center_stud: false,
+//     groove: false,
+//     connection: 'unknown',
+//     function: 'unknown',
+//     feature_text: `부품 ${num}의 자동 생성된 기본 설명`,
+//     recognition_hints: {
+//       top_view: '기본 형태',
+//       side_view: '기본 형태',
+//       unique_features: ['기본 특징']
+//     },
+//     similar_parts: [],
+//     distinguishing_features: ['기본 특징'],
+//     confidence: 0.1,
+//     part_num: num
+//   }
+// }
 
 // 텍스트만으로 분석
 function createTextOnlyAnalysis(part, partName, partNum) {
@@ -779,6 +778,10 @@ export function useMasterPartsPreprocessing() {
         const batchPromises = batch.map(async (part, index) => {
           try {
             const analysis = await analyzePartWithLLM(part)
+            if (analysis === null) {
+              console.log(`⏭️ Skipping LLM analysis for ${part.part_num} - API key missing`)
+              return { part, analysis: null, success: true, skipped: true }
+            }
             return { part, analysis, success: true }
           } catch (err) {
             console.error(`Failed to analyze part ${part.part_num}:`, err)
@@ -790,6 +793,9 @@ export function useMasterPartsPreprocessing() {
         
         for (const result of batchResults) {
           if (result.success) {
+            if (result.skipped) {
+              console.log(`⏭️ Skipped LLM analysis for ${result.part.part_num} - using existing data only`)
+            }
             results.push(result)
           } else {
             errors.push(result)
@@ -917,7 +923,7 @@ export function useMasterPartsPreprocessing() {
       // 응답 구조 확인
       if (!data.choices || !data.choices[0] || !data.choices[0].message) {
         console.error('응답 구조 오류:', data)
-        return createDefaultAnalysis(part)
+        return null
       }
       
       const llmResponse = data.choices[0].message.content
@@ -951,39 +957,38 @@ export function useMasterPartsPreprocessing() {
         console.error('JSON 파싱 실패:', parseError)
         console.log('추출된 JSON 텍스트:', jsonText)
         console.log('원본 응답:', llmResponse)
-        // JSON 파싱 실패 시 기본 구조 반환
-        analysisResult = createDefaultAnalysis(part)
-        analysisResult.part_num = partNum
+        // JSON 파싱 실패 시 null 반환
+        analysisResult = null
       }
 
       return analysisResult
     } catch (err) {
       console.error('LLM analysis failed:', err)
-      return createDefaultAnalysis(part)
+      return null
     }
   }
 
-  // 기본 분석 결과 생성 (하이브리드 전략용)
-  const createDefaultAnalysis = (part) => {
-    const partNum = part.part_num || part.part?.part_num || 'unknown'
-    return {
-      part_num: partNum,
-      shape: `분석 실패: ${part.name || part.part?.name}`,
-      center_stud: false,
-      groove: false,
-      connection: 'unknown',
-      function: 'unknown',
-      feature_text: `분석 실패: ${part.name || part.part?.name}`,
-      recognition_hints: {
-        top_view: '분석 실패',
-        side_view: '분석 실패',
-        unique_features: []
-      },
-      similar_parts: [],
-      distinguishing_features: [],
-      confidence: 0.3
-    }
-  }
+  // 기본 분석 결과 생성 (더 이상 사용하지 않음 - LLM 실패 시 null 반환)
+  // const createDefaultAnalysis = (part) => {
+  //   const partNum = part.part_num || part.part?.part_num || 'unknown'
+  //   return {
+  //     part_num: partNum,
+  //     shape: `분석 실패: ${part.name || part.part?.name}`,
+  //     center_stud: false,
+  //     groove: false,
+  //     connection: 'unknown',
+  //     function: 'unknown',
+  //     feature_text: `분석 실패: ${part.name || part.part?.name}`,
+  //     recognition_hints: {
+  //       top_view: '분석 실패',
+  //       side_view: '분석 실패',
+  //       unique_features: []
+  //     },
+  //     similar_parts: [],
+  //     distinguishing_features: [],
+  //     confidence: 0.3
+  //   }
+  // }
 
   // 텍스트만으로 분석 (이미지 URL이 없을 때)
   const createTextOnlyAnalysis = (part, partName, partNum) => {
