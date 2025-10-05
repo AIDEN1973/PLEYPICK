@@ -3,12 +3,20 @@ import { supabase } from './useSupabase'
 
 // LLM API 설정 (하이브리드 전략용)
 const LLM_CONFIG = {
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY,
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY || 'your-actual-api-key-here',
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   maxTokens: 1000,
   temperature: 0.1
 }
+
+// 환경 변수 디버깅 (프로덕션에서도 표시)
+console.log('🔍 Environment Debug:', {
+  VITE_OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
+  process_env: process.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
+  apiKey: LLM_CONFIG.apiKey ? 'Present' : 'Missing',
+  allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
+})
 
 // 하이브리드 설정: 1차(4o-mini) 결과가 모호하면 2차(4.1-mini)로 보강
 const HYBRID_CONFIG = {
@@ -30,6 +38,11 @@ export async function analyzePartWithLLM(part) {
     // API 키 검증
     if (!LLM_CONFIG.apiKey || LLM_CONFIG.apiKey === 'undefined') {
       console.warn('⚠️ OpenAI API key is missing, skipping LLM analysis')
+      console.warn('🔍 Environment check:', {
+        VITE_OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
+        process_env: process.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
+        allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
+      })
       return createDefaultAnalysis(part)
     }
     
