@@ -16,16 +16,40 @@ export function useImageManager() {
     error.value = null
 
     try {
-      // Rebrickable CDN URL을 프록시 URL로 변환
-      let proxyUrl = imageUrl
-      if (imageUrl.includes('cdn.rebrickable.com')) {
-        const path = imageUrl.replace('https://cdn.rebrickable.com', '')
-        proxyUrl = `/api/proxy${path}`
-      }
-      
-      const response = await fetch(proxyUrl)
-      if (!response.ok) {
-        throw new Error(`Failed to download image: ${response.status}`)
+      // 1차: 프록시를 통한 다운로드 시도
+      let response
+      try {
+        if (imageUrl.includes('cdn.rebrickable.com')) {
+          const path = imageUrl.replace('https://cdn.rebrickable.com', '')
+          const proxyUrl = `/api/proxy${path}`
+          response = await fetch(proxyUrl)
+        } else {
+          response = await fetch(imageUrl)
+        }
+        
+        if (!response.ok) {
+          throw new Error(`Proxy download failed: ${response.status}`)
+        }
+      } catch (proxyErr) {
+        console.warn('Direct download failed, using alternative method:', proxyErr.message)
+        
+        // 2차: 직접 다운로드 시도 (CORS 우회)
+        try {
+          response = await fetch(imageUrl, {
+            mode: 'cors',
+            headers: {
+              'Accept': 'image/*',
+              'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+            }
+          })
+          
+          if (!response.ok) {
+            throw new Error(`Direct download failed: ${response.status}`)
+          }
+        } catch (directErr) {
+          console.warn('All download methods failed:', directErr.message)
+          throw new Error(`Failed to download image: ${directErr.message}`)
+        }
       }
 
       const blob = await response.blob()

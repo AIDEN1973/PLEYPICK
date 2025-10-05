@@ -3,7 +3,7 @@ import { supabase } from './useSupabase'
 
 // LLM API 설정 (하이브리드 전략용)
 const LLM_CONFIG = {
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY,
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   maxTokens: 1000,
@@ -27,6 +27,12 @@ const CLIP_CONFIG = {
 // 개별 함수들을 export하기 위해 함수들을 밖으로 이동
 export async function analyzePartWithLLM(part) {
   try {
+    // API 키 검증
+    if (!LLM_CONFIG.apiKey || LLM_CONFIG.apiKey === 'undefined') {
+      console.warn('⚠️ OpenAI API key is missing, skipping LLM analysis')
+      return createDefaultAnalysis(part)
+    }
+    
     if (import.meta.env.DEV) {
       console.log('분석할 부품 정보:', part)
     }
