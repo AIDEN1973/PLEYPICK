@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import { useEnhancedRecognition } from './useEnhancedRecognition'
 
 // LLM API 설정 (하이브리드 전략용)
 const LLM_CONFIG = {
@@ -719,6 +720,9 @@ export function useMasterPartsPreprocessing() {
   const loading = ref(false)
   const error = ref(null)
   const processing = ref(false)
+  
+  // 향상된 인식 시스템 초기화
+  const enhancedRecognition = useEnhancedRecognition()
   const progress = ref(0)
 
   // 모든 Rebrickable 부품 수집
@@ -1267,6 +1271,12 @@ export function useMasterPartsPreprocessing() {
     buildMasterPartsDatabase,
     generateTextEmbeddingsBatch,
     checkMasterDBStatus,
-    checkExistingAnalysis
+    checkExistingAnalysis,
+    // 향상된 인식 시스템
+    enhancedRecognitionPipeline: enhancedRecognition.enhancedRecognitionPipeline,
+    processBatchRecognition: enhancedRecognition.processBatchRecognition,
+    filterByConfidence: enhancedRecognition.filterByConfidence,
+    sortByConfidence: enhancedRecognition.sortByConfidence,
+    generateStatistics: enhancedRecognition.generateStatistics
   }
 }
