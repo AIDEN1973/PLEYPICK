@@ -27,7 +27,9 @@ const CLIP_CONFIG = {
 // 개별 함수들을 export하기 위해 함수들을 밖으로 이동
 export async function analyzePartWithLLM(part) {
   try {
-    console.log('분석할 부품 정보:', part)
+    if (import.meta.env.DEV) {
+      console.log('분석할 부품 정보:', part)
+    }
     
     // 부품 정보 확인 및 정리
     const partName = part.part?.name || part.name || 'Unknown'
@@ -41,7 +43,9 @@ export async function analyzePartWithLLM(part) {
     const externalIds = part.part?.external_ids || part.external_ids || {}
     const legoPartNumber = externalIds.lego || externalIds.Lego || null
     
-    console.log('정리된 부품 정보:', { partName, partNum, partImgUrl, legoPartNumber })
+    if (import.meta.env.DEV) {
+      console.log('정리된 부품 정보:', { partName, partNum, partImgUrl, legoPartNumber })
+    }
     
     // 이미지 URL이 없으면 기본 분석만 수행
     if (!partImgUrl) {
@@ -114,12 +118,14 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
       response_format: { type: 'json_object' }
     }
 
-    console.log('API 요청 정보:', {
-      model: LLM_CONFIG.model,
-      apiKey: LLM_CONFIG.apiKey ? '설정됨' : '없음',
-      imageUrl: partImgUrl,
-      promptLength: prompt.length
-    })
+    if (import.meta.env.DEV) {
+      console.log('API 요청 정보:', {
+        model: LLM_CONFIG.model,
+        apiKey: LLM_CONFIG.apiKey ? '설정됨' : '없음',
+        imageUrl: partImgUrl,
+        promptLength: prompt.length
+      })
+    }
 
     const response = await fetch(`${LLM_CONFIG.baseUrl}/chat/completions`, {
       method: 'POST',
@@ -137,7 +143,9 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
     }
 
     const data = await response.json()
-    console.log('LLM raw response:', data)
+    if (import.meta.env.DEV) {
+      console.log('LLM raw response:', data)
+    }
     
     // 응답 구조 확인
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
@@ -789,7 +797,9 @@ export function useMasterPartsPreprocessing() {
   // 개별 부품 LLM 분석 (하이브리드 전략 A단계)
   const analyzePartWithLLM = async (part) => {
     try {
+      if (import.meta.env.DEV) {
       console.log('분석할 부품 정보:', part)
+    }
       
       // 부품 정보 확인 및 정리
       const partName = part.part?.name || part.name || 'Unknown'
@@ -882,7 +892,9 @@ export function useMasterPartsPreprocessing() {
       }
 
       const data = await response.json()
+      if (import.meta.env.DEV) {
       console.log('LLM raw response:', data)
+    }
       
       // 응답 구조 확인
       if (!data.choices || !data.choices[0] || !data.choices[0].message) {

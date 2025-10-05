@@ -3,11 +3,13 @@ import { ref } from 'vue'
 const REBRICKABLE_API_KEY = import.meta.env.VITE_REBRICKABLE_API_KEY || 'd966442dee02b69a7d05a63805216a85'
 const REBRICKABLE_BASE_URL = 'https://rebrickable.com/api/v3'
 
-// 디버깅을 위한 환경 변수 로깅
-console.log('Environment check:', {
-  VITE_REBRICKABLE_API_KEY: REBRICKABLE_API_KEY ? 'Present' : 'Missing',
-  allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
-})
+// 프로덕션 환경에서는 디버그 로그 비활성화
+if (import.meta.env.DEV) {
+  console.log('Environment check:', {
+    VITE_REBRICKABLE_API_KEY: REBRICKABLE_API_KEY ? 'Present' : 'Missing',
+    allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
+  })
+}
 
 export function useRebrickable() {
   const loading = ref(false)
