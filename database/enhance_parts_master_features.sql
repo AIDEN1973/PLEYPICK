@@ -95,7 +95,7 @@ BEGIN
     COUNT(*) FILTER (WHERE tier = 'SEMANTIC') as semantic_parts,
     COUNT(*) FILTER (WHERE orientation_sensitive = true) as orientation_sensitive_parts,
     COUNT(*) FILTER (WHERE complexity_level = 'high') as high_complexity_parts,
-    ROUND(AVG(confidence), 3) as average_confidence
+    ROUND(AVG(confidence)::numeric, 3) as average_confidence
   FROM parts_master_features;
 END;
 $$ LANGUAGE plpgsql;
