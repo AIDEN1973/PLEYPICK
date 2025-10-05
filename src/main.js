@@ -7,6 +7,7 @@ import Dashboard from './views/Dashboard.vue'
 import NewLegoRegistration from './views/NewLegoRegistration.vue'
 import SavedLegoManager from './views/SavedLegoManager.vue'
 import RealtimeDetection from './views/RealtimeDetection.vue'
+import IntegratedVisionDetection from './views/IntegratedVisionDetection.vue'
 import MasterDataBuilder from './views/MasterDataBuilder.vue'
 
 const routes = [
@@ -16,6 +17,7 @@ const routes = [
   { path: '/new-lego', name: 'NewLegoRegistration', component: NewLegoRegistration },
   { path: '/saved-lego', name: 'SavedLegoManager', component: SavedLegoManager },
   { path: '/detection', name: 'RealtimeDetection', component: RealtimeDetection },
+  { path: '/integrated-vision', name: 'IntegratedVisionDetection', component: IntegratedVisionDetection },
   { path: '/master-builder', name: 'MasterDataBuilder', component: MasterDataBuilder }
 ]
 

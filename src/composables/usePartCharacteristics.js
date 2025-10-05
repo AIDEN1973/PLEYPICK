@@ -7,7 +7,7 @@ export function usePartCharacteristics() {
   const analyzing = ref(false)
 
   // LLM API 키 (실제 환경에서는 환경변수로 관리)
-  const LLM_API_KEY = process.env.VUE_APP_OPENAI_API_KEY || 'your-openai-api-key'
+  const LLM_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || 'your-openai-api-key'
   const LLM_BASE_URL = 'https://api.openai.com/v1'
 
   // LLM API 호출 헬퍼

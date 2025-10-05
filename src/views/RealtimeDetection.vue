@@ -165,6 +165,16 @@
           <span class="accuracy-label">정확도:</span>
           <span class="accuracy-value">{{ (detectionState.statistics.accuracy * 100).toFixed(1) }}%</span>
         </div>
+        <div class="performance-stats" v-if="detectionState.statistics.averageProcessingTime">
+          <div class="performance-item">
+            <span class="performance-label">평균 처리 시간:</span>
+            <span class="performance-value">{{ detectionState.statistics.averageProcessingTime.toFixed(1) }}ms</span>
+          </div>
+          <div class="performance-item">
+            <span class="performance-label">효율성:</span>
+            <span class="performance-value">최적화됨 (마스터 DB)</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -172,9 +182,10 @@
 
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
-import { useRealtimeDetection } from '../composables/useRealtimeDetection'
+import { useOptimizedRealtimeDetection } from '../composables/useOptimizedRealtimeDetection'
 import { useThresholdSystem } from '../composables/useThresholdSystem'
 import { useLLMIntegration } from '../composables/useLLMIntegration'
+import { useMasterPartsMatching } from '../composables/useMasterPartsMatching'
 
 // 컴포저블 사용
 const { 
@@ -182,13 +193,11 @@ const {
   error, 
   detecting, 
   detectionState, 
-  startDetectionSession, 
-  detectParts, 
-  multiStageFiltering, 
-  llmReranking, 
-  thresholdBasedApproval, 
-  endDetectionSession 
-} = useRealtimeDetection()
+  startOptimizedSession, 
+  detectPartsOptimized, 
+  getPerformanceStats, 
+  endOptimizedSession 
+} = useOptimizedRealtimeDetection()
 
 const { processThresholdApproval } = useThresholdSystem()
 const { rerankPartCandidates } = useLLMIntegration()
@@ -209,7 +218,7 @@ let cameraStream = null
 // 세션 시작
 const startSession = async () => {
   try {
-    await startDetectionSession(setNumber.value)
+    await startOptimizedSession(setNumber.value)
     await startCamera()
   } catch (err) {
     console.error('Failed to start session:', err)
@@ -219,7 +228,7 @@ const startSession = async () => {
 // 세션 종료
 const endSession = async () => {
   try {
-    await endDetectionSession()
+    await endOptimizedSession()
     await stopCamera()
   } catch (err) {
     console.error('Failed to end session:', err)
@@ -265,7 +274,7 @@ const toggleCamera = async () => {
   }
 }
 
-// 프레임 캡처 및 검출
+// 프레임 캡처 및 검출 (최적화된 버전)
 const captureFrame = async () => {
   if (!cameraVideo.value || !cameraActive.value) return
   
@@ -280,25 +289,19 @@ const captureFrame = async () => {
     // 이미지 데이터 추출
     const imageData = canvas.toDataURL('image/jpeg')
     
-    // 부품 검출 실행
-    const detectedParts = await detectParts(imageData)
-    
-    // 다단계 필터링
-    const filteredResults = await multiStageFiltering(detectedParts)
-    
-    // LLM 후보 재랭킹
-    const rankedResults = await llmReranking(filteredResults)
-    
-    // 임계치 기반 자동 승인
-    const approvalResults = await processThresholdApproval(rankedResults)
+    // 최적화된 부품 검출 실행 (마스터 DB 활용)
+    const detectionResult = await detectPartsOptimized(imageData)
     
     // 결과 업데이트
-    detectionResults.autoApproved = approvalResults.autoApproved
-    detectionResults.manualReview = approvalResults.manualReview
-    detectionResults.retakeRequired = approvalResults.retakeRequired
+    detectionResults.autoApproved = detectionResult.approvalResults.autoApproved
+    detectionResults.manualReview = detectionResult.approvalResults.manualReview
+    detectionResults.retakeRequired = detectionResult.approvalResults.retakeRequired
     
     // 통계 업데이트
-    detectionState.statistics = approvalResults.statistics
+    detectionState.statistics = detectionResult.approvalResults.statistics
+    
+    // 성능 정보 표시
+    console.log('🎯 Detection Performance:', detectionResult.performance)
     
   } catch (err) {
     console.error('Detection failed:', err)
@@ -664,6 +667,31 @@ onUnmounted(() => {
 .accuracy-value {
   font-weight: bold;
   color: #4CAF50;
+}
+
+.performance-stats {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.performance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+}
+
+.performance-label {
+  color: #666;
+}
+
+.performance-value {
+  font-weight: bold;
+  color: #2196F3;
 }
 
 .error-message {

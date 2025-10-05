@@ -7,7 +7,7 @@ export function useLLMIntegration() {
 
   // LLM API 설정
   const LLM_CONFIG = {
-    apiKey: process.env.VUE_APP_OPENAI_API_KEY || 'your-openai-api-key',
+    apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'your-openai-api-key',
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
     maxTokens: 1000,

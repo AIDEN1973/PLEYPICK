@@ -38,6 +38,11 @@
           <router-link to="/detection" class="btn btn-success">검수 시작</router-link>
         </div>
         <div class="action-card">
+          <h3>통합 비전 검수</h3>
+          <p>마스터 DB와 통합된 최적화된 비전 검수 시스템을 사용하세요.</p>
+          <router-link to="/integrated-vision" class="btn btn-info">통합 검수</router-link>
+        </div>
+        <div class="action-card">
           <h3>마스터 데이터 구축</h3>
           <p>Rebrickable API에서 부품을 수집하고 LLM으로 분석하여 마스터 데이터베이스를 구축하세요.</p>
           <router-link to="/master-builder" class="btn btn-warning">데이터 구축</router-link>
@@ -283,6 +288,36 @@ export default {
 
 .btn-secondary:hover {
   background: #e9ecef;
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+}
+
+.btn-success:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+}
+
+.btn-info {
+  background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+  color: white;
+}
+
+.btn-info:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(23, 162, 184, 0.4);
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%);
+  color: white;
+}
+
+.btn-warning:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
 }
 
 @media (max-width: 768px) {
