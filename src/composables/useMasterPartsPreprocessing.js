@@ -275,6 +275,26 @@ function createTextOnlyAnalysis(part, partName, partNum) {
 export async function generateTextEmbeddingsBatch(analysisResults) {
   const results = []
 
+  // 0) 입력 데이터 중복 제거: (part_num, color_id) 조합 기준으로 중복 제거
+  const uniqueResults = []
+  const seenEmbeddingKeys = new Set()
+  
+  for (const item of analysisResults) {
+    const partNum = item.part_num || 'unknown'
+    const colorId = item.color_id !== undefined ? item.color_id : (item.color?.id !== undefined ? item.color.id : null)
+    const key = `${partNum}_${colorId}`
+    
+    if (!seenEmbeddingKeys.has(key)) {
+      seenEmbeddingKeys.add(key)
+      uniqueResults.push(item)
+    } else {
+      console.warn(`⚠️ Duplicate embedding input found for part_num=${partNum}, color_id=${colorId}, skipping`)
+    }
+  }
+  
+  console.log(`📊 Embedding input deduplication: ${analysisResults.length} -> ${uniqueResults.length} results`)
+  analysisResults = uniqueResults
+
   // 1) 기존 임베딩 보유/feature_text 누락 선분류
   const needsEmbedding = []
   for (const item of analysisResults) {
@@ -434,7 +454,27 @@ function buildEnhancedEmbeddingText({ partName, partNum, colorName, featureText,
 // 데이터베이스 저장 함수 export
 export async function saveToMasterPartsDB(analysisResults) {
   try {
-    // 0) 누락 임베딩 보충: embedding 없는 결과들만 배치 생성
+    // 0) 입력 데이터 중복 제거: (part_num, color_id) 조합 기준으로 중복 제거
+    const uniqueResults = []
+    const seenAnalysisKeys = new Set()
+    
+    for (const result of analysisResults) {
+      const partNum = result.part_num || 'unknown'
+      const colorId = result.color_id !== undefined ? result.color_id : (result.color?.id !== undefined ? result.color.id : null)
+      const key = `${partNum}_${colorId}`
+      
+      if (!seenAnalysisKeys.has(key)) {
+        seenAnalysisKeys.add(key)
+        uniqueResults.push(result)
+      } else {
+        console.warn(`⚠️ Duplicate analysis result found for part_num=${partNum}, color_id=${colorId}, skipping`)
+      }
+    }
+    
+    console.log(`📊 Input deduplication: ${analysisResults.length} -> ${uniqueResults.length} results`)
+    analysisResults = uniqueResults
+
+    // 1) 누락 임베딩 보충: embedding 없는 결과들만 배치 생성
     const missingEmb = analysisResults.filter(r => !Array.isArray(r.embedding) || r.embedding.length === 0)
     if (missingEmb.length > 0) {
       try {
@@ -499,12 +539,35 @@ export async function saveToMasterPartsDB(analysisResults) {
     })
 
     // color_id가 없는 레코드는 저장 스킵 (중복/재분석 유발 방지)
-    const records = mapped.filter(r => r.color_id !== null && r.color_id !== undefined)
-    const skipped = mapped.length - records.length
+    const validRecords = mapped.filter(r => r.color_id !== null && r.color_id !== undefined)
+    const skipped = mapped.length - validRecords.length
+
+    // 중복 제거: (part_id, color_id) 조합이 중복되는 경우 마지막 것만 유지
+    const uniqueRecords = []
+    const seenRecordKeys = new Set()
+    
+    // 역순으로 순회하여 중복된 키의 경우 마지막(최신) 레코드만 유지
+    for (let i = validRecords.length - 1; i >= 0; i--) {
+      const record = validRecords[i]
+      const key = `${record.part_id}_${record.color_id}`
+      
+      if (!seenRecordKeys.has(key)) {
+        seenRecordKeys.add(key)
+        uniqueRecords.unshift(record) // 순서 유지를 위해 unshift 사용
+      } else {
+        console.warn(`⚠️ Duplicate record found for part_id=${record.part_id}, color_id=${record.color_id}, skipping`)
+      }
+    }
+
+    const records = uniqueRecords
+    const duplicatesRemoved = validRecords.length - records.length
 
     console.log(`💾 Saving ${records.length} records to parts_master_features...`)
     if (skipped > 0) {
       console.warn(`⚠️ Skipping ${skipped} records without color_id to avoid null-color duplicates`)
+    }
+    if (duplicatesRemoved > 0) {
+      console.warn(`⚠️ Removed ${duplicatesRemoved} duplicate records to avoid constraint violations`)
     }
     
     const { data, error } = await supabase
