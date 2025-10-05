@@ -2,6 +2,8 @@ import { ref } from 'vue'
 import { usePartClassification } from './usePartClassification'
 import { useFeatureFlipComparison } from './useFeatureFlipComparison'
 import { useSemanticAnalysis } from './useSemanticAnalysis'
+import { useMultiAttributeVoting } from './useMultiAttributeVoting'
+import { useConfusionMatrix } from './useConfusionMatrix'
 
 // 통합 인식 파이프라인
 export function useEnhancedRecognition() {
@@ -13,6 +15,8 @@ export function useEnhancedRecognition() {
   const partClassification = usePartClassification()
   const featureFlipComparison = useFeatureFlipComparison()
   const semanticAnalysis = useSemanticAnalysis()
+  const multiAttributeVoting = useMultiAttributeVoting()
+  const confusionMatrix = useConfusionMatrix()
 
   // 향상된 인식 파이프라인
   const enhancedRecognitionPipeline = async (inputImage, partData) => {
@@ -58,24 +62,61 @@ export function useEnhancedRecognition() {
       )
       console.log('Flip comparison result:', flipComparison)
 
-      // 5. 향상된 유사도 계산
-      console.log('📈 Step 4: Enhanced similarity calculation...')
-      const finalConfidence = featureFlipComparison.calculateEnhancedSimilarity(
-        flipComparison,
-        enhancedMetadata
+      // 5. 멀티-어트리뷰트 투표 (새로 추가)
+      console.log('🗳️ Step 5: Multi-Attribute Voting...')
+      const votingResults = await multiAttributeVoting.performMultiAttributeVoting(inputImage, [partData])
+      const votingScore = votingResults[0]?.voting_score || { totalScore: 0 }
+
+      // 6. 혼동군 페널티 적용 (새로 추가)
+      console.log('🔍 Step 6: Applying confusion penalties...')
+      const penalizedResults = await confusionMatrix.applyConfusionPenalty(votingResults)
+      const penalizedScore = penalizedResults[0]?.confidence || 0
+
+      // 7. 향상된 유사도 계산 (개선된 버전)
+      console.log('📈 Step 7: Enhanced similarity calculation...')
+      const weights = {
+        flip: 0.3,      // Feature-space flip 비교
+        voting: 0.4,     // 멀티-어트리뷰트 투표
+        semantic: 0.2,   // 의미적 분석
+        metadata: 0.1    // 메타데이터 보정
+      }
+
+      // 각 방법별 점수 계산
+      const flipScore = flipComparison.confidence
+      const semanticScore = sculptedResult?.confidence || 0
+      const metadataBonus = calculateMetadataBonus(enhancedMetadata)
+
+      // 가중 평균으로 최종 confidence 계산
+      const finalConfidence = (
+        flipScore * weights.flip +
+        penalizedScore * weights.voting +
+        semanticScore * weights.semantic +
+        metadataBonus * weights.metadata
       )
 
-      // 6. 결과 통합
+      // 복잡도에 따른 가중치 (개선된 버전)
+      let adjustedConfidence = finalConfidence
+      if (enhancedMetadata.complexity_level === 'high') {
+        adjustedConfidence *= 0.85 // 복잡한 부품은 더 보수적으로
+      } else if (enhancedMetadata.complexity_level === 'low') {
+        adjustedConfidence *= 1.1 // 단순한 부품은 더 자신감 있게
+      }
+
+      // 8. 결과 통합 (개선된 버전)
       const result = {
-        confidence: finalConfidence,
+        confidence: Math.min(adjustedConfidence, 1.0),
         isFlipped: flipComparison.isFlipped,
         orientation_locked: enhancedMetadata.orientation_sensitive,
-        method: flipComparison.method,
+        method: 'enhanced_multi_attribute',
         tier: tierClassification.tier,
         metadata: enhancedMetadata,
         flipSignals: flipComparison.flipSignals,
         normalSimilarity: flipComparison.normal,
-        flippedSimilarity: flipComparison.flipped
+        flippedSimilarity: flipComparison.flipped,
+        votingScore: votingScore,
+        penalizedScore: penalizedScore,
+        confusionPenalty: penalizedResults[0]?.confusion_penalty || 0,
+        weights: weights
       }
 
       console.log('✅ Enhanced recognition completed:', result)
@@ -194,6 +235,25 @@ export function useEnhancedRecognition() {
     }
   }
 
+  // 메타데이터 보너스 계산 (새로 추가)
+  const calculateMetadataBonus = (metadata) => {
+    let bonus = 0
+    
+    // 핵심 특징 일치 보너스
+    if (metadata.has_stud) bonus += 0.1
+    if (metadata.groove) bonus += 0.1
+    if (metadata.center_stud) bonus += 0.15
+    
+    // 복잡도에 따른 보너스
+    if (metadata.complexity_level === 'high') bonus += 0.05
+    if (metadata.complexity_level === 'low') bonus += 0.1
+    
+    // 회전 불변 특징 보너스
+    if (metadata.rotation_invariance) bonus += 0.05
+    
+    return Math.min(bonus, 0.3) // 최대 0.3 보너스
+  }
+
   return {
     loading,
     error,
@@ -202,6 +262,7 @@ export function useEnhancedRecognition() {
     processBatchRecognition,
     filterByConfidence,
     sortByConfidence,
-    generateStatistics
+    generateStatistics,
+    calculateMetadataBonus
   }
 }

@@ -110,9 +110,47 @@ export function usePartClassification() {
     }
   }
 
-  // 향상된 메타데이터 생성
+  // 향상된 메타데이터 생성 (개선된 버전 - 회전/반전 불변 특징 수학적 명시)
   const generateEnhancedMetadata = (partData, tierClassification) => {
     const complexity = analyzePartComplexity(partData)
+    const partName = partData.name?.toLowerCase() || ''
+    const partNum = partData.part_num || ''
+    
+    // 회전/반전 불변 특징 (새로 추가)
+    let rotationInvariance = false
+    let angleStep = 0 // 회전 단위 (도)
+    let polarTransform = false // 극좌표 변환 필요 여부
+    let radialProfile = false // 방사형 프로파일 분석 필요 여부
+    let teethCount = 0 // 톱니 개수 (기어용)
+    let pitchPeriodicity = false // 피치 주기성
+    let circularArray = false // 원형 배열 (핀/커넥터용)
+    
+    // Tier별 회전/반전 불변 특징 설정
+    switch (tierClassification.tier) {
+      case 'STRUCTURAL':
+        rotationInvariance = true
+        angleStep = 5 // 5도 단위 회전 허용
+        polarTransform = true // 극좌표 변환 필요
+        radialProfile = true // 방사형 프로파일 분석 필요
+        
+        // 기어 특화 특징
+        if (/(gear|wheel)/i.test(partName)) {
+          teethCount = extractTeethCount(partName, partNum)
+          pitchPeriodicity = true
+        }
+        
+        // 핀/커넥터 특화 특징
+        if (/(pin|connector|axle)/i.test(partName)) {
+          circularArray = true
+        }
+        break
+      case 'GEOMETRY':
+        rotationInvariance = false
+        break
+      case 'SEMANTIC':
+        rotationInvariance = false // 조형형은 회전 불변하지 않음
+        break
+    }
     
     return {
       part_id: partData.part_num,
@@ -126,8 +164,25 @@ export function usePartClassification() {
       key_features: extractKeyFeatures(partData),
       flip_tolerance: tierClassification.flip_tolerance,
       confidence_threshold: getConfidenceThreshold(tierClassification.tier),
-      complexity_level: complexity.level
+      complexity_level: complexity.level,
+      
+      // 회전/반전 불변 특징 (새로 추가)
+      rotation_invariance: rotationInvariance,
+      angle_step: angleStep,
+      polar_transform: polarTransform,
+      radial_profile: radialProfile,
+      teeth_count: teethCount,
+      pitch_periodicity: pitchPeriodicity,
+      circular_array: circularArray
     }
+  }
+  
+  // 톱니 개수 추출 (기어용)
+  const extractTeethCount = (partName, partNum) => {
+    // 실제 구현에서는 부품명/번호에서 톱니 개수 추출
+    // 예: "8 Tooth Gear" -> 8, "Gear 24" -> 24
+    const teethMatch = partName.match(/(\d+)\s*tooth/i) || partNum.match(/(\d+)/)
+    return teethMatch ? parseInt(teethMatch[1]) : 0
   }
 
   // 주요 특징 추출

@@ -28,10 +28,64 @@ ADD COLUMN IF NOT EXISTS flipped_similarity DECIMAL(3,2) DEFAULT 0.0,
 ADD COLUMN IF NOT EXISTS semantic_score DECIMAL(3,2) DEFAULT 0.0,
 ADD COLUMN IF NOT EXISTS method VARCHAR(50) DEFAULT 'geometric';
 
--- 5. 인덱스 추가 (성능 최적화)
+-- 5. 회전/반전 불변 특징 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS rotation_invariance BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS angle_step INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS polar_transform BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS radial_profile BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS teeth_count INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS pitch_periodicity BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS circular_array BOOLEAN DEFAULT false;
+
+-- 6. 멀티-어트리뷰트 투표 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS round_shape_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS center_stud_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS groove_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS stud_count_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS tube_pattern_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS hole_count_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS symmetry_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS edge_quality_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS texture_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS color_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS pattern_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS voting_total_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS core_matches INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS core_bonus DECIMAL(3,2) DEFAULT 0.0;
+
+-- 7. 혼동군 페널티 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS confusion_penalty DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS applied_penalties JSONB DEFAULT '[]',
+ADD COLUMN IF NOT EXISTS confusion_groups TEXT[] DEFAULT '{}';
+
+-- 8. 향상된 메타데이터 JSON 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS feature_json JSONB DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS aliases TEXT[] DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS expected_stud_count INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS expected_hole_count INTEGER DEFAULT 0,
+ADD COLUMN IF NOT EXISTS underside_tube_pattern VARCHAR(50) DEFAULT '',
+ADD COLUMN IF NOT EXISTS primary_signal VARCHAR(50) DEFAULT '';
+
+-- 9. 품질 지표 컬럼 추가
+ALTER TABLE parts_master_features 
+ADD COLUMN IF NOT EXISTS precision_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS recall_score DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS top2_margin DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS review_ratio DECIMAL(3,2) DEFAULT 0.0,
+ADD COLUMN IF NOT EXISTS last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+-- 10. 인덱스 추가 (성능 최적화)
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_tier ON parts_master_features(tier);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_orientation_sensitive ON parts_master_features(orientation_sensitive);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_complexity ON parts_master_features(semantic_complexity);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_rotation_invariance ON parts_master_features(rotation_invariance);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_voting_score ON parts_master_features(voting_total_score);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_confusion_penalty ON parts_master_features(confusion_penalty);
+CREATE INDEX IF NOT EXISTS idx_parts_master_features_last_updated ON parts_master_features(last_updated);
 CREATE INDEX IF NOT EXISTS idx_parts_master_features_method ON parts_master_features(method);
 
 -- 6. 기존 데이터 업데이트 (기본값 설정)

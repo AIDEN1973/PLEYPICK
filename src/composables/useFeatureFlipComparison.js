@@ -27,36 +27,41 @@ export function useFeatureFlipComparison() {
     return flippedEmbedding
   }
 
-  // 뒤집힘 신호 탐지
+  // 뒤집힘 신호 탐지 (개선된 버전 - 튜브/홀 패턴 우선)
   const detectFlipSignals = async (imageUrl) => {
     try {
-      // 이미지 분석을 통한 뒤집힘 신호 탐지
+      // 이미지 분석을 통한 뒤집힘 신호 탐지 (우선순위: 튜브/홀 > 엣지 > 밝기)
       const signals = {
-        brightness_pattern: await analyzeBrightnessPattern(imageUrl),
+        tube_hole_pattern: await detectTubeHolePattern(imageUrl),
         edge_orientation: await analyzeEdgeOrientation(imageUrl),
+        brightness_pattern: await analyzeBrightnessPattern(imageUrl),
         symmetry_score: await calculateSymmetryScore(imageUrl),
         stud_pattern: await detectStudPattern(imageUrl)
       }
       
-      // 뒤집힘 점수 계산 (0-1)
+      // 개선된 뒤집힘 점수 계산 (튜브/홀 패턴 우선)
       const flipScore = (
-        signals.brightness_pattern * 0.3 +
-        signals.edge_orientation * 0.3 +
-        signals.symmetry_score * 0.2 +
-        signals.stud_pattern * 0.2
+        signals.tube_hole_pattern * 0.5 +  // 튜브/홀 패턴 우선
+        signals.edge_orientation * 0.25 +   // 엣지 방향
+        signals.brightness_pattern * 0.15 + // 밝기 패턴 (의존성 감소)
+        signals.symmetry_score * 0.05 +     // 대칭성
+        signals.stud_pattern * 0.05         // 스터드 패턴
       )
       
       return {
         is_flipped_candidate: flipScore > 0.5,
         flip_score: flipScore,
-        signals: signals
+        signals: signals,
+        primary_signal: signals.tube_hole_pattern > 0.3 ? 'tube_hole' : 
+                        signals.edge_orientation > 0.4 ? 'edge' : 'brightness'
       }
     } catch (err) {
       console.error('Flip signal detection failed:', err)
       return {
         is_flipped_candidate: false,
         flip_score: 0,
-        signals: {}
+        signals: {},
+        primary_signal: 'none'
       }
     }
   }
@@ -77,6 +82,13 @@ export function useFeatureFlipComparison() {
   // 대칭성 점수 계산
   const calculateSymmetryScore = async (imageUrl) => {
     // 실제 구현에서는 대칭성 분석 알고리즘 사용
+    return Math.random() * 0.5 + 0.3
+  }
+
+  // 튜브/홀 패턴 감지 (새로 추가)
+  const detectTubeHolePattern = async (imageUrl) => {
+    // 실제 구현에서는 튜브/홀 감지 알고리즘 사용
+    // HoughCircles, 원형 감지, 홀 패턴 분석
     return Math.random() * 0.5 + 0.3
   }
 
