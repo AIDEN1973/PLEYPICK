@@ -5,7 +5,7 @@ export function useConfusionMatrix() {
   const loading = ref(false)
   const error = ref(null)
 
-  // 혼동군 정의 및 페널티 매트릭스
+  // 혼동군 정의 및 페널티 매트릭스 (현재 데이터셋 기반 업데이트)
   const confusionMatrix = {
     // 2x2 관련 혼동군
     '3023': { // 2x2 Plate
@@ -15,38 +15,88 @@ export function useConfusionMatrix() {
     },
     '2412b': { // 2x2 Tile
       '3023': 0.15,  // 2x2 Plate
+      '18674': 0.18, // 2x2 Jumper
       '3068b': 0.10  // 2x2 Round Plate
     },
     '18674': { // 2x2 Jumper
       '3023': 0.20,  // 2x2 Plate
-      '3068b': 0.15  // 2x2 Round Plate
+      '2412b': 0.18, // 2x2 Tile
+      '3068b': 0.12  // 2x2 Round Plate
     },
     '3068b': { // 2x2 Round Plate
       '3023': 0.10,  // 2x2 Plate
       '2412b': 0.10, // 2x2 Tile
-      '18674': 0.15  // 2x2 Jumper
+      '18674': 0.12  // 2x2 Jumper
     },
 
-    // 1x2 관련 혼동군
-    '3023': { // 1x2 Plate
-      '3069b': 0.12, // 1x2 Tile
-      '18651': 0.18  // 1x2 Jumper
+    // Structural-tier 혼동군
+    '65768': { // Propeller 3 Blade
+      '63965': 0.15, // Bar 6L with Stop Ring
+      '44865': 0.10  // Brick Special with Pin
     },
-    '3069b': { // 1x2 Tile
-      '3023': 0.12,  // 1x2 Plate
-      '18651': 0.15  // 1x2 Jumper
+    '63965': { // Bar 6L with Stop Ring
+      '65768': 0.15, // Propeller 3 Blade
+      '44865': 0.12  // Brick Special with Pin
+    },
+    '44865': { // Brick Special with Pin
+      '65768': 0.10, // Propeller 3 Blade
+      '63965': 0.12  // Bar 6L with Stop Ring
     },
 
-    // 기어 관련 혼동군
-    '3647': { // 8 Tooth Gear
-      '3648': 0.25,  // 16 Tooth Gear
-      '3650': 0.30,  // 24 Tooth Gear
-      '3651': 0.20   // 40 Tooth Gear
+    // Semantic-tier 혼동군 (동물)
+    '49579pr0004': { // Animal, Dolphin
+      '69901pr0039': 0.25, // Animal, Dog Pup
+      '33121': 0.20  // Animal, Crab
     },
-    '3648': { // 16 Tooth Gear
-      '3647': 0.25,  // 8 Tooth Gear
-      '3650': 0.20,  // 24 Tooth Gear
-      '3651': 0.15   // 40 Tooth Gear
+    '69901pr0039': { // Animal, Dog Pup
+      '49579pr0004': 0.25, // Animal, Dolphin
+      '33121': 0.18  // Animal, Crab
+    },
+    '33121': { // Animal, Crab
+      '49579pr0004': 0.20, // Animal, Dolphin
+      '69901pr0039': 0.18  // Animal, Dog Pup
+    },
+
+    // Semantic-tier 혼동군 (식물)
+    '2682': { // Plant, Fern
+      '24866': 0.20, // Plant, Flower
+      '32607': 0.15  // Plant, Plate
+    },
+    '24866': { // Plant, Flower
+      '2682': 0.20,  // Plant, Fern
+      '32607': 0.18  // Plant, Plate
+    },
+    '32607': { // Plant, Plate
+      '2682': 0.15,  // Plant, Fern
+      '24866': 0.18  // Plant, Flower
+    },
+
+    // Semantic-tier 혼동군 (음식)
+    '33078': { // Food Hot Dog
+      '25386': 0.30, // Food Hot Dog Bun
+      '11610': 0.15  // Cone Ice Cream
+    },
+    '25386': { // Food Hot Dog Bun
+      '33078': 0.30, // Food Hot Dog
+      '11610': 0.12  // Cone Ice Cream
+    },
+    '11610': { // Cone Ice Cream
+      '33078': 0.15, // Food Hot Dog
+      '25386': 0.12  // Food Hot Dog Bun
+    },
+
+    // 프린트 부품 혼동군
+    '3069bpr9942': { // Tile with Gold Ticket
+      '3005pr0033': 0.25, // Brick with Orange Sun
+      '14769pr1070': 0.20  // Tile with Pizza Print
+    },
+    '3005pr0033': { // Brick with Orange Sun
+      '3069bpr9942': 0.25, // Tile with Gold Ticket
+      '14769pr1070': 0.18  // Tile with Pizza Print
+    },
+    '14769pr1070': { // Tile with Pizza Print
+      '3069bpr9942': 0.20, // Tile with Gold Ticket
+      '3005pr0033': 0.18  // Brick with Orange Sun
     },
 
     // 슬로프 관련 혼동군

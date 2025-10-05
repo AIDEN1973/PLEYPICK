@@ -1,10 +1,11 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
 import { useEnhancedRecognition } from './useEnhancedRecognition'
+import { usePartClassification } from './usePartClassification'
 
 // LLM API 설정 (하이브리드 전략용)
 const LLM_CONFIG = {
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY || 'sk-your-actual-openai-api-key-here',
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   baseUrl: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
   maxTokens: 1000,
@@ -15,7 +16,12 @@ const LLM_CONFIG = {
 console.log('🔍 Environment Debug:', {
   VITE_OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
   apiKey: LLM_CONFIG.apiKey ? 'Present' : 'Missing',
-  allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
+  allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_')),
+  // 추가 디버깅 정보
+  importMetaEnv: import.meta.env,
+  nodeEnv: import.meta.env.MODE,
+  dev: import.meta.env.DEV,
+  prod: import.meta.env.PROD
 })
 
 // 하이브리드 설정: 1차(4o-mini) 결과가 모호하면 2차(4.1-mini)로 보강
@@ -71,45 +77,30 @@ export async function analyzePartWithLLM(part) {
       return createTextOnlyAnalysis(part, partName, partNum)
     }
     
-    const prompt = `다음 레고 부품을 분석하여 JSON 형태로만 응답하세요. 다른 설명 없이 JSON만 반환하세요.
+    const prompt = `Analyze LEGO part ${partName} (${partNum}) and return JSON:
 
-부품 정보:
-- 부품명: ${partName}
-- 부품 번호: ${partNum}
-${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
- - 색상: ${colorName}${colorId !== null ? ` (ID: ${colorId})` : ''}
- ${elementId ? `- 엘리먼트 ID: ${elementId}` : ''}
-
-응답 형식:
 {
-  "shape": "부품의 기본 형태",
+  "shape": "basic shape",
   "center_stud": true/false,
   "groove": true/false,
-  "connection": "연결 방식",
-  "function": "주요 기능",
-  "feature_text": "부품 특징을 설명하는 텍스트",
+  "connection": "connection type",
+  "function": "main function",
+  "feature_text": "brief description",
   "recognition_hints": {
-    "top_view": "위에서 본 모습",
-    "side_view": "옆에서 본 모습",
-    "unique_features": ["고유 특징들"]
+    "top_view": "top view description",
+    "side_view": "side view description",
+    "unique_features": ["key features"]
   },
-  "similar_parts": ["유사한 부품 번호들"],
-  "distinguishing_features": ["구별되는 특징들"],
+  "similar_parts": ["similar part numbers"],
+  "distinguishing_features": ["distinguishing features"],
   "stud_count_top": 0,
   "tube_count_bottom": 0,
   "size_category": "duplo|system|minifig|technic",
-  "keypoints": ["식별에 중요한 형상 포인트(모서리, 슬롯, 홈, 핀 위치 등)"],
-  "confusions": ["혼동되기 쉬운 유사 부품 번호들"],
-  "color_expectation": "이미지상 색상 관찰 요약 (빛/각도 영향 배제)",
+  "keypoints": ["important shape points"],
+  "confusions": ["confusing similar parts"],
+  "color_expectation": "observed color summary",
   "confidence": 0.95
-}
-
-신뢰도(confidence) 기준:
-- 0.9-1.0: 매우 명확한 부품 (기본 블록, 플레이트 등)
-- 0.7-0.9: 비교적 명확한 부품 (특수 부품, 장식 요소)
-- 0.5-0.7: 애매한 부품 (복잡한 형태, 인쇄가 있는 부품)
-- 0.3-0.5: 불확실한 부품 (이미지가 흐리거나 각도가 나쁨)
-- 0.0-0.3: 분석 불가능 (이미지 없음 또는 너무 흐림)`
+}`
 
     const requestBody = {
       model: LLM_CONFIG.model,
@@ -157,6 +148,68 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 오류 응답:', errorText)
+      
+      // Rate limit 대응 (개선된 버전)
+      if (response.status === 429) {
+        const errorData = JSON.parse(errorText)
+        
+        // retry_after 헤더 우선 확인, 없으면 응답에서 추출
+        const retryAfterHeader = response.headers.get('retry-after')
+        const retryAfterFromError = errorData.error?.retry_after
+        const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader) : (retryAfterFromError || 60)
+        
+        // 최소 60초, 최대 300초 대기
+        const waitTime = Math.min(Math.max(retryAfter, 60), 300)
+        console.warn(`⏳ Rate limit exceeded. Waiting ${waitTime} seconds...`)
+        await new Promise(resolve => setTimeout(resolve, waitTime * 1000))
+        
+        // 재시도
+        const retryResponse = await fetch(`${LLM_CONFIG.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LLM_CONFIG.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        })
+        
+        if (!retryResponse.ok) {
+          const retryErrorText = await retryResponse.text()
+          throw new Error(`LLM API Error (retry failed): ${retryResponse.status} - ${retryErrorText}`)
+        }
+        
+        // 재시도 성공 시 응답 처리
+        const retryData = await retryResponse.json()
+        if (!retryData.choices || !retryData.choices[0] || !retryData.choices[0].message) {
+          console.error('재시도 응답 구조 오류:', retryData)
+          return null
+        }
+        
+        let retryParsed
+        try {
+          retryParsed = JSON.parse(retryData.choices[0].message.content)
+        } catch (e) {
+          const retryLlmResponse = retryData.choices[0].message.content || ''
+          let retryJsonText = retryLlmResponse
+          const retryJsonBlockMatch = retryLlmResponse.match(/```json\s*([\s\S]*?)\s*```/)
+          if (retryJsonBlockMatch) {
+            retryJsonText = retryJsonBlockMatch[1].trim()
+          } else {
+            const retryJsonObjectMatch = retryLlmResponse.match(/\{[\s\S]*\}/)
+            if (retryJsonObjectMatch) retryJsonText = retryJsonObjectMatch[0]
+          }
+          try {
+            retryParsed = JSON.parse(retryJsonText)
+          } catch (err) {
+            console.error('재시도 JSON 파싱 실패:', err)
+            return null
+          }
+        }
+        
+        retryParsed.part_num = partNum
+        return retryParsed
+      }
+      
       throw new Error(`LLM API Error: ${response.status} - ${errorText}`)
     }
 
@@ -197,11 +250,47 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
     // 1차 결과
     parsed.part_num = partNum
 
+    // 메타데이터 정규화(형식 보정 및 필수 필드 보존)
+    const normalizeArray = (v) => Array.isArray(v) ? v : (v ? [v] : [])
+    const toBoolean = (v) => typeof v === 'boolean' ? v : (String(v).toLowerCase() === 'true')
+    const toNumber = (v) => {
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    }
+    const normalizeAnalysis = (obj) => {
+      const normalized = { ...obj }
+      normalized.shape = typeof obj.shape === 'string' ? obj.shape : (obj.shape?.toString?.() || '')
+      normalized.center_stud = toBoolean(obj.center_stud ?? false)
+      normalized.groove = toBoolean(obj.groove ?? false)
+      normalized.connection = typeof obj.connection === 'string' ? obj.connection : (obj.connection?.toString?.() || 'unknown')
+      normalized.function = typeof obj.function === 'string' ? obj.function : (obj.function?.toString?.() || 'unknown')
+      normalized.feature_text = typeof obj.feature_text === 'string' ? obj.feature_text : (obj.feature_text?.toString?.() || '')
+      normalized.recognition_hints = {
+        ...(obj.recognition_hints || {}),
+        top_view: obj.recognition_hints?.top_view ?? '',
+        side_view: obj.recognition_hints?.side_view ?? '',
+        unique_features: normalizeArray(obj.recognition_hints?.unique_features)
+      }
+      normalized.similar_parts = normalizeArray(obj.similar_parts)
+      normalized.distinguishing_features = normalizeArray(obj.distinguishing_features)
+      normalized.keypoints = normalizeArray(obj.keypoints)
+      normalized.confusions = normalizeArray(obj.confusions)
+      normalized.color_expectation = (typeof obj.color_expectation === 'string' ? obj.color_expectation : (obj.color_expectation?.toString?.() || null))
+      normalized.stud_count_top = toNumber(obj.stud_count_top)
+      normalized.tube_count_bottom = toNumber(obj.tube_count_bottom)
+      return normalized
+    }
+    parsed = normalizeAnalysis(parsed)
+
     // 하이브리드 보강 트리거: 낮은 confidence(<0.8), feature_text 짧음(<40자), key 필드 누락 시
     const needRefine = HYBRID_CONFIG.enabled && (
       (typeof parsed.confidence === 'number' && parsed.confidence < 0.8) ||
       (!parsed.feature_text || String(parsed.feature_text).length < 40) ||
-      !parsed.recognition_hints || !parsed.distinguishing_features || !parsed.similar_parts
+      !parsed.recognition_hints || !parsed.distinguishing_features || !parsed.similar_parts ||
+      (Array.isArray(parsed.keypoints) ? parsed.keypoints.length === 0 : true) ||
+      (Array.isArray(parsed.confusions) ? parsed.confusions.length === 0 : true) ||
+      (parsed.stud_count_top === null) || (parsed.tube_count_bottom === null) ||
+      (!parsed.color_expectation)
     )
 
     if (!needRefine) return parsed
@@ -234,14 +323,21 @@ ${legoPartNumber ? `- 레고 공식 부품번호: ${legoPartNumber}` : ''}
       return parsed
     }
 
-    // 병합: 2차 값이 있으면 우선, 없으면 1차 유지
-    const merged = {
+    // 병합: 2차 값이 있으면 우선, 없으면 1차 유지 + 정규화 보존
+    const mergedRaw = {
       ...parsed,
       ...refined,
       recognition_hints: { ...(parsed.recognition_hints || {}), ...(refined.recognition_hints || {}) },
       similar_parts: Array.isArray(refined?.similar_parts) && refined.similar_parts.length > 0 ? refined.similar_parts : parsed.similar_parts,
-      distinguishing_features: Array.isArray(refined?.distinguishing_features) && refined.distinguishing_features.length > 0 ? refined.distinguishing_features : parsed.distinguishing_features
+      distinguishing_features: Array.isArray(refined?.distinguishing_features) && refined.distinguishing_features.length > 0 ? refined.distinguishing_features : parsed.distinguishing_features,
+      keypoints: Array.isArray(refined?.keypoints) && refined.keypoints.length > 0 ? refined.keypoints : parsed.keypoints,
+      confusions: Array.isArray(refined?.confusions) && refined.confusions.length > 0 ? refined.confusions : parsed.confusions,
+      stud_count_top: (refined?.stud_count_top ?? parsed.stud_count_top),
+      tube_count_bottom: (refined?.tube_count_bottom ?? parsed.tube_count_bottom),
+      color_expectation: (refined?.color_expectation ?? parsed.color_expectation)
     }
+
+    const merged = normalizeAnalysis(mergedRaw)
     merged.part_num = partNum
     return merged
     
@@ -325,6 +421,13 @@ export async function generateTextEmbeddingsBatch(analysisResults) {
   const needsEmbedding = []
   for (const item of analysisResults) {
     const partNum = item.part_num || 'unknown'
+    
+    // part_id가 'unknown'인 경우 스킵
+    if (partNum === 'unknown' || partNum === 'Unknown') {
+      console.warn(`⚠️ Skipping embedding for unknown part_num: ${partNum}`)
+      continue
+    }
+    
     if (item.has_embedding === true) {
       console.log(`⏭️ Skipping embedding for ${partNum} - already has embedding`)
       results.push({ part_num: partNum, embedding: item.existing_embedding || null, feature_text: item.feature_text })
@@ -487,6 +590,13 @@ export async function saveToMasterPartsDB(analysisResults) {
     for (const result of analysisResults) {
       const partNum = result.part_num || 'unknown'
       const colorId = result.color_id !== undefined ? result.color_id : (result.color?.id !== undefined ? result.color.id : null)
+      
+      // part_id가 null이거나 'unknown'인 경우 스킵
+      if (!partNum || partNum === 'unknown' || partNum === 'Unknown') {
+        console.warn(`⚠️ Skipping result with invalid part_num: ${partNum}`)
+        continue
+      }
+      
       const key = `${partNum}_${colorId}`
       
       if (!seenAnalysisKeys.has(key)) {
@@ -520,11 +630,21 @@ export async function saveToMasterPartsDB(analysisResults) {
       }
     }
 
+    // 분류기 초기화 (Tier/메타데이터 산출)
+    const classifier = usePartClassification()
+
     // color_id 확정: result.color_id 또는 result.color?.id에서 추출, 없으면 저장 스킵
     const mapped = analysisResults.map(result => {
       const resolvedColorId = (result.color_id !== undefined && result.color_id !== null)
         ? result.color_id
         : (result.color?.id !== undefined ? result.color.id : null)
+
+      const partName = result.part?.name || result.name || ''
+      const partNum = result.part_num || result.part?.part_num || ''
+
+      // Tier 분류 및 향상 메타데이터 계산
+      const tierClassification = classifier.classifyPartTier({ name: partName, part_num: partNum })
+      const enhancedMetadata = classifier.generateEnhancedMetadata({ name: partName, part_num: partNum }, tierClassification)
 
       // 태그 정규화 + CLIP 스타일 문구 변환
       const normalizedShape = normalizeShapeTag(result.shape)
@@ -540,6 +660,10 @@ export async function saveToMasterPartsDB(analysisResults) {
         part_name: result.part?.name || 'Unknown',
         part_category: result.part?.part_cat_id || null,
         color_id: resolvedColorId,
+        // 3-Tier 운영 컬럼 저장 (통계/운영용)
+        tier: tierClassification.tier,
+        orientation_sensitive: tierClassification.orientation_sensitive,
+        complexity_level: enhancedMetadata.complexity_level,
         feature_json: {
           shape: result.shape,
           center_stud: result.center_stud,
@@ -549,6 +673,11 @@ export async function saveToMasterPartsDB(analysisResults) {
           recognition_hints: result.recognition_hints,
           similar_parts: result.similar_parts,
           distinguishing_features: result.distinguishing_features,
+          keypoints: result.keypoints || [],
+          confusions: result.confusions || [],
+          stud_count_top: (typeof result.stud_count_top === 'number' ? result.stud_count_top : null),
+          tube_count_bottom: (typeof result.tube_count_bottom === 'number' ? result.tube_count_bottom : null),
+          color_expectation: result.color_expectation || null,
           shape_tag: normalizedShape,
           function_tag: normalizedFunction,
           clip_distinguishing: clipDistinguishing,
@@ -765,8 +894,12 @@ export function useMasterPartsPreprocessing() {
     }
   }
 
-  // 부품별 LLM 분석 (배치 처리)
-  const analyzePartsBatch = async (parts, batchSize = 10) => {
+  // Rate Limit 상태 추적
+  let rateLimitCount = 0
+  let lastRateLimitTime = 0
+  
+  // 부품별 LLM 분석 (배치 처리 - Rate Limit 대응)
+  const analyzePartsBatch = async (parts, batchSize = 2) => {
     processing.value = true
     error.value = null
     progress.value = 0
@@ -774,12 +907,31 @@ export function useMasterPartsPreprocessing() {
     try {
       const results = []
       const errors = []
+      
+      // Rate Limit 상태에 따른 동적 조정
+      const currentTime = Date.now()
+      const timeSinceLastRateLimit = currentTime - lastRateLimitTime
+      
+      let DELAY_BETWEEN_BATCHES = 10000 // 기본 10초
+      let DELAY_BETWEEN_REQUESTS = 2000  // 기본 2초
+      
+      // 최근 Rate Limit 발생 시 더 긴 지연
+      if (rateLimitCount > 0 && timeSinceLastRateLimit < 300000) { // 5분 이내
+        DELAY_BETWEEN_BATCHES = 30000 // 30초
+        DELAY_BETWEEN_REQUESTS = 5000  // 5초
+        console.warn(`⚠️ Rate limit detected recently, using extended delays: ${DELAY_BETWEEN_BATCHES}ms batches, ${DELAY_BETWEEN_REQUESTS}ms requests`)
+      }
 
       for (let i = 0; i < parts.length; i += batchSize) {
         const batch = parts.slice(i, i + batchSize)
         console.log(`Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(parts.length / batchSize)}`)
 
         const batchPromises = batch.map(async (part, index) => {
+          // 요청 간 지연
+          if (index > 0) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_REQUESTS))
+          }
+          
           try {
             const analysis = await analyzePartWithLLM(part)
             if (analysis === null) {
@@ -789,6 +941,14 @@ export function useMasterPartsPreprocessing() {
             return { part, analysis, success: true }
           } catch (err) {
             console.error(`Failed to analyze part ${part.part_num}:`, err)
+            
+            // Rate Limit 에러 추적
+            if (err.message.includes('429') || err.message.includes('rate_limit')) {
+              rateLimitCount++
+              lastRateLimitTime = Date.now()
+              console.warn(`🚨 Rate limit error #${rateLimitCount} detected for part ${part.part_num}`)
+            }
+            
             return { part, error: err.message, success: false }
           }
         })
@@ -804,6 +964,12 @@ export function useMasterPartsPreprocessing() {
           } else {
             errors.push(result)
           }
+        }
+
+        // 배치 간 지연 (마지막 배치 제외)
+        if (i + batchSize < parts.length) {
+          console.log(`⏳ Waiting ${DELAY_BETWEEN_BATCHES/1000}s before next batch... (Rate limit count: ${rateLimitCount})`)
+          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES))
         }
 
         // 진행률 업데이트
@@ -833,6 +999,12 @@ export function useMasterPartsPreprocessing() {
       const partName = part.part?.name || part.name || 'Unknown'
       const partNum = part.part_num || part.part?.part_num || 'Unknown'
       const partImgUrl = part.part?.part_img_url || part.part_img_url || null
+      
+      // part_id가 'Unknown'인 경우 스킵
+      if (partNum === 'Unknown') {
+        console.warn(`⚠️ Skipping part with unknown part_num: ${partName}`)
+        return null
+      }
       
       console.log('정리된 부품 정보:', { partName, partNum, partImgUrl })
       

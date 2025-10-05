@@ -27,15 +27,26 @@ export function usePartClassification() {
     }
   }
 
-  // 부품 유형 분류
+  // 부품 유형 분류 (개선된 버전 - 프린트 부품 혼합 가중치)
   const classifyPartTier = (partData) => {
     const partName = partData.name?.toLowerCase() || ''
     const partNum = partData.part_num || ''
     
-    // 조형형 부품 키워드 감지
+    // 프린트 부품 감지
+    const hasPrint = partName.includes('print') || partName.includes('decorated') || 
+                     partNum.includes('pr') || partNum.includes('pb')
+    
+    // 조형형 부품 키워드 감지 (확장된 버전)
     const sculptedKeywords = [
       'head', 'face', 'lion', 'animal', 'figure', 'sculpted', 
-      'curved', 'slope', 'decorative', 'print', 'pattern'
+      'curved', 'slope', 'decorative', 'print', 'pattern',
+      'dolphin', 'dog', 'crab', 'fern', 'flower', 'plant',
+      'hot dog', 'bun', 'food', 'equipment', 'shovel', 'oar',
+      'umbrella', 'glasses', 'goblet', 'glass', 'windscreen',
+      'surfboard', 'shuttle', 'tail', 'swirled', 'poo',
+      'cone', 'ice cream', 'pizza', 'ticket', 'globe', 'sun',
+      'goblet', 'glass', 'windscreen', 'umbrella', 'glasses',
+      'shuttle', 'tail', 'swirled', 'poo', 'star', 'stud holder'
     ]
     
     const isSculpted = sculptedKeywords.some(keyword => 
@@ -47,13 +58,20 @@ export function usePartClassification() {
         tier: 'SEMANTIC',
         confidence: 0.9,
         orientation_sensitive: true,
-        flip_tolerance: 0.1
+        flip_tolerance: 0.1,
+        printed_subtype: hasPrint
       }
     }
     
-    // 구조형 부품 키워드 감지
+    // 구조형 부품 키워드 감지 (확장된 버전)
     const structuralKeywords = [
-      'technic', 'gear', 'axle', 'pin', 'connector', 'mechanism'
+      'technic', 'gear', 'axle', 'pin', 'connector', 'mechanism',
+      'propeller', 'blade', 'bar', 'stop', 'ring', 'special',
+      'stud holder', 'clip', 'vertical', 'hollow', 'stud',
+      'lever', 'base', 'handle', 'reinforced', 'equipment',
+      'separator', 'bucket', 'handle', 'oar', 'paddle',
+      'shovel', 'goblet', 'glass', 'windscreen', 'umbrella',
+      'glasses', 'accessory', 'door frame', 'storage case'
     ]
     
     const isStructural = structuralKeywords.some(keyword => 
@@ -65,48 +83,80 @@ export function usePartClassification() {
         tier: 'STRUCTURAL',
         confidence: 0.8,
         orientation_sensitive: false,
-        flip_tolerance: 0.3
+        flip_tolerance: 0.3,
+        printed_subtype: hasPrint
       }
     }
     
-    // 기본형 부품 (기하학적)
+    // 기본형 부품 (기하학적) - 프린트 부품은 혼합 가중치 적용
+    if (hasPrint) {
+      return {
+        tier: 'GEOMETRY',
+        confidence: 0.7,
+        orientation_sensitive: true,
+        flip_tolerance: 0.4,
+        printed_subtype: true,
+        mixed_weights: { geometry: 0.6, semantic: 0.4 }
+      }
+    }
+    
     return {
       tier: 'GEOMETRY',
       confidence: 0.7,
       orientation_sensitive: true,
-      flip_tolerance: 0.4
+      flip_tolerance: 0.4,
+      printed_subtype: false
     }
   }
 
-  // 부품 복잡도 분석
+  // 부품 복잡도 분석 (개선된 버전 - 실제 분포 고려)
   const analyzePartComplexity = (partData) => {
     const name = partData.name || ''
     const description = partData.description || ''
     
-    // 복잡도 지표들
+    // 복잡도 지표들 (확장된 버전)
     const complexityIndicators = {
       studCount: (name.match(/\d+x\d+/g) || []).length,
-      specialFeatures: ['special', 'round', 'curved', 'slope'].filter(f => 
+      specialFeatures: ['special', 'round', 'curved', 'slope', 'inverted', 'truncated', 'technic', 'beam', 'axle', 'pin', 'connector'].filter(f => 
         name.toLowerCase().includes(f)
       ).length,
       descriptionLength: description.length,
-      hasPrint: name.includes('print') || name.includes('decorated')
+      hasPrint: name.includes('print') || name.includes('decorated'),
+      hasAnimal: /animal|dolphin|dog|crab|fern|flower|plant/i.test(name),
+      hasFood: /food|hot dog|bun|cone|pizza/i.test(name),
+      hasEquipment: /equipment|shovel|oar|goblet|umbrella|glasses/i.test(name),
+      hasSports: /sports|surfboard|shuttle/i.test(name),
+      hasStorage: /storage|case|divider/i.test(name),
+      hasSticker: /sticker|sheet/i.test(name),
+      hasTechnic: /technic|beam|axle|pin|connector|hub|bush/i.test(name)
     }
     
-    // 복잡도 점수 계산 (0-1)
-    const complexityScore = Math.min(
-      (complexityIndicators.studCount * 0.1) +
-      (complexityIndicators.specialFeatures * 0.2) +
-      (complexityIndicators.descriptionLength / 1000) +
-      (complexityIndicators.hasPrint ? 0.3 : 0),
-      1.0
+    // 복잡도 점수 계산 (개선된 수식 - 가중치 조정)
+    const baseScore = (
+      (complexityIndicators.studCount * 0.1) +  // 0.05 -> 0.1
+      (complexityIndicators.specialFeatures * 0.2) +  // 0.15 -> 0.2
+      (complexityIndicators.descriptionLength / 1000) +  // 2000 -> 1000
+      (complexityIndicators.hasPrint ? 0.3 : 0) +  // 0.4 -> 0.3
+      (complexityIndicators.hasAnimal ? 0.4 : 0) +  // 0.3 -> 0.4
+      (complexityIndicators.hasFood ? 0.4 : 0) +  // 0.3 -> 0.4
+      (complexityIndicators.hasEquipment ? 0.3 : 0) +  // 0.2 -> 0.3
+      (complexityIndicators.hasSports ? 0.4 : 0) +  // 0.3 -> 0.4
+      (complexityIndicators.hasStorage ? 0.3 : 0) +  // 0.2 -> 0.3
+      (complexityIndicators.hasSticker ? 0.2 : 0) +  // 0.1 -> 0.2
+      (complexityIndicators.hasTechnic ? 0.2 : 0)  // 새로 추가
     )
+    
+    // 복잡도 점수 (0-1, 클리핑)
+    const complexityScore = Math.min(Math.max(baseScore, 0), 1.0)
+    
+    // 개선된 임계값 (L/M/H = 40/40/20 분포 목표)
+    const level = complexityScore > 0.35 ? 'high' : 
+                  complexityScore > 0.15 ? 'medium' : 'low'
     
     return {
       score: complexityScore,
       indicators: complexityIndicators,
-      level: complexityScore > 0.7 ? 'high' : 
-             complexityScore > 0.4 ? 'medium' : 'low'
+      level: level
     }
   }
 

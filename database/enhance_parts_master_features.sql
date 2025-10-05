@@ -153,7 +153,7 @@ SET
     ELSE 'low'
   END;
 
--- 8. 통계 정보 조회 함수
+-- 8. 통계 정보 조회 함수 (확장된 버전)
 CREATE OR REPLACE FUNCTION get_enhanced_recognition_stats()
 RETURNS TABLE (
   total_parts BIGINT,
@@ -162,7 +162,11 @@ RETURNS TABLE (
   semantic_parts BIGINT,
   orientation_sensitive_parts BIGINT,
   high_complexity_parts BIGINT,
-  average_confidence DECIMAL(5,3)
+  medium_complexity_parts BIGINT,
+  low_complexity_parts BIGINT,
+  average_confidence DECIMAL(5,3),
+  tier_distribution JSONB,
+  complexity_distribution JSONB
 ) AS $$
 BEGIN
   RETURN QUERY
@@ -173,7 +177,19 @@ BEGIN
     COUNT(*) FILTER (WHERE tier = 'SEMANTIC') as semantic_parts,
     COUNT(*) FILTER (WHERE orientation_sensitive = true) as orientation_sensitive_parts,
     COUNT(*) FILTER (WHERE complexity_level = 'high') as high_complexity_parts,
-    ROUND(AVG(confidence)::numeric, 3) as average_confidence
+    COUNT(*) FILTER (WHERE complexity_level = 'medium') as medium_complexity_parts,
+    COUNT(*) FILTER (WHERE complexity_level = 'low') as low_complexity_parts,
+    ROUND(AVG(confidence)::numeric, 3) as average_confidence,
+    jsonb_build_object(
+      'geometry', COUNT(*) FILTER (WHERE tier = 'GEOMETRY'),
+      'structural', COUNT(*) FILTER (WHERE tier = 'STRUCTURAL'),
+      'semantic', COUNT(*) FILTER (WHERE tier = 'SEMANTIC')
+    ) as tier_distribution,
+    jsonb_build_object(
+      'high', COUNT(*) FILTER (WHERE complexity_level = 'high'),
+      'medium', COUNT(*) FILTER (WHERE complexity_level = 'medium'),
+      'low', COUNT(*) FILTER (WHERE complexity_level = 'low')
+    ) as complexity_distribution
   FROM parts_master_features;
 END;
 $$ LANGUAGE plpgsql;
