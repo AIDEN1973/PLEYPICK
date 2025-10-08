@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+🧱 BrickBox Storage 용량 모니터링 스크립트
+
+Supabase Storage 버킷의 용량 사용량을 모니터링하고 
+합성 데이터셋 생성 계획에 따른 용량 예측을 제공합니다.
+"""
+
+import os
+import sys
+import json
+from pathlib import Path
+from typing import Dict, List, Optional
+from datetime import datetime
+
+# 프로젝트 루트를 Python 경로에 추가
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
+
+try:
+    from supabase import create_client, Client
+    from dotenv import load_dotenv
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    print("⚠️ Supabase 클라이언트를 설치하세요: pip install supabase python-dotenv")
+    SUPABASE_AVAILABLE = False
+
+class StorageCapacityMonitor:
+    """Storage 용량 모니터링 클래스"""
+    
+    def __init__(self, supabase_url: str = None, supabase_key: str = None, bucket_name: str = "lego-synthetic"):
+        self.bucket_name = bucket_name
+        self.supabase = None
+        
+        # Supabase 클라이언트 초기화
+        if SUPABASE_AVAILABLE and supabase_url and supabase_key:
+            try:
+                self.supabase = create_client(supabase_url, supabase_key)
+                print("✅ Supabase 클라이언트 연결 성공")
+            except Exception as e:
+                print(f"❌ Supabase 연결 실패: {e}")
+    
+    def get_bucket_usage(self) -> Dict:
+        """버킷 사용량 조회"""
+        if not self.supabase:
+            return {'error': 'Supabase 클라이언트 없음'}
+        
+        try:
+            # Storage 객체 목록 조회
+            result = self.supabase.storage.from_(self.bucket_name).list()
+            
+            if isinstance(result, dict) and result.get('error'):
+                return {'error': f"버킷 조회 실패: {result['error']}"}
+            
+            # result가 리스트인 경우 직접 사용
+            files = result if isinstance(result, list) else result.get('data', [])
+            
+            # 용량 계산
+            total_size = 0
+            file_count = 0
+            synthetic_count = 0
+            synthetic_size = 0
+            
+            for file_info in files:
+                if 'size' in file_info:
+                    size = file_info['size']
+                    total_size += size
+                    file_count += 1
+                    
+                    # 합성 데이터셋 파일 확인
+                    if 'synthetic' in file_info.get('name', ''):
+                        synthetic_count += 1
+                        synthetic_size += size
+            
+            return {
+                'total_files': file_count,
+                'total_size_bytes': total_size,
+                'total_size_mb': round(total_size / (1024 * 1024), 2),
+                'total_size_gb': round(total_size / (1024 * 1024 * 1024), 2),
+                'synthetic_files': synthetic_count,
+                'synthetic_size_bytes': synthetic_size,
+                'synthetic_size_mb': round(synthetic_size / (1024 * 1024), 2),
+                'synthetic_size_gb': round(synthetic_size / (1024 * 1024 * 1024), 2)
+            }
+            
+        except Exception as e:
+            return {'error': f"용량 조회 실패: {e}"}
+    
+    def calculate_capacity_plan(self, parts_count: int, images_per_part: int) -> Dict:
+        """용량 계획 계산"""
+        # 이미지 크기 추정 (RGB PNG, 640x640)
+        estimated_image_size_kb = 75  # 50-100KB 중간값
+        estimated_annotation_size_kb = 0.1  # YOLO 어노테이션
+        
+        total_images = parts_count * images_per_part
+        total_files = total_images * 2  # 이미지 + 어노테이션
+        
+        # 용량 계산
+        total_size_bytes = total_images * (estimated_image_size_kb + estimated_annotation_size_kb) * 1024
+        total_size_mb = total_size_bytes / (1024 * 1024)
+        total_size_gb = total_size_mb / 1024
+        
+        # 100GB 버킷 기준 사용률
+        bucket_capacity_gb = 100
+        usage_percentage = (total_size_gb / bucket_capacity_gb) * 100
+        
+        return {
+            'parts_count': parts_count,
+            'images_per_part': images_per_part,
+            'total_images': total_images,
+            'total_files': total_files,
+            'estimated_size_gb': round(total_size_gb, 2),
+            'bucket_capacity_gb': bucket_capacity_gb,
+            'usage_percentage': round(usage_percentage, 2),
+            'remaining_capacity_gb': round(bucket_capacity_gb - total_size_gb, 2),
+            'recommendation': self._get_recommendation(usage_percentage)
+        }
+    
+    def _get_recommendation(self, usage_percentage: float) -> str:
+        """용량 사용률에 따른 권장사항"""
+        if usage_percentage < 50:
+            return "✅ 안전한 사용량입니다. 추가 데이터셋 생성 가능"
+        elif usage_percentage < 80:
+            return "⚠️ 주의가 필요합니다. 용량 모니터링 권장"
+        elif usage_percentage < 95:
+            return "🚨 높은 사용량입니다. 추가 생성 전 용량 정리 필요"
+        else:
+            return "❌ 용량 부족입니다. 기존 데이터 정리 또는 버킷 확장 필요"
+    
+    def get_optimization_suggestions(self, current_usage: Dict, planned_usage: Dict) -> List[str]:
+        """용량 최적화 제안"""
+        suggestions = []
+        
+        # 현재 사용량 분석
+        current_gb = current_usage.get('total_size_gb', 0)
+        planned_gb = planned_usage.get('estimated_size_gb', 0)
+        total_gb = current_gb + planned_gb
+        
+        if total_gb > 80:  # 80GB 초과 시
+            suggestions.append("📦 이미지 압축 최적화: PNG 압축 레벨 증가")
+            suggestions.append("🗂️ 파일 정리: 오래된 테스트 데이터 삭제")
+            suggestions.append("📊 선택적 생성: 중요 부품만 우선 생성")
+        
+        if total_gb > 90:  # 90GB 초과 시
+            suggestions.append("🔄 배치 처리: 단계별 생성으로 용량 관리")
+            suggestions.append("☁️ 아카이브: 완료된 데이터셋을 별도 저장소로 이동")
+            suggestions.append("📈 버킷 확장: 필요시 Supabase Storage 플랜 업그레이드")
+        
+        return suggestions
+    
+    def generate_capacity_report(self, current_usage: Dict, planned_usage: Dict) -> str:
+        """용량 보고서 생성"""
+        report = {
+            'timestamp': datetime.now().isoformat(),
+            'bucket_name': self.bucket_name,
+            'current_usage': current_usage,
+            'planned_usage': planned_usage,
+            'total_estimated_gb': current_usage.get('total_size_gb', 0) + planned_usage.get('estimated_size_gb', 0),
+            'optimization_suggestions': self.get_optimization_suggestions(current_usage, planned_usage)
+        }
+        
+        # 보고서 저장
+        report_path = project_root / "logs" / f"storage_capacity_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        
+        print(f"📊 용량 보고서 생성: {report_path}")
+        return str(report_path)
+
+def main():
+    """메인 실행 함수"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Storage 용량 모니터링')
+    parser.add_argument('--parts-count', type=int, default=100, help='계획된 부품 수')
+    parser.add_argument('--images-per-part', type=int, default=1000, help='부품당 이미지 수')
+    parser.add_argument('--supabase-url', help='Supabase URL')
+    parser.add_argument('--supabase-key', help='Supabase API Key')
+    
+    args = parser.parse_args()
+    
+    # 환경 변수 로드
+    try:
+        load_dotenv(project_root / "config" / "synthetic_dataset.env")
+        if not args.supabase_url:
+            args.supabase_url = os.getenv('VITE_SUPABASE_URL')
+        if not args.supabase_key:
+            args.supabase_key = os.getenv('VITE_SUPABASE_ANON_KEY')
+    except:
+        pass
+    
+    print("🧱 BrickBox Storage 용량 모니터링")
+    print("=" * 50)
+    
+    # 모니터 초기화
+    monitor = StorageCapacityMonitor(
+        supabase_url=args.supabase_url,
+        supabase_key=args.supabase_key
+    )
+    
+    # 1. 현재 사용량 조회
+    print("📊 현재 Storage 사용량 조회 중...")
+    current_usage = monitor.get_bucket_usage()
+    
+    if 'error' in current_usage:
+        print(f"❌ {current_usage['error']}")
+        return False
+    
+    print(f"✅ 현재 사용량:")
+    print(f"  - 총 파일: {current_usage['total_files']}개")
+    print(f"  - 총 용량: {current_usage['total_size_gb']}GB")
+    print(f"  - 합성 데이터: {current_usage['synthetic_files']}개 ({current_usage['synthetic_size_gb']}GB)")
+    
+    # 2. 계획된 사용량 계산
+    print(f"\n📈 계획된 사용량 계산:")
+    print(f"  - 부품 수: {args.parts_count}개")
+    print(f"  - 부품당 이미지: {args.images_per_part}장")
+    
+    planned_usage = monitor.calculate_capacity_plan(args.parts_count, args.images_per_part)
+    
+    print(f"  - 총 이미지: {planned_usage['total_images']}장")
+    print(f"  - 예상 용량: {planned_usage['estimated_size_gb']}GB")
+    print(f"  - 버킷 사용률: {planned_usage['usage_percentage']}%")
+    print(f"  - 권장사항: {planned_usage['recommendation']}")
+    
+    # 3. 최적화 제안
+    print(f"\n💡 최적화 제안:")
+    suggestions = monitor.get_optimization_suggestions(current_usage, planned_usage)
+    for suggestion in suggestions:
+        print(f"  - {suggestion}")
+    
+    # 4. 보고서 생성
+    report_path = monitor.generate_capacity_report(current_usage, planned_usage)
+    
+    print(f"\n🎉 용량 분석 완료!")
+    print(f"📊 보고서: {report_path}")
+    
+    return True
+
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)

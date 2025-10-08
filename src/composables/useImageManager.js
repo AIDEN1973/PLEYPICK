@@ -79,30 +79,9 @@ export function useImageManager() {
       
       console.log('Current user:', session.user?.email)
       
-      // 버킷 존재 여부를 실제 업로드로 확인
-      try {
-        const { data, error } = await supabase.storage.listBuckets()
-        if (error) {
-          console.warn('Failed to list buckets, but bucket might still exist:', error.message)
-          return true // 목록 조회 실패 시에도 업로드 시도
-        }
-        
-        console.log('Available buckets:', data.map(b => b.id))
-        
-        const bucketExists = data.some(bucket => bucket.id === 'lego_parts_images')
-        console.log('Bucket lego_parts_images exists:', bucketExists)
-        
-        // 버킷이 없어도 업로드 시도 (권한 문제일 수 있음)
-        if (!bucketExists) {
-          console.warn('Bucket not found in list, but attempting upload anyway (permission issue possible)')
-          return true
-        }
-        
-        return bucketExists
-      } catch (listError) {
-        console.warn('Bucket list check failed, but bucket might still exist:', listError.message)
-        return true // 목록 조회 실패 시에도 업로드 시도
-      }
+      // 버킷 존재 여부를 실제 업로드로 확인 (간소화)
+      console.log('Assuming bucket exists and attempting upload...')
+      return true // 항상 true 반환하여 업로드 시도
     } catch (err) {
       console.warn('Error checking bucket, but bucket might still exist:', err.message)
       return true // 오류 시에도 업로드 시도
@@ -156,23 +135,21 @@ export function useImageManager() {
     try {
       console.log(`Checking for existing image: part_num=${partNum}, color_id=${colorId}`)
       
-      // image_metadata 테이블에서 해당 부품의 이미지가 이미 있는지 확인
-      const { data, error } = await supabase
-        .from('image_metadata')
-        .select('id, supabase_url')
-        .eq('part_num', partNum)
-        .eq('color_id', colorId)
-        .maybeSingle()
-
-      if (error && error.code !== 'PGRST116') {
-        console.warn('Image existence check failed:', error.message)
-        return false // 오류 시 중복 없음으로 처리
-      }
+      // Storage 버킷에서 직접 확인 (테이블 대신 실제 파일 존재 여부 확인)
+      const fileName = `${partNum}_${colorId}.jpg`
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const bucketName = 'lego_parts_images'
+      const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
       
-      // 이미지가 존재하면 중복
-      if (data && data.supabase_url) {
-        console.log(`Existing image found for ${partNum} (color: ${colorId}): ${data.supabase_url}`)
-        return true
+      // HTTP HEAD 요청으로 이미지 존재 여부 확인
+      try {
+        const response = await fetch(imageUrl, { method: 'HEAD' })
+        if (response.ok) {
+          console.log(`Existing image found for ${partNum} (color: ${colorId}): ${imageUrl}`)
+          return true
+        }
+      } catch (fetchError) {
+        console.log(`Image not found in Storage: ${fileName}`)
       }
       
       return false // 중복 없음
@@ -203,12 +180,20 @@ export function useImageManager() {
         const fileName = file.name
         const filePath = `images/${fileName}`
         
-        // 중복 파일 처리: 덮어쓰기 옵션 사용
+        // 기존 파일 삭제 후 업로드 (중복 방지)
+        try {
+          await supabase.storage
+            .from('lego_parts_images')
+            .remove([filePath])
+        } catch (deleteError) {
+          // 파일이 없어도 무시
+          console.log('No existing file to delete:', filePath)
+        }
+        
+        // Storage 업로드
         const { data, error: uploadError } = await supabase.storage
           .from('lego_parts_images')
-          .upload(filePath, file, {
-            upsert: true // 파일이 이미 존재하면 덮어쓰기
-          })
+          .upload(filePath, file)
 
         if (uploadError) {
           throw new Error(`Supabase upload failed: ${uploadError.message}`)
@@ -274,7 +259,7 @@ export function useImageManager() {
   }
 
   // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수 (파일명 기반 중복 검사)
-  const processRebrickableImage = async (imageUrl, partNum, colorId = null) => {
+  const processRebrickableImage = async (imageUrl, partNum, colorId = null, options = {}) => {
     try {
       // 원본 URL에서 파일명 추출
       const originalFilename = extractOriginalFilename(imageUrl)
@@ -283,17 +268,22 @@ export function useImageManager() {
       // 업로드 경로 설정 (일관된 경로)
       const uploadPath = `images`
       
-      // 1. 부품별 이미지 중복 검사 수행
-      const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
-      if (isDuplicate) {
-        console.log(`Skipping duplicate image for part ${partNum} (color: ${colorId})`)
-        return {
-          originalUrl: imageUrl,
-          uploadedUrl: null, // 중복으로 업로드하지 않음
-          filename: originalFilename,
-          path: uploadPath,
-          isDuplicate: true
+      // 1. 부품별 이미지 중복 검사 수행 (강제 업로드 옵션)
+      const forceUpload = options?.forceUpload || false
+      if (!forceUpload) {
+        const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
+        if (isDuplicate) {
+          console.log(`Skipping duplicate image for part ${partNum} (color: ${colorId})`)
+          return {
+            originalUrl: imageUrl,
+            uploadedUrl: null, // 중복으로 업로드하지 않음
+            filename: originalFilename,
+            path: uploadPath,
+            isDuplicate: true
+          }
         }
+      } else {
+        console.log(`Force uploading image for part ${partNum} (color: ${colorId}) - overwriting existing`)
       }
       
       try {
@@ -309,6 +299,9 @@ export function useImageManager() {
         
         console.log(`Successfully uploaded: ${fileName}`)
         
+        // part_images 동기화
+        await upsertPartImage({ partNum, colorId, uploadedUrl: result.url, filename: fileName })
+        
         return {
           originalUrl: imageUrl,
           uploadedUrl: result.url,
@@ -320,7 +313,12 @@ export function useImageManager() {
         
         try {
           // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
-          const result = await uploadImageFromUrl(imageUrl, originalFilename, uploadPath)
+          // 파일명도 일관되게 partNum_colorId.jpg 사용
+          const combinedFilename = `${partNum}_${colorId}.jpg`
+          const result = await uploadImageFromUrl(imageUrl, combinedFilename, uploadPath)
+          
+          // part_images 동기화
+          await upsertPartImage({ partNum, colorId, uploadedUrl: result.url, filename: result.filename })
           
           return {
             originalUrl: imageUrl,
@@ -448,22 +446,65 @@ export function useImageManager() {
   // 이미지 메타데이터를 Supabase에 저장
   const saveImageMetadata = async (imageData) => {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('image_metadata')
-        .insert([imageData])
-        .select()
+        .insert([imageData], { returning: 'minimal' })
 
       if (error) {
         throw new Error(`Failed to save image metadata: ${error.message}`)
       }
 
-      return data[0]
+      return true
     } catch (err) {
       error.value = err.message
       throw err
     }
   }
 
+  // 업로드 직후 part_images 테이블에 동기화 (트리거 없이 앱 레벨에서 처리)
+  const upsertPartImage = async ({ partNum, colorId, uploadedUrl, filename }) => {
+    try {
+      if (!partNum || typeof colorId !== 'number' || !uploadedUrl) return
+
+      const payload = {
+        part_id: String(partNum),
+        color_id: colorId,
+        original_url: uploadedUrl,
+        uploaded_url: uploadedUrl,
+        filename: filename || `${partNum}_${colorId}.jpg`,
+        upload_status: 'completed'
+      }
+
+      // 1) 존재 시 업데이트
+      const { data: updated, error: updateError } = await supabase
+        .from('part_images')
+        .update(payload)
+        .eq('part_id', String(partNum))
+        .eq('color_id', colorId)
+        .select('part_id')
+
+      if (updateError) {
+        console.warn('part_images update failed, will try insert:', updateError.message)
+      }
+
+      // 2) 업데이트된 행이 없으면 삽입
+      if (!updated || updated.length === 0) {
+        const { error: insertError } = await supabase
+          .from('part_images')
+          .insert([payload])
+
+        if (insertError) {
+          console.warn('part_images insert failed:', insertError.message)
+          return
+        }
+        console.log(`part_images inserted: ${partNum}_${colorId}`)
+      } else {
+        console.log(`part_images updated: ${partNum}_${colorId}`)
+      }
+    } catch (err) {
+      console.warn('part_images upsert error:', err.message)
+    }
+  }
 
   // 로컬 저장소에 이미지 정보 저장
   const saveImageLocally = async (imageUrl, filename, uploadPath) => {
@@ -501,21 +542,28 @@ export function useImageManager() {
     const results = []
     const errors = []
 
-    for (const data of imageData) {
-      try {
-        const result = await processRebrickableImage(
-          data.imageUrl, 
-          data.partNum, 
-          data.colorId
-        )
-        results.push(result)
-      } catch (err) {
-        errors.push({
-          partNum: data.partNum,
-          error: err.message
-        })
+    const concurrency = 5
+    let index = 0
+
+    const worker = async () => {
+      while (index < imageData.length) {
+        const i = index++
+        const data = imageData[i]
+        try {
+          const result = await processRebrickableImage(
+            data.imageUrl,
+            data.partNum,
+            data.colorId
+          )
+          results[i] = result
+        } catch (err) {
+          errors.push({ partNum: data.partNum, error: err.message })
+        }
       }
     }
+
+    const workers = Array.from({ length: Math.min(concurrency, imageData.length) }, () => worker())
+    await Promise.all(workers)
 
     return { results, errors }
   }

@@ -48,6 +48,11 @@
           <router-link to="/master-builder" class="btn btn-warning">데이터 구축</router-link>
         </div>
         <div class="action-card">
+          <h3>합성 데이터셋 생성</h3>
+          <p>LDraw 3D 모델을 Blender로 렌더링하여 AI 학습용 대규모 합성 데이터셋을 자동 생성하세요.</p>
+          <router-link to="/synthetic-dataset" class="btn btn-purple">합성 데이터셋</router-link>
+        </div>
+        <div class="action-card">
           <h3>프로필 관리</h3>
           <p>사용자 정보를 확인하고 수정하세요.</p>
           <button class="btn btn-secondary">프로필 보기</button>
@@ -318,6 +323,16 @@ export default {
 .btn-warning:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
+}
+
+.btn-purple {
+  background: linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%);
+  color: white;
+}
+
+.btn-purple:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(111, 66, 193, 0.4);
 }
 
 @media (max-width: 768px) {

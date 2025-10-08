@@ -997,6 +997,7 @@ export default {
                       partData.part.part_img_url,
                       partData.part.part_num,
                       partData.color.id
+                      // forceUpload 제거 - 중복 이미지는 스킵
                     )
                     
                     if (imageResult.uploadedUrl) {
@@ -1005,7 +1006,7 @@ export default {
                         original_url: partData.part.part_img_url,
                         supabase_url: imageResult.uploadedUrl,
                         file_path: imageResult.path,
-                        file_name: imageResult.filename,
+                        file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.jpg`,
                         part_num: partData.part.part_num,
                         color_id: partData.color.id,
                         set_num: selectedSet.value?.set_num

@@ -78,3 +78,24 @@ jspm_packages/
 # DynamoDB Local files
 .dynamodb/
 
+# Output directories
+output/
+temp/
+cache/
+
+# Blender cache and temporary files
+*.blend1
+*.blend2
+*.blend3
+
+# LDraw rendering outputs
+*.png
+*.jpg
+*.jpeg
+*.txt
+*.yaml
+*.yml
+
+# Supabase cache
+.supabase/
+

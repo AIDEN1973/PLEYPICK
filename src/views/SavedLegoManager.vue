@@ -443,23 +443,30 @@ export default {
       }
     }
 
-    // Supabase Storage에서 이미지 URL 조회
+    // Supabase Storage에서 이미지 URL 조회 (part_images 우선, 다음 image_metadata)
     const getSupabaseImageUrl = async (partNum, colorId) => {
       try {
-        // image_metadata 테이블에서 해당 부품의 Supabase Storage URL 조회
-        const { data, error } = await supabase
+        // 1) part_images에서 직접 조회 (앱 업서트 소스)
+        const { data: pi, error: piErr } = await supabase
+          .from('part_images')
+          .select('uploaded_url')
+          .eq('part_id', partNum)
+          .eq('color_id', colorId)
+          .maybeSingle()
+
+        if (!piErr && pi?.uploaded_url) return pi.uploaded_url
+
+        // 2) 과거 기록 호환: image_metadata.supabase_url 조회
+        const { data: im, error: imErr } = await supabase
           .from('image_metadata')
           .select('supabase_url')
           .eq('part_num', partNum)
           .eq('color_id', colorId)
           .maybeSingle()
 
-        if (error) {
-          console.log(`No Supabase image found for ${partNum} (color: ${colorId})`)
-          return null
-        }
+        if (!imErr && im?.supabase_url) return im.supabase_url
 
-        return data?.supabase_url || null
+        return null
       } catch (err) {
         console.error('Error fetching Supabase image URL:', err)
         return null

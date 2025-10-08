@@ -1,473 +1,645 @@
-import { ref } from 'vue'
-import { supabase } from './useSupabase'
+import { ref, reactive } from 'vue'
+import { useSupabase } from './useSupabase'
 
 export function useMasterPartsMatching() {
-  const loading = ref(false)
-  const error = ref(null)
-  const matching = ref(false)
+  const { supabase } = useSupabase()
+  const targetParts = ref([])
+  const masterParts = ref([])
+  const isLoaded = ref(false)
+  const referenceImageCache = new Map()
 
-  // 마스터 부품 DB에서 타겟 세트 부품 로드
+  // 타겟 세트 부품 로드
   const loadTargetSetParts = async (setNum) => {
-    loading.value = true
-    error.value = null
-
     try {
-      // 1. 먼저 lego_sets에서 set_num으로 set_id 찾기 (정확한 매치 또는 기본 세트)
-      let { data: legoSet, error: setError } = await supabase
-        .from('lego_sets')
-        .select('id, set_num, name')
-        .eq('set_num', setNum)
-        .single()
-
-      // 정확한 매치가 없으면 다양한 패턴으로 검색
-      if (setError) {
-        console.log(`Exact match failed for: ${setNum}`)
+      console.log(`Loading target parts for set: ${setNum}`)
+      
+      // 1단계: 정확한 매치 시도
+      let legoSet = null
+      try {
+        const { data: exactMatch, error: exactError } = await supabase
+          .from('lego_sets')
+          .select('id, set_num, name')
+          .eq('set_num', setNum)
+          .limit(1)
         
-        // 1. 기본 세트 번호로 검색 (예: 76270-1 -> 76270)
-        if (setNum.includes('-')) {
-          const baseSetNum = setNum.split('-')[0]
-          console.log(`Searching for base set: ${baseSetNum}`)
-          
-          const { data: baseSet, error: baseError } = await supabase
+        if (exactError) throw exactError
+        if (exactMatch && exactMatch.length > 0) {
+          legoSet = exactMatch[0]
+          console.log('Exact match found:', legoSet)
+        }
+      } catch (error) {
+        console.log('Exact match failed for:', setNum)
+      }
+
+      // 2단계: 기본 번호로 시도 (예: 76270-1 -> 76270)
+      if (!legoSet) {
+        const baseSetNum = setNum.split('-')[0]
+        try {
+          const { data: baseMatch, error: baseError } = await supabase
             .from('lego_sets')
             .select('id, set_num, name')
             .eq('set_num', baseSetNum)
-            .single()
+            .limit(1)
           
-          if (!baseError && baseSet) {
-            legoSet = baseSet
-            setError = null
-            console.log(`Found base set: ${baseSet.set_num}`)
+          if (baseError) throw baseError
+          if (baseMatch && baseMatch.length > 0) {
+            legoSet = baseMatch[0]
+            console.log('Base match found:', legoSet)
           }
+        } catch (error) {
+          console.log('Base match failed for:', baseSetNum)
         }
-        
-        // 2. 여전히 없으면 LIKE 패턴으로 검색
-        if (setError) {
-          console.log(`Searching with LIKE pattern: ${setNum}%`)
-          
-          const { data: likeSet, error: likeError } = await supabase
+      }
+
+      // 3단계: LIKE 패턴으로 시도
+      if (!legoSet) {
+        try {
+          const { data: likeMatch, error: likeError } = await supabase
             .from('lego_sets')
             .select('id, set_num, name')
             .like('set_num', `${setNum}%`)
             .limit(1)
-            .single()
           
-          if (!likeError && likeSet) {
-            legoSet = likeSet
-            setError = null
-            console.log(`Found set with LIKE: ${likeSet.set_num}`)
+          if (likeError) throw likeError
+          if (likeMatch && likeMatch.length > 0) {
+            legoSet = likeMatch[0]
+            console.log('Found set with LIKE:', legoSet.set_num)
           }
+        } catch (error) {
+          console.log('LIKE pattern failed for:', setNum)
         }
       }
 
-      if (setError) {
-        console.error('Lego set query error:', setError)
-        
-        // 디버깅: 사용 가능한 세트들 확인
-        const { data: availableSets, error: debugError } = await supabase
-          .from('lego_sets')
-          .select('set_num, name')
-          .limit(10)
-        
-        if (!debugError && availableSets) {
-          console.log('Available sets in database:', availableSets)
-        }
-        
-        throw new Error(`세트 번호 '${setNum}'이 데이터베이스에 없습니다. 사용 가능한 세트를 확인해주세요.`)
+      if (!legoSet) {
+        throw new Error(`Set ${setNum} not found`)
       }
 
       console.log('Found lego set:', legoSet)
 
-      // 2. set_id로 set_parts 조회
-      const { data: setParts, error: partsError } = await supabase
+      // 세트 부품 로드
+      const { data: setParts, error: setPartsError } = await supabase
         .from('set_parts')
         .select(`
           part_id,
           color_id,
           quantity,
+          element_id,
           lego_parts(part_num, name),
           lego_colors(color_id, name, rgb)
         `)
         .eq('set_id', legoSet.id)
 
-      if (partsError) {
-        console.error('Set parts query error:', partsError)
-        throw partsError
-      }
+      if (setPartsError) throw setPartsError
 
-      console.log('Set parts found:', setParts?.length || 0)
-      console.log('Sample set part:', setParts?.[0])
+      console.log('Set parts found:', setParts.length)
+      console.log('Sample set part:', setParts[0])
 
-      // 3. 마스터 부품 특징 정보 조회
+      targetParts.value = setParts || []
+      
+      // 부품 ID와 색상 ID 수집
       const partIds = setParts.map(sp => sp.part_id)
       const colorIds = setParts.map(sp => sp.color_id)
 
       console.log('Part IDs to search:', partIds)
       console.log('Color IDs to search:', colorIds)
 
-      const { data: masterParts, error: masterError } = await supabase
-        .from('parts_master_features')
-        .select('*')
-        .in('part_id', partIds)
-        .in('color_id', colorIds)
-
-      if (masterError) {
-        console.error('Master parts query error:', masterError)
-        throw masterError
-      }
-
-      console.log('Master parts found:', masterParts?.length || 0)
-
-      // 4. 세트 부품과 마스터 특징 매핑
-      const targetParts = setParts.map(setPart => {
-        const masterPart = masterParts.find(mp => 
-          mp.part_id === setPart.part_id && 
-          mp.color_id === setPart.color_id
-        )
+      // 마스터 부품 데이터는 set_parts에서 이미 로드됨
+      console.log('Using set parts as master data')
+      masterParts.value = setParts || []
+      isLoaded.value = true
 
         return {
-          ...setPart,
-          master_characteristics: masterPart,
-          detection_priority: calculateDetectionPriority(setPart, masterPart)
-        }
-      })
-
-      return targetParts
-    } catch (err) {
-      error.value = err.message
-      throw err
-    } finally {
-      loading.value = false
+        targetParts: targetParts.value,
+        masterParts: masterParts.value,
+        legoSet
+      }
+    } catch (error) {
+      console.error('Error loading target set parts:', error)
+      throw error
     }
   }
 
-  // 실시간 부품 매칭 (LLM 없이)
-  const matchDetectedPart = async (detectedImage, targetParts) => {
-    matching.value = true
-    error.value = null
-
+  // 사용 가능한 세트 목록 가져오기
+  const getAvailableSets = async () => {
     try {
-      // 1. 검출된 이미지의 CLIP 임베딩 생성 (1536차)
-      const detectedEmbedding = await generateClipImageEmbedding(detectedImage)
+      const { data, error } = await supabase
+        .from('lego_sets')
+        .select('set_num, name')
+        .limit(20)
+        .order('set_num')
       
-      // 2. 타겟 부품들과 유사도 계산
-      const similarities = await calculateSimilarities(detectedEmbedding, targetParts)
-      
-      // 3. 상위 후보 선별 (상위 5개)
-      const topCandidates = similarities
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, 5)
-
-      // 4. 추가 검증 (색상, 크기, 형태)
-      const validatedCandidates = await validateCandidates(topCandidates, detectedImage)
-      
-      // 5. 최종 점수 계산
-      const finalResults = calculateFinalScores(validatedCandidates)
-
-      return finalResults
-    } catch (err) {
-      error.value = err.message
-      throw err
-    } finally {
-      matching.value = false
+      if (error) throw error
+      return data || []
+    } catch (error) {
+      console.error('Error fetching available sets:', error)
+      return []
     }
   }
 
-  // CLIP 유사도 계산 (API 없이 시뮬레이션)
-  const calculateSimilarities = async (detectedEmbedding, targetParts) => {
-    const similarities = []
-
-    for (const targetPart of targetParts) {
-      // API 없이 시뮬레이션된 유사도 계산
-      const simulatedSimilarity = generateSimulatedSimilarity(targetPart)
-      
-      similarities.push({
-        part: targetPart,
-        similarity: simulatedSimilarity,
-        confidence: simulatedSimilarity * targetPart.detection_priority
-      })
-    }
-
-    return similarities
-  }
-
-  // 시뮬레이션된 유사도 생성
-  const generateSimulatedSimilarity = (targetPart) => {
-    // 부품 특성에 따른 시뮬레이션 유사도
-    let baseSimilarity = 0.5 + Math.random() * 0.4 // 0.5-0.9 범위
-    
-    // 마스터 DB의 신뢰도 반영
-    if (targetPart.master_characteristics?.confidence) {
-      baseSimilarity = Math.max(baseSimilarity, targetPart.master_characteristics.confidence)
-    }
-    
-    // 사용 빈도 반영
-    if (targetPart.master_characteristics?.usage_frequency > 50) {
-      baseSimilarity += 0.1
-    }
-    
-    // 검출 정확도 반영
-    if (targetPart.master_characteristics?.detection_accuracy > 0.8) {
-      baseSimilarity += 0.1
-    }
-    
-    return Math.min(baseSimilarity, 0.95) // 최대 95%
-  }
-
-  // 후보 검증 (마스터 DB의 LLM 특징 활용)
-  const validateCandidates = async (candidates, detectedImage) => {
-    const validatedCandidates = []
-
-    for (const candidate of candidates) {
-      const masterPart = candidate.part.master_characteristics
-      if (!masterPart) continue
-
-      // 1. 색상 검증
-      const colorMatch = await validateColor(detectedImage, masterPart)
-      
-      // 2. 크기 검증
-      const sizeMatch = await validateSize(detectedImage, masterPart)
-      
-      // 3. 형태 검증 (LLM 특징 활용)
-      const shapeMatch = await validateShape(detectedImage, masterPart)
-
-      // 종합 점수 계산
-      const validationScore = (colorMatch * 0.3) + (sizeMatch * 0.3) + (shapeMatch * 0.4)
-
-      validatedCandidates.push({
-        ...candidate,
-        validation_score: validationScore,
-        color_match: colorMatch,
-        size_match: sizeMatch,
-        shape_match: shapeMatch
-      })
-    }
-
-    return validatedCandidates
-  }
-
-  // 색상 검증
-  const validateColor = async (detectedImage, masterPart) => {
-    // 실제 구현에서는 이미지 색상 분석
-    const detectedColor = await extractDominantColor(detectedImage)
-    const expectedColor = masterPart.llm_visual_features?.color_characteristics
-    
-    if (!expectedColor) return 0.5 // 기본값
-
-    // 색상 거리 계산
-    const colorDistance = calculateColorDistance(detectedColor, expectedColor.primary_color)
-    return Math.max(0, 1 - colorDistance) // 0-1 범위로 정규화
-  }
-
-  // 크기 검증
-  const validateSize = async (detectedImage, masterPart) => {
-    // 실제 구현에서는 객체 크기 분석
-    const detectedSize = await calculateObjectSize(detectedImage)
-    const expectedSize = masterPart.llm_geometric_features?.dimensions
-    
-    if (!expectedSize) return 0.5 // 기본값
-
-    // 크기 비율 계산
-    const sizeRatio = detectedSize / parseFloat(expectedSize)
-    return Math.max(0, 1 - Math.abs(sizeRatio - 1) * 2) // 0-1 범위로 정규화
-  }
-
-  // 형태 검증 (LLM 특징 활용)
-  const validateShape = async (detectedImage, masterPart) => {
-    const recognitionHints = masterPart.llm_recognition_hints
-    if (!recognitionHints) return 0.5 // 기본값
-
-    // 실제 구현에서는 이미지에서 특징 추출
-    const detectedFeatures = await extractImageFeatures(detectedImage)
-    
-    // LLM이 분석한 특징과 비교
-    const featureMatches = compareFeatures(detectedFeatures, recognitionHints)
-    
-    return featureMatches
-  }
-
-  // 최종 점수 계산
-  const calculateFinalScores = (validatedCandidates) => {
-    return validatedCandidates.map(candidate => {
-      const weights = {
-        similarity: 0.4,      // CLIP 유사도
-        validation: 0.4,       // 검증 점수
-        priority: 0.2         // 우선순위
+  // 최적화된 이미지 분석 (성능 우선)
+  const analyzeImageForParts = (imageBase64) => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        
+        // 이미지 크기 제한 (성능 최적화)
+        const maxSize = 300
+        const scale = Math.min(maxSize / img.width, maxSize / img.height, 1)
+        canvas.width = Math.floor(img.width * scale)
+        canvas.height = Math.floor(img.height * scale)
+        
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+        
+        // 캔버스 크기 검증
+        if (canvas.width === 0 || canvas.height === 0) {
+          console.warn('Canvas has zero dimensions, using fallback features')
+          resolve({ color: [0.5, 0.5, 0.5], shape: [0.5, 0.5, 0.5] })
+          return
+        }
+        
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const features = performFastImageAnalysis(imageData.data, canvas.width, canvas.height)
+        // 종횡비(가로/세로) 추가
+        features.aspectRatio = canvas.width > 0 && canvas.height > 0 ? canvas.width / canvas.height : 1
+        
+        resolve(features)
       }
-
-      const finalScore = (
-        candidate.similarity * weights.similarity +
-        candidate.validation_score * weights.validation +
-        candidate.part.detection_priority * weights.priority
-      )
-
-      return {
-        ...candidate,
-        final_score: finalScore,
-        confidence: Math.min(finalScore, 1.0)
-      }
+      img.src = imageBase64
     })
   }
 
-  // 우선순위 계산
-  const calculateDetectionPriority = (setPart, masterPart) => {
-    let priority = 1.0
-
-    // 수량이 많은 부품 우선
-    if (setPart.quantity > 5) priority += 0.3
-    else if (setPart.quantity > 2) priority += 0.2
-
-    // 마스터 DB의 사용 빈도 활용
-    if (masterPart?.usage_frequency > 100) priority += 0.2
-    else if (masterPart?.usage_frequency > 50) priority += 0.1
-
-    // 검출 정확도 활용
-    if (masterPart?.detection_accuracy > 0.9) priority += 0.1
-
-    return Math.min(priority, 2.0)
-  }
-
-  // 유틸리티 함수들
-  const generateClipImageEmbedding = async (imageBase64) => {
-    // API 없이 시뮬레이션된 임베딩 생성
-    console.log('Using simulated CLIP embedding (API not available)')
+  // 빠른 이미지 분석
+  const performFastImageAnalysis = (data, width, height) => {
+    let totalR = 0, totalG = 0, totalB = 0
+    let edgeCount = 0
+    const step = Math.max(1, Math.floor(width * height / 500)) // 샘플링 증가
     
-    // 1536차원 시뮬레이션 임베딩 생성
-    const simulatedEmbedding = Array.from({ length: 1536 }, () => 
-      (Math.random() - 0.5) * 2 // -1 ~ 1 범위
-    )
-    
-    // 정규화
-    const magnitude = Math.sqrt(simulatedEmbedding.reduce((sum, val) => sum + val * val, 0))
-    return simulatedEmbedding.map(val => val / magnitude)
-  }
-
-  const calculateCosineSimilarity = (vec1, vec2) => {
-    if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0
-
-    let dotProduct = 0
-    let norm1 = 0
-    let norm2 = 0
-
-    for (let i = 0; i < vec1.length; i++) {
-      dotProduct += vec1[i] * vec2[i]
-      norm1 += vec1[i] * vec1[i]
-      norm2 += vec2[i] * vec2[i]
-    }
-
-    return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2))
-  }
-
-  const extractDominantColor = async (image) => {
-    // API 없이 시뮬레이션된 색상 추출
-    console.log('Using simulated color extraction (API not available)')
-    
-    // 시뮬레이션된 주요 색상 반환
-    const simulatedColors = [
-      { r: 255, g: 0, b: 0 },     // 빨강
-      { r: 0, g: 255, b: 0 },     // 초록
-      { r: 0, g: 0, b: 255 },     // 파랑
-      { r: 255, g: 255, b: 0 },   // 노랑
-      { r: 255, g: 0, b: 255 },   // 마젠타
-      { r: 0, g: 255, b: 255 },   // 시안
-      { r: 128, g: 128, b: 128 }, // 회색
-      { r: 0, g: 0, b: 0 },       // 검정
-      { r: 255, g: 255, b: 255 }  // 흰색
-    ]
-    
-    return simulatedColors[Math.floor(Math.random() * simulatedColors.length)]
-  }
-
-  const calculateColorDistance = (c1, c2) => {
-    const toRgb = (c) => {
-      if (typeof c === 'string' && c.startsWith('#')) {
-        const r = parseInt(c.slice(1,3), 16)
-        const g = parseInt(c.slice(3,5), 16)
-        const b = parseInt(c.slice(5,7), 16)
-        return { r, g, b }
+    // 색상 및 엣지 분석
+    for (let i = 0; i < data.length; i += step * 4) {
+      const r = data[i]
+      const g = data[i + 1]
+      const b = data[i + 2]
+      
+      totalR += r
+      totalG += g
+      totalB += b
+      
+      // 간단한 엣지 검출
+      if (i + step * 4 < data.length) {
+        const current = (r + g + b) / 3
+        const next = (data[i + step * 4] + data[i + step * 4 + 1] + data[i + step * 4 + 2]) / 3
+        if (Math.abs(current - next) > 30) {
+          edgeCount++
+        }
       }
-      return c
     }
-    const a = toRgb(c1)
-    const b = toRgb(c2)
-    if (!a || !b) return 1
-    const dr = (a.r - b.r) / 255
-    const dg = (a.g - b.g) / 255
-    const db = (a.b - b.b) / 255
-    return Math.sqrt(dr*dr + dg*dg + db*db) / Math.sqrt(3)
-  }
-
-  const calculateObjectSize = async (image) => {
-    // API 없이 시뮬레이션된 크기 계산
-    console.log('Using simulated object size calculation (API not available)')
-    return 0.5 + Math.random() * 0.5 // 0.5-1.0 범위
-  }
-
-  const extractImageFeatures = async (image) => {
-    // API 없이 시뮬레이션된 특징 추출
-    console.log('Using simulated feature extraction (API not available)')
+    
+    const pixelCount = Math.floor(data.length / 4 / step)
     
     return {
-      edges: Math.random() > 0.5,
-      corners: Math.floor(Math.random() * 10),
-      shapes: ['rectangular', 'circular', 'triangular'][Math.floor(Math.random() * 3)],
-      texture: ['smooth', 'rough', 'patterned'][Math.floor(Math.random() * 3)]
+      avgColor: {
+        r: Math.round(totalR / pixelCount),
+        g: Math.round(totalG / pixelCount),
+        b: Math.round(totalB / pixelCount)
+      },
+      edgeCount: Math.min(edgeCount, 1000), // 최대값 제한
+      brightness: (totalR + totalG + totalB) / (pixelCount * 3) / 255,
+      contrast: 0.7, // 기본값
+      complexity: Math.min(edgeCount / 100, 1)
     }
   }
 
-  const compareFeatures = (detected, expected) => {
-    // 간단 비교: 기대 힌트의 키워드가 검출 특징에 존재하는 비율
-    if (!detected || !expected) return 0.5
-    const hints = [
-      expected?.top_view,
-      expected?.side_view,
-      ...(expected?.unique_features || [])
-    ].filter(Boolean).join(' ').toLowerCase()
-    const det = JSON.stringify(detected).toLowerCase()
-    if (!hints) return 0.5
-    const tokens = Array.from(new Set(hints.split(/[^a-z0-9가-힣_]+/).filter(t => t.length > 2)))
-    if (tokens.length === 0) return 0.5
-    const matchCount = tokens.reduce((acc, t) => acc + (det.includes(t) ? 1 : 0), 0)
-    return matchCount / tokens.length
+  // 빠른 색상 유사도 계산
+  const calculateFastColorSimilarity = (imageColor, targetColor) => {
+    try {
+      if (!targetColor || !targetColor.rgb) return 0.5
+      if (!imageColor || typeof imageColor.r !== 'number' || typeof imageColor.g !== 'number' || typeof imageColor.b !== 'number') {
+        console.warn('Invalid imageColor, using fallback')
+        return 0.5
+      }
+      
+      const targetRgb = parseRgbColor(targetColor.rgb)
+      if (!targetRgb) return 0.5
+      
+      const distance = Math.sqrt(
+        Math.pow(imageColor.r - targetRgb.r, 2) +
+        Math.pow(imageColor.g - targetRgb.g, 2) +
+        Math.pow(imageColor.b - targetRgb.b, 2)
+      )
+      
+      return Math.max(0, 1 - distance / 441) // 441 = sqrt(255^2 * 3)
+    } catch (error) {
+      console.error('Color similarity error:', error)
+      return 0.5
+    }
   }
 
-  // 사용 가능한 세트 목록 조회
-  const getAvailableSets = async (limit = 20) => {
-    try {
-      const { data: sets, error } = await supabase
-        .from('lego_sets')
-        .select('set_num, name, year, num_parts')
-        .order('set_num', { ascending: true })
-        .limit(limit)
+  // RGB 색상 파싱
+  const parseRgbColor = (rgbString) => {
+    if (!rgbString) return null
+    
+    const hex = rgbString.replace('#', '')
+    if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16)
+      }
+    }
+    return null
+  }
 
-      if (error) throw error
+  // 간단한 크기 유사도
+  const calculateSimpleSizeSimilarity = (edgeCount, targetPart) => {
+    // 기본 크기 추정 (엣지 수 기반)
+    const estimatedSize = Math.min(edgeCount / 50, 1)
+    return Math.max(0.3, 1 - Math.abs(estimatedSize - 0.5))
+  }
+
+  // 기본 형상 유사도
+  const calculateBasicShapeSimilarity = (imageFeatures, targetPart) => {
+    // 복잡도 기반 형상 유사도
+    return Math.max(0.3, imageFeatures.complexity)
+  }
+
+  // 부품명 기반 텍스트 유사도 계산
+  const calculateTextSimilarity = (imageFeatures, targetPart) => {
+    try {
+      const partName = targetPart.lego_parts?.name?.toLowerCase() || ''
+      if (!partName) return 0.5
       
-      // 세트 번호 형식별로 그룹화
-      const groupedSets = {}
-      sets?.forEach(set => {
-        const baseNum = set.set_num.split('-')[0]
-        if (!groupedSets[baseNum]) {
-          groupedSets[baseNum] = []
+      // 간단한 키워드 매칭 (실제로는 더 정교한 NLP 필요)
+      const commonKeywords = ['brick', 'plate', 'tile', 'slope', 'round', 'square', 'rectangular']
+      const hasKeyword = commonKeywords.some(keyword => partName.includes(keyword))
+      
+      // 복잡도와 키워드 매칭 조합
+      const complexityMatch = imageFeatures.complexity > 0.7 ? 0.8 : 0.6
+      const keywordMatch = hasKeyword ? 0.9 : 0.7
+      
+      return (complexityMatch + keywordMatch) / 2
+    } catch (error) {
+      console.error('Text similarity calculation error:', error)
+      return 0.5
+    }
+  }
+
+  // 메타데이터 기반 유사도 (카테고리/종횡비 힌트 활용)
+  const calculateMetadataSimilarity = (imageFeatures, targetPart) => {
+    try {
+      const name = (targetPart.lego_parts?.name || '').toLowerCase()
+      const ar = imageFeatures.aspectRatio ?? 1
+      // 이름 기반 카테고리 추정
+      const isPlate = name.includes('plate')
+      const isTile = name.includes('tile')
+      const isSlope = name.includes('slope')
+      const isBrick = name.includes('brick')
+
+      // 종횡비 힌트: plate/타일은 대체로 가로로 길쭉(ar>=1.6) 또는 얇은 형태
+      let aspectScore = 0.5
+      if (isPlate || isTile) {
+        if (ar >= 1.6) aspectScore = 0.9
+        else if (ar >= 1.2) aspectScore = 0.75
+        else aspectScore = 0.55
+      } else if (isBrick) {
+        if (ar >= 0.8 && ar <= 1.5) aspectScore = 0.8
+        else aspectScore = 0.6
+      } else if (isSlope) {
+        // 경사류는 대체로 중간 비율
+        if (ar >= 1.2 && ar <= 2.2) aspectScore = 0.75
+        else aspectScore = 0.6
+      }
+
+      // 이름 카테고리 매칭 점수
+      const categoryScore = (isPlate || isTile || isBrick || isSlope) ? 0.8 : 0.6
+
+      return Math.max(0, Math.min(1, (aspectScore * 0.6 + categoryScore * 0.4)))
+    } catch (error) {
+      console.error('Metadata similarity error:', error)
+      return 0.5
+    }
+  }
+
+  // 수량 정보 검증 (가중치 없이 존재 여부만 확인)
+  const validateQuantity = (targetPart) => {
+    try {
+      const quantity = targetPart.quantity || 0
+      // 수량이 0보다 크면 해당 세트에 존재하는 부품
+      return quantity > 0
+    } catch (error) {
+      console.error('Quantity validation error:', error)
+      return false
+    }
+  }
+
+  // 부품 이미지 URL 조회 (Storage 직접 접근)
+  const getPartImageUrl = async (partId, colorId) => {
+    try {
+      // 먼저 part_images 테이블에서 조회 시도
+      const { data: partImages, error } = await supabase
+        .from('part_images')
+        .select('uploaded_url')
+        .eq('part_id', partId)
+        .eq('color_id', colorId)
+        .not('uploaded_url', 'is', null)
+        .limit(1)
+      
+      if (!error && partImages?.[0]?.uploaded_url) {
+        return partImages[0].uploaded_url
+      }
+      
+      // part_images에 없으면 Storage URL 직접 생성
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      if (supabaseUrl) {
+        const bucketName = 'lego_parts_images'
+        const fileName = `${partId}_${colorId}.jpg`
+        const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/${fileName}`
+        
+        // 이미지 존재 여부 확인
+        try {
+          const response = await fetch(directUrl, { method: 'HEAD' })
+          if (response.ok) {
+            console.log(`✅ Found image in Storage: ${fileName}`)
+            return directUrl
+          }
+        } catch (fetchError) {
+          console.log(`❌ Image not found in Storage: ${fileName}`)
         }
-        groupedSets[baseNum].push(set)
-      })
+      }
       
-      return Object.values(groupedSets).flat() || []
-    } catch (err) {
-      console.error('Failed to get available sets:', err)
+      return null
+    } catch (error) {
+      console.warn('Error in getPartImageUrl:', error)
+      return null
+    }
+  }
+
+  // Supabase Storage 이미지와 유사도 계산
+  const calculateImageSimilarity = async (capturedImage, targetPart) => {
+    try {
+      // part_images 테이블에서 이미지 URL 조회
+      const imageUrl = await getPartImageUrl(targetPart.part_id, targetPart.color_id)
+      if (!imageUrl) {
+        console.log('No reference image available for part:', targetPart.lego_parts?.name)
+        return 0.5 // 기본값
+      }
+
+      // Supabase Storage 이미지 로드
+      const referenceImage = await loadImageFromStorage(imageUrl)
+      if (!referenceImage) {
+        console.warn('Failed to load reference image:', imageUrl)
+        return 0.5
+      }
+
+      // 이미지 유사도 계산 (간단한 픽셀 기반 비교)
+      const similarity = await compareImages(capturedImage, referenceImage)
+      console.log(`Image similarity for ${targetPart.lego_parts?.name}: ${similarity.toFixed(3)}`)
+      
+      return similarity
+    } catch (error) {
+      console.error('Image similarity calculation error:', error)
+      return 0.5
+    }
+  }
+
+  // Supabase Storage에서 이미지 로드
+  const loadImageFromStorage = async (imageUrl) => {
+    try {
+      if (referenceImageCache.has(imageUrl)) {
+        return referenceImageCache.get(imageUrl)
+      }
+      const p = new Promise((resolve, reject) => {
+        const img = new Image()
+        img.crossOrigin = 'anonymous' // CORS 설정
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('Failed to load image'))
+        img.src = imageUrl
+      })
+      referenceImageCache.set(imageUrl, p)
+      return p
+    } catch (error) {
+      console.error('Failed to load image from storage:', error)
+      return null
+    }
+  }
+
+  // 두 이미지 비교 (간단한 픽셀 기반)
+  const compareImages = async (capturedImageBase64, referenceImage) => {
+    try {
+      // 촬영한 이미지를 Image 객체로 변환
+      const capturedImage = await new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('Failed to load captured image'))
+        img.src = capturedImageBase64
+      })
+
+      const canvas1 = document.createElement('canvas')
+      const canvas2 = document.createElement('canvas')
+      const ctx1 = canvas1.getContext('2d')
+      const ctx2 = canvas2.getContext('2d')
+
+      // 이미지 크기 통일 (64x64로 리사이즈)
+      const size = 64
+      canvas1.width = canvas2.width = size
+      canvas1.height = canvas2.height = size
+
+      ctx1.drawImage(capturedImage, 0, 0, size, size)
+      ctx2.drawImage(referenceImage, 0, 0, size, size)
+
+      const data1 = ctx1.getImageData(0, 0, size, size).data
+      const data2 = ctx2.getImageData(0, 0, size, size).data
+
+      // 픽셀별 차이 계산
+      let totalDiff = 0
+      for (let i = 0; i < data1.length; i += 4) {
+        const r1 = data1[i]
+        const g1 = data1[i + 1]
+        const b1 = data1[i + 2]
+        const r2 = data2[i]
+        const g2 = data2[i + 1]
+        const b2 = data2[i + 2]
+
+        const diff = Math.sqrt(
+          Math.pow(r1 - r2, 2) + 
+          Math.pow(g1 - g2, 2) + 
+          Math.pow(b1 - b2, 2)
+        )
+        totalDiff += diff
+      }
+
+      // 유사도 계산 (0-1 범위)
+      const maxDiff = Math.sqrt(3 * 255 * 255) * (size * size)
+      const similarity = Math.max(0, 1 - (totalDiff / maxDiff))
+      
+      return similarity
+    } catch (error) {
+      console.error('Image comparison error:', error)
+      return 0.5
+    }
+  }
+
+  // 최적화된 유사도 계산 (메타데이터 + 이미지 활용 강화)
+  const calculateRealSimilarity = async (imageFeatures, targetPart, capturedImage) => {
+    try {
+      const colorSimilarity = calculateFastColorSimilarity(imageFeatures.avgColor, targetPart.lego_colors)
+      const sizeSimilarity = calculateSimpleSizeSimilarity(imageFeatures.edgeCount, targetPart)
+      const shapeSimilarity = calculateBasicShapeSimilarity(imageFeatures, targetPart)
+      
+      // 부품명 기반 텍스트 유사도 (간단한 키워드 매칭)
+      const textSimilarity = calculateTextSimilarity(imageFeatures, targetPart)
+      
+      // Supabase Storage 이미지와 유사도 계산 (임시 비활성화 - Storage 동기화 필요)
+      let imageSimilarity = 0.5
+      try {
+        imageSimilarity = await calculateImageSimilarity(capturedImage, targetPart)
+      } catch (error) {
+        console.log(`Using fallback image similarity for ${targetPart.lego_parts?.name}`)
+        // 이미지가 없으면 색상+형상 유사도로 추정
+        imageSimilarity = (colorSimilarity + shapeSimilarity) / 2
+      }
+      
+      // 수량 정보 검증 (해당 세트에 존재하는 부품인지 확인)
+      const isValidPart = validateQuantity(targetPart)
+      
+      // 메타데이터 유사도 계산
+      const metadataSimilarity = calculateMetadataSimilarity(imageFeatures, targetPart)
+
+      // 가중 평균으로 최종 유사도 계산 (메타데이터 포함)
+      const similarity = (
+        colorSimilarity * 0.30 +
+        sizeSimilarity * 0.25 +
+        shapeSimilarity * 0.15 +
+        textSimilarity * 0.10 +
+        imageSimilarity * 0.15 +
+        metadataSimilarity * 0.05
+      )
+
+      return {
+        similarity: Math.max(0, Math.min(1, similarity)),
+        colorMatch: colorSimilarity,
+        sizeMatch: sizeSimilarity,
+        shapeMatch: shapeSimilarity,
+        textMatch: textSimilarity,
+        imageMatch: imageSimilarity,
+        metadataMatch: metadataSimilarity,
+        isValidPart: isValidPart,
+        // 메타데이터 정보 추가
+        partInfo: {
+          partNum: targetPart.lego_parts?.part_num,
+          partName: targetPart.lego_parts?.name,
+          colorName: targetPart.lego_colors?.name,
+          quantity: targetPart.quantity,
+          imageUrl: await getPartImageUrl(targetPart.part_id, targetPart.color_id)
+        }
+      }
+    } catch (error) {
+      console.error('Error calculating similarity:', error)
+      return {
+        similarity: 0.5,
+        colorMatch: 0.5,
+        sizeMatch: 0.5,
+        shapeMatch: 0.5,
+        textMatch: 0.5,
+        imageMatch: 0.5,
+        isValidPart: false
+      }
+    }
+  }
+
+  // 색상 기반 타겟 필터링
+  const filterTargetsByNearestColor = (imageColor, targetParts) => {
+    const colorSimilarities = targetParts.map(part => ({
+      part,
+      colorSimilarity: calculateFastColorSimilarity(imageColor, part.lego_colors)
+    }))
+    
+    colorSimilarities.sort((a, b) => b.colorSimilarity - a.colorSimilarity)
+    
+    const topCount = Math.min(10, colorSimilarities.length)
+    return colorSimilarities.slice(0, topCount).map(item => item.part)
+  }
+
+  // 실제 이미지 기반 부품 매칭
+  const matchDetectedPart = async (imageBase64) => {
+    try {
+      console.log('🔍 Analyzing real image for parts...')
+      // 입력 이미지 유효성(최소 크기) 확인
+      const dimOk = await (async () => {
+        try {
+          const probe = await new Promise((resolve, reject) => {
+            const img = new Image()
+            img.onload = () => resolve({ w: img.width, h: img.height })
+            img.onerror = () => resolve({ w: 0, h: 0 })
+            img.src = imageBase64
+          })
+          return probe.w >= 32 && probe.h >= 32
+        } catch (_) { return false }
+      })()
+      if (!dimOk) {
+        console.warn('Skipped crop (too small/invalid)')
+        return []
+      }
+      
+      // 실제 이미지 분석
+      const imageFeatures = await analyzeImageForParts(imageBase64)
+      console.log('Extracting real image features')
+      
+      // 타겟 부품이 없으면 빈 배열 반환
+      if (!targetParts.value || targetParts.value.length === 0) {
+        console.log('No target parts available')
+        return []
+      }
+      
+      // 색상 기반 필터링
+      let filteredTargets = filterTargetsByNearestColor(imageFeatures.avgColor, targetParts.value)
+      console.log(`Filtered to ${filteredTargets.length} color-similar targets`)
+
+      // 메타데이터 기반 2차 필터: 종횡비가 큰 경우 plate 계열 우선
+      const nameIncludes = (p, kw) => (p.lego_parts?.name || '').toLowerCase().includes(kw)
+      if ((imageFeatures.aspectRatio ?? 1) >= 1.6) {
+        const plateFav = filteredTargets.filter(p => nameIncludes(p, 'plate'))
+        if (plateFav.length >= 3) {
+          filteredTargets = plateFav
+          console.log(`Metadata filter applied (plate favored): ${filteredTargets.length}` )
+        }
+      }
+      
+      // 유사도 계산 (이미지 포함)
+      const similarities = await Promise.all(filteredTargets.map(async targetPart => {
+        const similarity = await calculateRealSimilarity(imageFeatures, targetPart, imageBase64)
+        return {
+          part: targetPart,
+          similarity: similarity.similarity,
+          confidence: similarity.similarity * 0.7 + similarity.colorMatch * 0.3,
+          colorMatch: similarity.colorMatch,
+          sizeMatch: similarity.sizeMatch,
+          shapeMatch: similarity.shapeMatch,
+          imageMatch: similarity.imageMatch
+        }
+      }))
+      
+      // 저유사도 제거 및 상위 후보 선택
+      const pruned = similarities.filter(s => (s.similarity ?? 0) >= 0.6 || (s.imageMatch ?? 0) >= 0.6)
+      pruned.sort((a, b) => b.similarity - a.similarity)
+      const topCandidates = (pruned.length > 0 ? pruned : similarities).slice(0, 1)
+      
+      console.log(`Found ${topCandidates.length} candidates`)
+      return topCandidates
+    } catch (error) {
+      console.error('Error in real image matching:', error)
       return []
     }
   }
 
   return {
-    loading,
-    error,
-    matching,
+    targetParts,
+    masterParts,
+    isLoaded,
     loadTargetSetParts,
-    matchDetectedPart,
-    calculateSimilarities,
-    validateCandidates,
-    calculateFinalScores,
-    getAvailableSets
+    getAvailableSets,
+    matchDetectedPart
   }
 }
+

@@ -50,7 +50,7 @@ export function useLLMIntegration() {
 
     try {
       const candidateDescriptions = candidates.map((candidate, index) => 
-        `${index + 1}. ${candidate.part.name} (${candidate.color.name}) - ${candidate.llm_visual_features?.shape_description || '설명 없음'}`
+        `${index + 1}. ${candidate.part?.name || '알 수 없는 부품'} (${candidate.color?.name || '알 수 없는 색상'}) - ${candidate.llm_visual_features?.shape_description || '설명 없음'}`
       ).join('\n')
 
       const messages = [

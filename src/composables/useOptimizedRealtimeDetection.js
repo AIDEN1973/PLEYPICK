@@ -1,6 +1,7 @@
 import { ref, reactive } from 'vue'
 import { useMasterPartsMatching } from './useMasterPartsMatching'
 import { useThresholdSystem } from './useThresholdSystem'
+import { useYoloDetector } from './useYoloDetector'
 
 export function useOptimizedRealtimeDetection() {
   const loading = ref(false)
@@ -40,8 +41,9 @@ export function useOptimizedRealtimeDetection() {
       const sessionId = crypto.randomUUID()
       
       // 2. 마스터 DB에서 타겟 세트 부품 로드 (LLM 없이!)
-      const targetParts = await loadTargetSetParts(setNum)
-      
+      const loadRes = await loadTargetSetParts(setNum)
+      const targetParts = Array.isArray(loadRes) ? loadRes : (loadRes?.targetParts || [])
+
       if (!targetParts || targetParts.length === 0) {
         throw new Error(`세트 ${setNum}의 부품 정보가 마스터 DB에 없습니다.`)
       }
@@ -78,7 +80,7 @@ export function useOptimizedRealtimeDetection() {
     const startTime = performance.now()
 
     try {
-      // 1. 부품 검출 (YOLO/RT-DETR)
+      // 1. 부품 검출 (YOLO WebGPU/CPU)
       const detectedParts = await detectPartsWithYOLO(imageData)
       
       // 2. 마스터 DB 기반 매칭 (LLM 없이!)
@@ -104,6 +106,7 @@ export function useOptimizedRealtimeDetection() {
 
       return {
         detectedParts,
+        detections: detectedParts,
         matchedResults,
         approvalResults,
         processingTime: processingTime,
@@ -121,31 +124,178 @@ export function useOptimizedRealtimeDetection() {
     }
   }
 
-  // YOLO 기반 부품 검출
+  // 실제 이미지 분석 기반 부품 검출
   const detectPartsWithYOLO = async (imageData) => {
-    // 실제 구현에서는 YOLO/RT-DETR 모델 사용
-    // 여기서는 시뮬레이션된 검출 결과 반환
-    
-    const detections = []
-    const numParts = Math.floor(Math.random() * 3) + 1 // 1-3개 부품
+    console.log('🔍 YOLO detection start...')
+    const { detect, init } = useYoloDetector()
+    try {
+      await init({ modelPath: '/models/yolo11n-seg.onnx', inputSize: 640 })
+      const dets = await detect(imageData, { confThreshold: 0.25 })
+      console.log(`YOLO detected ${dets.length} objects`)
 
-    for (let i = 0; i < numParts; i++) {
-      const detection = {
-        id: crypto.randomUUID(),
-        boundingBox: {
-          x: Math.random() * 0.8,
-          y: Math.random() * 0.8,
-          width: 0.1 + Math.random() * 0.2,
-          height: 0.1 + Math.random() * 0.2
-        },
-        confidence: 0.8 + Math.random() * 0.2,
-        image: imageData,
-        timestamp: new Date().toISOString()
+      // 정규화된 바운딩박스 생성: {boundingBox:{x,y,width,height}}
+      const toBox = (d) => {
+        if (d?.boundingBox && typeof d.boundingBox.width === 'number') return d.boundingBox
+        if (d?.box && typeof d.box.width === 'number') return d.box
+        if (Array.isArray(d?.bbox) && d.bbox.length >= 4) {
+          const [x,y,w,h] = d.bbox
+          return { x, y, width: w, height: h }
+        }
+        if (typeof d?.x1 === 'number' && typeof d?.y1 === 'number' && typeof d?.x2 === 'number' && typeof d?.y2 === 'number') {
+          const w = Math.max(0, d.x2 - d.x1)
+          const h = Math.max(0, d.y2 - d.y1)
+          return { x: d.x1, y: d.y1, width: w, height: h }
+        }
+        return { x: 0, y: 0, width: 1, height: 1 }
       }
-      detections.push(detection)
-    }
 
-    return detections
+      const normalized = dets.map(d => ({ ...d, boundingBox: toBox(d) }))
+      if (normalized.length > 0) console.log('[AR] sample box:', normalized[0].boundingBox)
+
+      if (normalized.length === 0) {
+        return [{
+          id: crypto.randomUUID(),
+          boundingBox: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+          confidence: 0.6,
+          image: imageData,
+          timestamp: new Date().toISOString()
+        }]
+      }
+      return normalized
+    } catch (err) {
+      console.error('YOLO detection failed, fallback to simple analysis:', err)
+      const detections = await analyzeImageForParts(imageData)
+      return detections
+    }
+  }
+
+  // 실제 이미지에서 부품 분석
+  const analyzeImageForParts = async (imageData) => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        canvas.width = img.width
+        canvas.height = img.height
+        ctx.drawImage(img, 0, 0)
+        
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const parts = detectPartsInImageData(imageData)
+        resolve(parts)
+      }
+      img.src = imageData
+    })
+  }
+
+  // 이미지 데이터에서 부품 검출
+  const detectPartsInImageData = (imageData) => {
+    const data = imageData.data
+    const width = imageData.width
+    const height = imageData.height
+    
+    // 간단한 객체 검출: 엣지 밀도 기반
+    const edgeMap = createEdgeMap(data, width, height)
+    const objects = findObjectsInEdgeMap(edgeMap, width, height)
+    
+    return objects.map((obj, index) => ({
+      id: crypto.randomUUID(),
+      boundingBox: {
+        x: obj.x / width,
+        y: obj.y / height,
+        width: obj.width / width,
+        height: obj.height / height
+      },
+      confidence: obj.confidence,
+      image: imageData,
+      timestamp: new Date().toISOString()
+    }))
+  }
+
+  // 엣지 맵 생성
+  const createEdgeMap = (data, width, height) => {
+    const edges = new Array(width * height).fill(0)
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        const idx = (y * width + x) * 4
+        const current = (data[idx] + data[idx + 1] + data[idx + 2]) / 3
+        const right = (data[idx + 4] + data[idx + 5] + data[idx + 6]) / 3
+        const down = (data[idx + width * 4] + data[idx + width * 4 + 1] + data[idx + width * 4 + 2]) / 3
+        
+        const edgeStrength = Math.abs(current - right) + Math.abs(current - down)
+        edges[y * width + x] = edgeStrength > 30 ? 1 : 0
+      }
+    }
+    
+    return edges
+  }
+
+  // 엣지 맵에서 객체 찾기
+  const findObjectsInEdgeMap = (edges, width, height) => {
+    const objects = []
+    const visited = new Array(width * height).fill(false)
+    
+    for (let y = 0; y < height; y += 10) {
+      for (let x = 0; x < width; x += 10) {
+        if (!visited[y * width + x] && edges[y * width + x] === 1) {
+          const object = floodFillObject(edges, visited, x, y, width, height)
+          if (object.area > 100) { // 최소 크기 필터
+            objects.push(object)
+          }
+        }
+      }
+    }
+    
+    // 객체가 없으면 전체 이미지를 하나의 객체로 처리
+    if (objects.length === 0) {
+      objects.push({
+        x: 0,
+        y: 0,
+        width: width,
+        height: height,
+        area: width * height,
+        confidence: 0.7
+      })
+    }
+    
+    return objects
+  }
+
+  // 플러드 필 알고리즘으로 객체 영역 찾기
+  const floodFillObject = (edges, visited, startX, startY, width, height) => {
+    const stack = [{x: startX, y: startY}]
+    let minX = startX, maxX = startX, minY = startY, maxY = startY
+    let area = 0
+    
+    while (stack.length > 0) {
+      const {x, y} = stack.pop()
+      const idx = y * width + x
+      
+      if (x < 0 || x >= width || y < 0 || y >= height || visited[idx] || edges[idx] === 0) {
+        continue
+      }
+      
+      visited[idx] = true
+      area++
+      
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+      
+      // 4방향 탐색
+      stack.push({x: x+1, y}, {x: x-1, y}, {x, y: y+1}, {x, y: y-1})
+    }
+    
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+      area: area,
+      confidence: Math.min(0.9, 0.5 + (area / 10000)) // 면적에 따른 신뢰도
+    }
   }
 
   // 마스터 DB 기반 매칭

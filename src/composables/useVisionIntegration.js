@@ -1,6 +1,7 @@
 import { ref, reactive } from 'vue'
 import { useMasterPartsMatching } from './useMasterPartsMatching'
 import { useImageProcessing } from './useImageProcessing'
+import { useYoloDetector } from './useYoloDetector'
 import { useThresholdSystem } from './useThresholdSystem'
 import { useLLMIntegration } from './useLLMIntegration'
 
@@ -14,6 +15,7 @@ export function useVisionIntegration() {
   const { assessImageQuality, preprocessImage, extractImageMetadata } = useImageProcessing()
   const { processThresholdApproval } = useThresholdSystem()
   const { rerankPartCandidates } = useLLMIntegration()
+  const yolo = useYoloDetector()
 
   // 통합 인식 상태
   const recognitionState = reactive({
@@ -58,15 +60,93 @@ export function useVisionIntegration() {
 
       // 3. 마스터 DB에서 타겟 부품 로드
       console.log('📊 Step 3: Loading target parts from master DB...')
-      const targetParts = await loadTargetSetParts(setNum)
+      const loadRes = await loadTargetSetParts(setNum)
+      const targetParts = loadRes?.targetParts || []
       console.log(`Target parts loaded: ${targetParts.length}`)
 
-      // 4. 마스터 DB 기반 매칭
-      console.log('🎯 Step 4: Master DB matching...')
-      const matchResults = await matchDetectedPart(processedImage, targetParts)
+      // 4. YOLO 기반 객체 검출 (로컬 WebGPU/CPU)
+      console.log('🧠 Step 4: YOLO object detection...')
+      let detections = []
+      
+      try {
+        // 모델 초기화
+        await yolo.init({ modelPath: '/models/yolo11n-seg.onnx', inputSize: 640 })
+        
+        // YOLO 검출 실행
+        detections = await yolo.detect(processedImage, { confThreshold: 0.25 })
+        console.log(`YOLO detections: ${detections.length}`)
+
+        // 매칭 부하를 줄이기 위해 상위 N개만 사용 (강제 제한)
+        const minDetConf = options.minDetConf ?? 0.50
+        const maxDetections = options.maxDetections ?? 10  // 더 적극적으로 제한
+        console.log(`🔧 Filtering detections: minConf=${minDetConf}, maxDet=${maxDetections}`)
+        
+        const originalCount = detections.length
+        detections = detections
+          .filter(d => (d.confidence ?? 0) >= minDetConf)
+          .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+          .slice(0, maxDetections)
+        
+        console.log(`🔧 Filtered from ${originalCount} to ${detections.length} detections`)
+        
+        if (detections.length === 0) {
+          console.log('No YOLO detections after filtering, using full-frame fallback')
+          detections = [{
+            id: crypto.randomUUID(),
+            boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+            confidence: 0.6,
+            image: processedImage,
+            timestamp: new Date().toISOString()
+          }]
+        }
+        
+        if (detections.length === 0) {
+          console.log('No YOLO detections, using full-frame fallback')
+          detections = [{
+            id: crypto.randomUUID(),
+            boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+            confidence: 0.6,
+            image: processedImage,
+            timestamp: new Date().toISOString()
+          }]
+        }
+      } catch (e) {
+        console.warn('YOLO detection failed, using fallback detection:', e.message)
+        // YOLO 실패 시 전체 이미지를 하나의 객체로 처리
+        detections = [{
+          id: crypto.randomUUID(),
+          boundingBox: { x: 0, y: 0, width: 1, height: 1 },
+          confidence: 0.6,
+          image: processedImage,
+          timestamp: new Date().toISOString()
+        }]
+      }
+
+      // 5. 검출된 각 객체에 대해 마스터 DB 기반 매칭
+      console.log('🎯 Step 5: Master DB matching per detection...')
+      const matchResults = []
+      for (const det of detections) {
+        try {
+          const best = await matchDetectedPart(det.image)
+          // matchDetectedPart는 상위 1개만 반환하도록 구현되어 있음
+          const top = Array.isArray(best) ? best[0] : best
+          if (top) {
+            matchResults.push({
+              ...top,
+              // 스코어 보강
+              similarity: top.similarity ?? top.colorMatch ?? 0.6,
+              vision: top.similarity ?? 0.7,
+              color: top.colorMatch ?? 0.7,
+              detectedPart: det
+            })
+          }
+        } catch (e) {
+          console.warn('Matching failed for detection:', e)
+        }
+      }
       console.log('Match results:', matchResults)
 
-      // 5. LLM 후보 재랭킹 (선택적)
+      // 6. LLM 후보 재랭킹 (선택적)
       let finalResults = matchResults
       const enableLLM = options.enableLLM || (import.meta.env.VITE_ENABLE_LLM_RERANK || 'false') === 'true'
       
@@ -84,14 +164,14 @@ export function useVisionIntegration() {
         }
       }
 
-      // 6. 임계치 기반 승인 처리
+      // 7. 임계치 기반 승인 처리
       console.log('✅ Step 6: Threshold-based approval...')
       const approvalResults = await processThresholdApproval(finalResults)
 
-      // 7. 처리 시간 계산
+      // 8. 처리 시간 계산
       const processingTime = performance.now() - startTime
 
-      // 8. 통계 업데이트
+      // 9. 통계 업데이트
       updateProcessingStats(approvalResults, processingTime)
 
       const result = {
@@ -102,7 +182,7 @@ export function useVisionIntegration() {
         performance: {
           speed: `${processingTime.toFixed(1)}ms`,
           accuracy: calculateAccuracy(approvalResults),
-          efficiency: 'Integrated (Master DB + Vision)',
+          efficiency: 'Integrated (YOLO + Master DB)',
           costSavings: enableLLM ? '50% (Selective LLM)' : '99% (Master DB Only)'
         }
       }

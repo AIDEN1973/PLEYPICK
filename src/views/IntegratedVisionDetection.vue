@@ -24,7 +24,7 @@
             id="setNumber"
             v-model="setNumber" 
             type="text" 
-            placeholder="예: 60387"
+            placeholder="76917"
             :disabled="loading"
           />
         </div>
@@ -122,17 +122,21 @@
           <h3>✅ 자동 승인된 부품 ({{ detectionResults.autoApproved.length }}개)</h3>
           <div class="parts-grid">
             <div 
-              v-for="part in detectionResults.autoApproved" 
-              :key="part.id"
+              v-for="(part, index) in detectionResults.autoApproved" 
+              :key="part.id || index"
               class="part-card approved"
             >
               <div class="part-info">
-                <span class="part-name">{{ part.bestMatch?.part.name || part.matchResult?.part?.name }}</span>
-                <span class="part-color">{{ part.bestMatch?.color.name || part.matchResult?.color?.name }}</span>
-                <span class="confidence">신뢰도: {{ (part.confidence * 100).toFixed(1) }}%</span>
+                <span class="part-name">{{ getPartName(part) }}</span>
+                <span class="part-color">{{ getPartColor(part) }}</span>
+                <span class="part-number">부품번호: {{ getPartNumber(part) }}</span>
+                <span class="confidence">신뢰도: {{ getConfidence(part) }}%</span>
+                <span class="final-score">최종점수: {{ getFinalScore(part) }}</span>
+                <span class="quantity" v-if="getPartQuantity(part)">수량: {{ getPartQuantity(part) }}개</span>
               </div>
               <div class="processing-info">
-                <span class="processing-method">{{ part.processingMethod || '통합 인식' }}</span>
+                <span class="processing-method">통합 인식 (자동승인)</span>
+                <span class="timestamp">{{ formatTimestamp(part.timestamp) }}</span>
               </div>
             </div>
           </div>
@@ -143,27 +147,34 @@
           <h3>⚠️ 수동 검토 필요 ({{ detectionResults.manualReview.length }}개)</h3>
           <div class="parts-grid">
             <div 
-              v-for="part in detectionResults.manualReview" 
-              :key="part.id"
+              v-for="(part, index) in detectionResults.manualReview" 
+              :key="part.id || index"
               class="part-card manual"
             >
               <div class="part-info">
-                <span class="part-name">{{ part.bestMatch?.part.name || part.matchResult?.part?.name }}</span>
-                <span class="part-color">{{ part.bestMatch?.color.name || part.matchResult?.color?.name }}</span>
-                <span class="confidence">신뢰도: {{ (part.confidence * 100).toFixed(1) }}%</span>
+                <span class="part-name">{{ getPartName(part) }}</span>
+                <span class="part-color">{{ getPartColor(part) }}</span>
+                <span class="part-number">부품번호: {{ getPartNumber(part) }}</span>
+                <span class="confidence">신뢰도: {{ getConfidence(part) }}%</span>
+                <span class="final-score">최종점수: {{ getFinalScore(part) }}</span>
               </div>
               <div class="candidates">
                 <h4>후보 부품들:</h4>
                 <div class="candidate-list">
                   <div 
-                    v-for="(candidate, index) in part.topCandidates" 
-                    :key="index"
+                    v-for="(candidate, idx) in getTopCandidates(part)" 
+                    :key="idx"
                     class="candidate-item"
                     @click="selectCandidate(part, candidate)"
                   >
-                    {{ candidate.part.name }} ({{ candidate.color.name }})
+                    {{ candidate.part?.name || '알 수 없는 부품' }} ({{ candidate.color?.name || '알 수 없는 색상' }})
+                    <span class="candidate-score">점수: {{ (candidate.similarity * 100).toFixed(1) }}%</span>
                   </div>
                 </div>
+              </div>
+              <div class="processing-info">
+                <span class="processing-method">통합 인식 (수동검토)</span>
+                <span class="timestamp">{{ formatTimestamp(part.timestamp) }}</span>
               </div>
             </div>
           </div>
@@ -174,21 +185,27 @@
           <h3>🔄 재촬영 필요 ({{ detectionResults.retakeRequired.length }}개)</h3>
           <div class="parts-grid">
             <div 
-              v-for="part in detectionResults.retakeRequired" 
-              :key="part.id"
+              v-for="(part, index) in detectionResults.retakeRequired" 
+              :key="part.id || index"
               class="part-card retake"
             >
               <div class="part-info">
-                <span class="part-name">부품 식별 실패</span>
-                <span class="confidence">신뢰도: {{ (part.confidence * 100).toFixed(1) }}%</span>
+                <span class="part-name">{{ getPartName(part) || '부품 식별 실패' }}</span>
+                <span class="part-color">{{ getPartColor(part) || '알 수 없는 색상' }}</span>
+                <span class="confidence">신뢰도: {{ getConfidence(part) }}%</span>
+                <span class="final-score">최종점수: {{ getFinalScore(part) }}</span>
               </div>
               <div class="guidance">
-                <h4>가이드:</h4>
+                <h4>재촬영 가이드:</h4>
                 <ul>
-                  <li v-for="suggestion in part.guidance?.suggestions || ['카메라 각도를 조정해주세요.']" :key="suggestion">
+                  <li v-for="suggestion in getGuidanceSuggestions(part)" :key="suggestion">
                     {{ suggestion }}
                   </li>
                 </ul>
+              </div>
+              <div class="processing-info">
+                <span class="processing-method">통합 인식 (재촬영필요)</span>
+                <span class="timestamp">{{ formatTimestamp(part.timestamp) }}</span>
               </div>
             </div>
           </div>
@@ -201,19 +218,27 @@
         <div class="stats-grid">
           <div class="stat-card">
             <span class="stat-label">총 처리</span>
-            <span class="stat-value">{{ recognitionState.processingStats.totalProcessed }}</span>
+            <span class="stat-value">{{ totalProcessed }}</span>
           </div>
-          <div class="stat-card">
-            <span class="stat-label">성공</span>
-            <span class="stat-value">{{ recognitionState.processingStats.successfulMatches }}</span>
+          <div class="stat-card success">
+            <span class="stat-label">자동 승인</span>
+            <span class="stat-value">{{ detectionResults.autoApproved.length }}</span>
+          </div>
+          <div class="stat-card warning">
+            <span class="stat-label">수동 검토</span>
+            <span class="stat-value">{{ detectionResults.manualReview.length }}</span>
+          </div>
+          <div class="stat-card error">
+            <span class="stat-label">재촬영 필요</span>
+            <span class="stat-value">{{ detectionResults.retakeRequired.length }}</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">성공률</span>
-            <span class="stat-value">{{ ((recognitionState.processingStats.successfulMatches / Math.max(recognitionState.processingStats.totalProcessed, 1)) * 100).toFixed(1) }}%</span>
+            <span class="stat-value">{{ successRate }}%</span>
           </div>
           <div class="stat-card">
             <span class="stat-label">평균 신뢰도</span>
-            <span class="stat-value">{{ (recognitionState.processingStats.averageConfidence * 100).toFixed(1) }}%</span>
+            <span class="stat-value">{{ averageConfidence }}%</span>
           </div>
         </div>
         <div class="performance-display">
@@ -232,7 +257,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useVisionIntegration } from '../composables/useVisionIntegration'
 import { useMasterPartsMatching } from '../composables/useMasterPartsMatching'
 
@@ -267,6 +292,97 @@ const detectionResults = reactive({
 
 // 카메라 스트림
 let cameraStream = null
+
+// 계산된 통계
+const totalProcessed = computed(() => {
+  return detectionResults.autoApproved.length + 
+         detectionResults.manualReview.length + 
+         detectionResults.retakeRequired.length
+})
+
+const successRate = computed(() => {
+  if (totalProcessed.value === 0) return 0
+  const successful = detectionResults.autoApproved.length + 
+                    (detectionResults.manualReview.length * 0.5) // 수동 검토는 50% 성공으로 계산
+  return Math.round((successful / totalProcessed.value) * 100)
+})
+
+const averageConfidence = computed(() => {
+  const allResults = [
+    ...detectionResults.autoApproved,
+    ...detectionResults.manualReview,
+    ...detectionResults.retakeRequired
+  ]
+  
+  if (allResults.length === 0) return 0
+  
+  const totalConfidence = allResults.reduce((sum, result) => {
+    return sum + (result.confidence || 0.5)
+  }, 0)
+  
+  return Math.round((totalConfidence / allResults.length) * 100)
+})
+
+const averageProcessingTime = computed(() => {
+  return recognitionState.processingStats.averageProcessingTime || 0
+})
+
+// 부품 정보 추출 헬퍼 함수들
+const getPartName = (part) => {
+  return part.part?.lego_parts?.name || 
+         part.bestMatch?.part?.lego_parts?.name || 
+         part.matchResult?.part?.lego_parts?.name || 
+         part.detectedPart?.name || 
+         '알 수 없는 부품'
+}
+
+const getPartColor = (part) => {
+  return part.part?.lego_colors?.name ||
+         part.bestMatch?.color?.lego_colors?.name || 
+         part.matchResult?.color?.lego_colors?.name || 
+         part.detectedPart?.color?.name || 
+         '알 수 없는 색상'
+}
+
+const getPartNumber = (part) => {
+  return part.part?.lego_parts?.part_num ||
+         part.bestMatch?.part?.lego_parts?.part_num || 
+         part.matchResult?.part?.lego_parts?.part_num || 
+         part.detectedPart?.part_num || 
+         part.part?.part_id ||  // fallback to part_id
+         '알 수 없음'
+}
+
+const getConfidence = (part) => {
+  return Math.round((part.confidence || 0.5) * 100)
+}
+
+const getFinalScore = (part) => {
+  return (part.finalScore || 0).toFixed(3)
+}
+
+const getPartQuantity = (part) => {
+  return part.partInfo?.quantity || part.part?.quantity || null
+}
+
+// 희귀도 함수 제거 - 수량 정보만 사용
+
+const getTopCandidates = (part) => {
+  return part.topCandidates || part.candidates || []
+}
+
+const getGuidanceSuggestions = (part) => {
+  return part.guidance?.suggestions || [
+    '카메라 각도를 조정해주세요.',
+    '조명을 개선해주세요.',
+    '부품을 더 명확하게 배치해주세요.'
+  ]
+}
+
+const formatTimestamp = (timestamp) => {
+  if (!timestamp) return '알 수 없음'
+  return new Date(timestamp).toLocaleTimeString()
+}
 
 // 사용 가능한 세트 로드
 const loadAvailableSets = async () => {
@@ -403,7 +519,9 @@ const captureFrame = async () => {
     // 통합 인식 처리 (옵션 전달)
     const recognitionResult = await processRealtimeRecognition(imageData, {
       enableLLM: enableLLM.value,
-      enablePreprocessing: enablePreprocessing.value
+      enablePreprocessing: enablePreprocessing.value,
+      maxDetections: 20,  // YOLO 검출 결과를 20개로 제한
+      minDetConf: 0.5    // 신뢰도 0.5 이상만 사용
     })
     
     // 결과 업데이트
@@ -478,7 +596,9 @@ const handleImageUpload = async (event) => {
     // 통합 인식 처리
     const recognitionResult = await processRealtimeRecognition(imageData, {
       enableLLM: enableLLM.value,
-      enablePreprocessing: enablePreprocessing.value
+      enablePreprocessing: enablePreprocessing.value,
+      maxDetections: 20,  // YOLO 검출 결과를 20개로 제한
+      minDetConf: 0.5     // 신뢰도 0.5 이상만 사용
     })
     
     // 결과 업데이트
@@ -837,38 +957,76 @@ onUnmounted(() => {
 
 .part-info {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.part-info span {
+  display: block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 14px;
 }
 
 .part-name {
   font-weight: bold;
   font-size: 16px;
+  color: #2c3e50;
+  background: #ecf0f1;
 }
 
 .part-color {
-  color: #666;
-  font-size: 14px;
+  color: #7f8c8d;
+  background: #f8f9fa;
+}
+
+.part-number {
+  color: #34495e;
+  background: #e8f4f8;
+  font-family: monospace;
 }
 
 .confidence {
-  background: #f0f0f0;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 12px;
+  color: #27ae60;
+  background: #d5f4e6;
+  font-weight: bold;
 }
+
+.final-score {
+  color: #8e44ad;
+  background: #f4e6f7;
+  font-weight: bold;
+}
+
+.quantity {
+  color: #27ae60;
+  background: #d5f4e6;
+  font-weight: bold;
+}
+
+/* 희귀도 스타일 제거 - 수량 정보만 사용 */
+
 
 .processing-info {
   margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .processing-method {
-  background: #e3f2fd;
-  color: #1976d2;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 11px;
+  color: #495057;
+  font-weight: bold;
+}
+
+.timestamp {
+  color: #6c757d;
+  font-family: monospace;
 }
 
 .candidates {
@@ -938,6 +1096,22 @@ onUnmounted(() => {
   padding: 15px;
   border-radius: 8px;
   text-align: center;
+  border-left: 4px solid #6c757d;
+}
+
+.stat-card.success {
+  background: #d4edda;
+  border-left-color: #28a745;
+}
+
+.stat-card.warning {
+  background: #fff3cd;
+  border-left-color: #ffc107;
+}
+
+.stat-card.error {
+  background: #f8d7da;
+  border-left-color: #dc3545;
 }
 
 .stat-label {

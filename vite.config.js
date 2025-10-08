@@ -1,11 +1,17 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
   return {
     plugins: [vue()],
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src')
+      }
+    },
     define: {
       __VUE_OPTIONS_API__: true,
       __VUE_PROD_DEVTOOLS__: false,
@@ -42,6 +48,21 @@ export default defineConfig(({ mode }) => {
             });
             proxy.on('proxyRes', (proxyRes, req, _res) => {
               console.log('Received Upload Response:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
+        '/api/synthetic': {
+          target: 'http://localhost:3004',
+          changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('synthetic API proxy error', err);
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log('Sending Synthetic API Request:', req.method, req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('Received Synthetic API Response:', proxyRes.statusCode, req.url);
             });
           },
         }

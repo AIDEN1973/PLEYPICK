@@ -47,6 +47,8 @@
             playsinline
             class="camera-feed"
           ></video>
+          <!-- AR Overlay Canvas -->
+          <canvas ref="overlayCanvas" class="overlay-canvas"></canvas>
           <div class="camera-overlay">
             <div class="detection-indicator" :class="{ active: detecting }">
               {{ detecting ? '검출 중...' : '대기 중' }}
@@ -60,11 +62,43 @@
           <button @click="toggleCamera" class="camera-toggle-btn">
             {{ cameraActive ? '카메라 중지' : '카메라 시작' }}
           </button>
+          <button @click="saveCapture" :disabled="!cameraActive || !setNumber" class="camera-toggle-btn">
+            캡처 저장
+          </button>
+          <button @click="fetchReport" :disabled="!setNumber" class="camera-toggle-btn">
+            세트 리포트
+          </button>
+          <button @click="startContinuousCapture" :disabled="!cameraActive || isContinuous" class="camera-toggle-btn">
+            계속 촬영
+          </button>
+          <button @click="stopContinuousCapture" :disabled="!isContinuous" class="camera-toggle-btn">
+            촬영 종료
+          </button>
+          <button @click="prevCapture" class="camera-toggle-btn">이전 촬영</button>
+          <button @click="nextCapture" class="camera-toggle-btn">다음 촬영</button>
+          <span style="align-self:center; font-size:12px; color:#666;">현재: {{ currentCaptureIndex + 1 }}</span>
         </div>
       </div>
 
       <!-- 검출 결과 영역 -->
       <div class="results-section">
+        <!-- 단일 부품 디텍션 테스트 -->
+        <div class="result-group" style="margin-bottom:20px;">
+          <h3>🔎 단일 부품 디텍션 테스트</h3>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <input v-model="expectedPartId" placeholder="확인할 부품 ID (예: 3001)" style="padding:8px; border:1px solid #ddd; border-radius:6px;" />
+            <button @click="testCurrentFrame" :disabled="!cameraActive || !expectedPartId" class="capture-btn">현재 프레임 테스트</button>
+            <label class="camera-toggle-btn" style="cursor:pointer;">
+              이미지 업로드
+              <input type="file" accept="image/*" @change="onUploadImageTest" style="display:none;" />
+            </label>
+            <span v-if="singleTest.status" :style="{ color: singleTest.status==='성공' ? '#27ae60' : '#e74c3c', fontWeight:'600' }">
+              {{ singleTest.status }}
+            </span>
+            <span v-if="singleTest.status" style="color:#666;">(검출: {{ singleTest.foundPartId || '없음' }}, 신뢰도: {{ singleTest.confidence !== null ? (singleTest.confidence*100).toFixed(1)+'%' : '-' }})</span>
+          </div>
+        </div>
+
         <!-- 자동 승인된 부품들 -->
         <div v-if="detectionResults.autoApproved.length > 0" class="result-group auto-approved">
           <h3>✅ 자동 승인된 부품 ({{ detectionResults.autoApproved.length }}개)</h3>
@@ -165,6 +199,12 @@
           <span class="accuracy-label">정확도:</span>
           <span class="accuracy-value">{{ (detectionState.statistics.accuracy * 100).toFixed(1) }}%</span>
         </div>
+        <div class="performance-stats">
+          <div class="performance-item">
+            <span class="performance-label">연속 촬영</span>
+            <span class="performance-value">{{ isContinuous ? '진행 중' : '대기' }} ({{ continuousCount }}장)</span>
+          </div>
+        </div>
         <div class="performance-stats" v-if="detectionState.statistics.averageProcessingTime">
           <div class="performance-item">
             <span class="performance-label">평균 처리 시간:</span>
@@ -173,6 +213,12 @@
           <div class="performance-item">
             <span class="performance-label">효율성:</span>
             <span class="performance-value">최적화됨 (마스터 DB)</span>
+          </div>
+        </div>
+        <div v-if="reportState.loaded" class="performance-stats">
+          <div class="performance-item">
+            <span class="performance-label">세트 확인/누락</span>
+            <span class="performance-value">{{ reportState.confirmed }}/{{ reportState.expected }} (누락 {{ reportState.missing }})</span>
           </div>
         </div>
       </div>
@@ -186,6 +232,7 @@ import { useOptimizedRealtimeDetection } from '../composables/useOptimizedRealti
 import { useThresholdSystem } from '../composables/useThresholdSystem'
 import { useLLMIntegration } from '../composables/useLLMIntegration'
 import { useMasterPartsMatching } from '../composables/useMasterPartsMatching'
+import { useCaptures } from '../composables/useCaptures'
 
 // 컴포저블 사용
 const { 
@@ -201,16 +248,39 @@ const {
 
 const { processThresholdApproval } = useThresholdSystem()
 const { rerankPartCandidates } = useLLMIntegration()
+const { uploadCapture, getSetReport } = useCaptures()
 
 // 로컬 상태
 const setNumber = ref('')
 const cameraVideo = ref(null)
+const overlayCanvas = ref(null)
 const cameraActive = ref(false)
+let detectTimer = null
 const detectionResults = reactive({
   autoApproved: [],
   manualReview: [],
   retakeRequired: []
 })
+
+// 리포트 상태
+const reportState = reactive({
+  loaded: false,
+  expected: 0,
+  confirmed: 0,
+  missing: 0
+})
+
+// 단일 부품 디텍션 테스트
+const expectedPartId = ref('')
+const singleTest = reactive({ status: '', confidence: null, foundPartId: null })
+
+// 연속 촬영 상태
+const isContinuous = ref(false)
+const continuousTimer = ref(null)
+const continuousCount = ref(0)
+const snapshotResults = ref([])
+const aggregatedParts = reactive({ byPart: {}, uniqueCount: 0, totalDetections: 0 })
+const currentCaptureIndex = ref(0)
 
 // 카메라 스트림
 let cameraStream = null
@@ -220,6 +290,7 @@ const startSession = async () => {
   try {
     await startOptimizedSession(setNumber.value)
     await startCamera()
+    startAutoDetect()
   } catch (err) {
     console.error('Failed to start session:', err)
   }
@@ -230,6 +301,7 @@ const endSession = async () => {
   try {
     await endOptimizedSession()
     await stopCamera()
+    stopAutoDetect()
   } catch (err) {
     console.error('Failed to end session:', err)
   }
@@ -249,6 +321,12 @@ const startCamera = async () => {
     if (cameraVideo.value) {
       cameraVideo.value.srcObject = cameraStream
       cameraActive.value = true
+
+      // 비디오 메타데이터가 로드되면 오버레이 캔버스 크기 동기화
+      cameraVideo.value.onloadedmetadata = () => {
+        syncOverlaySize()
+        clearOverlay()
+      }
     }
   } catch (err) {
     console.error('Failed to start camera:', err)
@@ -269,14 +347,96 @@ const stopCamera = async () => {
 const toggleCamera = async () => {
   if (cameraActive.value) {
     await stopCamera()
+    stopAutoDetect()
   } else {
     await startCamera()
+    startAutoDetect()
   }
+}
+
+// 자동 검출 루프 (가벼운 주기)
+const startAutoDetect = () => {
+  if (detectTimer) return
+  detectTimer = setInterval(async () => {
+    try {
+      await captureFrame()
+    } catch (_) {}
+  }, 800) // 0.8초 주기
+}
+
+const stopAutoDetect = () => {
+  if (detectTimer) {
+    clearInterval(detectTimer)
+    detectTimer = null
+  }
+}
+
+// 오버레이 캔버스 크기 동기화
+const syncOverlaySize = () => {
+  if (!cameraVideo.value || !overlayCanvas.value) return
+  overlayCanvas.value.width = cameraVideo.value.videoWidth
+  overlayCanvas.value.height = cameraVideo.value.videoHeight
+  console.log('[AR] overlay synced:', overlayCanvas.value.width, overlayCanvas.value.height)
+}
+
+// 오버레이 지우기
+const clearOverlay = () => {
+  if (!overlayCanvas.value) return
+  const ctx = overlayCanvas.value.getContext('2d')
+  ctx.clearRect(0, 0, overlayCanvas.value.width, overlayCanvas.value.height)
+}
+
+// 검출 박스 그리기
+const drawDetections = (detections = []) => {
+  if (!overlayCanvas.value || !cameraVideo.value) return
+  const ctx = overlayCanvas.value.getContext('2d')
+  ctx.clearRect(0, 0, overlayCanvas.value.width, overlayCanvas.value.height)
+
+  ctx.lineWidth = 3
+  ctx.font = '14px Segoe UI'
+  ctx.textBaseline = 'top'
+
+  console.log('[AR] drawDetections count:', detections.length)
+
+  detections.forEach((det, idx) => {
+    // det.boundingBox 정규화 좌표 가정 {x,y,width,height} 0..1
+    const bb = det.boundingBox || det.box || {}
+    // 정규화 여부 판단 (폭/높이가 1 이하면 정규화로 가정)
+    const isNormalized = (bb && bb.width <= 1 && bb.height <= 1)
+    const x = Math.max(0, Math.floor((bb.x || 0) * (isNormalized ? overlayCanvas.value.width : 1)))
+    const y = Math.max(0, Math.floor((bb.y || 0) * (isNormalized ? overlayCanvas.value.height : 1)))
+    const w = Math.floor((bb.width || (isNormalized ? 1 : overlayCanvas.value.width)) * (isNormalized ? overlayCanvas.value.width : 1))
+    const h = Math.floor((bb.height || (isNormalized ? 1 : overlayCanvas.value.height)) * (isNormalized ? overlayCanvas.value.height : 1))
+
+    console.log('[AR] box', idx, { x, y, w, h, bb })
+
+    // 윤곽선(글로우 효과)
+    ctx.strokeStyle = 'rgba(80, 200, 120, 0.95)'
+    ctx.shadowColor = 'rgba(80, 200, 120, 0.9)'
+    ctx.shadowBlur = 12
+    ctx.strokeRect(x, y, w, h)
+
+    // 라벨
+    ctx.shadowBlur = 0
+    ctx.fillStyle = 'rgba(80, 200, 120, 0.85)'
+    const confText = det && typeof det.confidence === 'number' ? `${(det.confidence * 100).toFixed(0)}%` : ''
+    const label = `#${idx + 1} ${confText}`
+    const textPadding = 4
+    const tw = ctx.measureText(label).width + textPadding * 2
+    const th = 18
+    ctx.fillRect(x, Math.max(0, y - th - 2), tw, th)
+    ctx.fillStyle = '#fff'
+    ctx.fillText(label, x + textPadding, Math.max(0, y - th - 2) + 2)
+  })
 }
 
 // 프레임 캡처 및 검출 (최적화된 버전)
 const captureFrame = async () => {
   if (!cameraVideo.value || !cameraActive.value) return
+  // 이미 감지 중이면 중복 실행 방지
+  if (detecting.value) {
+    return
+  }
   
   try {
     // 캔버스에 프레임 그리기
@@ -291,6 +451,7 @@ const captureFrame = async () => {
     
     // 최적화된 부품 검출 실행 (마스터 DB 활용)
     const detectionResult = await detectPartsOptimized(imageData)
+    console.log('[AR] detectionResult keys:', Object.keys(detectionResult || {}))
     
     // 결과 업데이트
     detectionResults.autoApproved = detectionResult.approvalResults.autoApproved
@@ -302,6 +463,30 @@ const captureFrame = async () => {
     
     // 성능 정보 표시
     console.log('🎯 Detection Performance:', detectionResult.performance)
+
+    // AR 오버레이 그리기 (detections가 제공되는 경우)
+    if (detectionResult.detections && Array.isArray(detectionResult.detections)) {
+      console.log('[AR] detections received:', detectionResult.detections.length)
+      syncOverlaySize()
+      if (detectionResult.detections.length > 0) {
+        drawDetections(detectionResult.detections)
+      } else {
+        clearOverlay()
+      }
+    } else if (detectionResult.detectedParts && Array.isArray(detectionResult.detectedParts)) {
+      console.log('[AR] detections (fallback detectedParts):', detectionResult.detectedParts.length)
+      syncOverlaySize()
+      if (detectionResult.detectedParts.length > 0) {
+        drawDetections(detectionResult.detectedParts)
+      } else {
+        clearOverlay()
+      }
+    } else {
+      // 제공되지 않으면 전체 프레임에 가이드 사각형 표시(옵션)
+      syncOverlaySize()
+      clearOverlay()
+      console.log('[AR] no detections provided')
+    }
     
   } catch (err) {
     console.error('Detection failed:', err)
@@ -334,6 +519,205 @@ const selectCandidate = async (part, candidate) => {
     
   } catch (err) {
     console.error('Failed to select candidate:', err)
+  }
+}
+
+// 내부 유틸: 현재 프레임 dataURL 생성
+const getCurrentFrameDataUrl = () => {
+  if (!cameraVideo.value || !cameraActive.value) return null
+  const canvas = document.createElement('canvas')
+  const ctx = canvas.getContext('2d')
+  canvas.width = cameraVideo.value.videoWidth
+  canvas.height = cameraVideo.value.videoHeight
+  ctx.drawImage(cameraVideo.value, 0, 0)
+  return canvas.toDataURL('image/jpeg', 0.9)
+}
+
+// 계속 촬영 시작: 일정 주기로 스냅샷 캡처/분석/업로드
+const startContinuousCapture = async () => {
+  if (isContinuous.value || !setNumber.value) return
+  isContinuous.value = true
+  continuousCount.value = 0
+  snapshotResults.value = []
+  aggregatedParts.byPart = {}
+  aggregatedParts.uniqueCount = 0
+  aggregatedParts.totalDetections = 0
+  currentCaptureIndex.value = 0
+  // 1초 간격 기본
+  continuousTimer.value = setInterval(async () => {
+    try {
+      if (!cameraActive.value) return
+      const imageData = getCurrentFrameDataUrl()
+      if (!imageData) return
+      // 검출 호출
+      const result = await detectPartsOptimized(imageData)
+      snapshotResults.value.push(result)
+      currentCaptureIndex.value = snapshotResults.value.length - 1
+      // 다부품 집계: detections 또는 detectedParts에서 part_num 수집
+      const candidates = Array.isArray(result?.detections) ? result.detections : (result?.detectedParts || [])
+      const partNums = []
+      for (const det of candidates) {
+        const pn = det?.bestMatch?.part?.part_num || det?.part?.part_num || det?.part_num
+        if (pn) partNums.push(pn)
+      }
+      for (const pn of partNums) {
+        aggregatedParts.byPart[pn] = (aggregatedParts.byPart[pn] || 0) + 1
+        aggregatedParts.totalDetections += 1
+      }
+      aggregatedParts.uniqueCount = Object.keys(aggregatedParts.byPart).length
+      continuousCount.value += 1
+      // 저장(옵션): 최상위 파트 라벨로 캡처 저장
+      let partId = null
+      const approved = result?.approvalResults?.autoApproved || []
+      if (approved.length > 0) partId = approved[0]?.bestMatch?.part?.part_num
+      if (!partId) {
+        const mr = result?.approvalResults?.manualReview || []
+        const cand = mr[0]?.topCandidates?.[0]
+        partId = cand?.part?.part_num || 'unknown'
+      }
+      await uploadCapture({ setNum: setNumber.value, partId, imageData })
+    } catch (e) {
+      console.error('continuous capture tick failed:', e)
+    }
+  }, 1000)
+}
+
+// 촬영 종료: 연속 캡처 중지 후 누적 결과 집계
+const stopContinuousCapture = async () => {
+  try {
+    if (continuousTimer.value) {
+      clearInterval(continuousTimer.value)
+      continuousTimer.value = null
+    }
+    isContinuous.value = false
+    // 최종 집계: 고유 부품 목록/카운트 출력
+    const sorted = Object.entries(aggregatedParts.byPart)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20)
+    console.log('연속 촬영 최종 집계:', {
+      uniqueParts: aggregatedParts.uniqueCount,
+      totalDetections: aggregatedParts.totalDetections,
+      top20: sorted
+    })
+  } catch (e) {
+    console.error('stopContinuousCapture failed:', e)
+  }
+}
+
+// 이전/다음 촬영 네비게이션 (연속 촬영 재생성 아님, 인덱스 이동)
+const prevCapture = () => {
+  if (snapshotResults.value.length === 0) return
+  currentCaptureIndex.value = Math.max(0, currentCaptureIndex.value - 1)
+  // 필요 시 인덱스 기반 상세 표시/리뷰 로직 연결 가능
+}
+
+const nextCapture = () => {
+  if (snapshotResults.value.length === 0) return
+  currentCaptureIndex.value = Math.min(snapshotResults.value.length - 1, currentCaptureIndex.value + 1)
+}
+
+// 단일 테스트 공통 로직
+const runSinglePartTest = async (imageData) => {
+  singleTest.status = ''
+  singleTest.confidence = null
+  singleTest.foundPartId = null
+  try {
+    const result = await detectPartsOptimized(imageData)
+    const candidates = Array.isArray(result?.detections) ? result.detections : (result?.detectedParts || [])
+    // 최고 신뢰도 후보와 기대 파트 매칭
+    let best = null
+    let bestConf = -1
+    let matchedConf = -1
+    let matchedPart = null
+    for (const det of candidates) {
+      const pn = det?.bestMatch?.part?.part_num || det?.part?.part_num || det?.part_num
+      const conf = typeof det?.confidence === 'number' ? det.confidence : (det?.score ?? 0)
+      if (conf > bestConf) { bestConf = conf; best = pn }
+      if (pn && expectedPartId.value && String(pn) === String(expectedPartId.value)) {
+        matchedConf = Math.max(matchedConf, conf)
+        matchedPart = pn
+      }
+    }
+    if (matchedPart) {
+      singleTest.status = '성공'
+      singleTest.confidence = matchedConf
+      singleTest.foundPartId = matchedPart
+    } else {
+      singleTest.status = '실패'
+      singleTest.confidence = bestConf >= 0 ? bestConf : null
+      singleTest.foundPartId = best
+    }
+  } catch (e) {
+    console.error('runSinglePartTest failed:', e)
+    singleTest.status = '오류'
+  }
+}
+
+const testCurrentFrame = async () => {
+  const data = getCurrentFrameDataUrl()
+  if (!data) return
+  await runSinglePartTest(data)
+}
+
+const onUploadImageTest = async (evt) => {
+  try {
+    const file = evt?.target?.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async (e) => {
+      const dataUrl = e?.target?.result
+      if (typeof dataUrl === 'string') {
+        await runSinglePartTest(dataUrl)
+      }
+    }
+    reader.readAsDataURL(file)
+  } catch (e) {
+    console.error('onUploadImageTest failed:', e)
+  } finally {
+    if (evt?.target) evt.target.value = ''
+  }
+}
+
+// 캡처 저장: 현재 프레임을 dataURL로 저장, 최상위 검출 파트로 라벨링
+const saveCapture = async () => {
+  try {
+    if (!cameraVideo.value || !cameraActive.value || !setNumber.value) return
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    canvas.width = cameraVideo.value.videoWidth
+    canvas.height = cameraVideo.value.videoHeight
+    ctx.drawImage(cameraVideo.value, 0, 0)
+    const imageData = canvas.toDataURL('image/jpeg', 0.9)
+
+    // 최상위 파트 결정: autoApproved 1순위, 없으면 manualReview의 첫 후보
+    let partId = null
+    if (detectionResults.autoApproved.length > 0) {
+      partId = detectionResults.autoApproved[0]?.bestMatch?.part?.part_num || null
+    }
+    if (!partId && detectionResults.manualReview.length > 0) {
+      const cand = detectionResults.manualReview[0]?.topCandidates?.[0]
+      partId = cand?.part?.part_num || null
+    }
+    // 폴백: 미지정 시 'unknown'
+    partId = partId || 'unknown'
+
+    await uploadCapture({ setNum: setNumber.value, partId, imageData })
+  } catch (e) {
+    console.error('saveCapture failed:', e)
+  }
+}
+
+// 세트 리포트 조회
+const fetchReport = async () => {
+  try {
+    if (!setNumber.value) return
+    const rep = await getSetReport(setNumber.value)
+    reportState.loaded = true
+    reportState.expected = rep?.counts?.expected || 0
+    reportState.confirmed = rep?.counts?.confirmed || 0
+    reportState.missing = rep?.counts?.missing || 0
+  } catch (e) {
+    console.error('fetchReport failed:', e)
   }
 }
 
@@ -458,6 +842,16 @@ onUnmounted(() => {
   object-fit: cover;
   border-radius: 10px;
   background: #000;
+}
+
+/* AR overlay */
+.overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
 }
 
 .camera-overlay {
