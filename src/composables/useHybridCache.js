@@ -469,12 +469,12 @@ export function useHybridCache() {
       const imageResult = await getImageFromLocal(partId, colorId)
       
       if (imageResult.found) {
-        return {
-          found: true,
+      return {
+        found: true,
           image: imageResult.blob,
           size: imageResult.size,
           timestamp: imageResult.timestamp,
-          cached: true
+        cached: true
         }
       } else {
         return {

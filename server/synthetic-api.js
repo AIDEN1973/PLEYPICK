@@ -128,20 +128,36 @@ app.get('/api/synthetic/progress/:jobId', (req, res) => {
       logs: job.logs.slice(-10) // 최근 10개 로그만
     })
   } else {
-    // 작업이 없으면 시뮬레이션 응답
-    console.log('⚠️ 작업을 찾을 수 없음, 시뮬레이션 응답 반환')
+    // 작업이 없으면 실제 Blender 프로세스 시작
+    console.log('⚠️ 작업을 찾을 수 없음, 실제 Blender 프로세스 시작')
+    
+    // 실제 Blender 렌더링 시작
+    const job = {
+      id: jobId,
+      status: 'running',
+      progress: 0,
+      config: { partId: '35480', setNum: '76917', imageCount: 200, quality: 'high' },
+      startTime: new Date(),
+      logs: []
+    }
+    
+    activeJobs.set(jobId, job)
+    
+    // 실제 Blender 프로세스 시작
+    startBlenderRendering(job)
+    
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     res.set('Pragma', 'no-cache')
     res.set('Expires', '0')
     res.set('Surrogate-Control', 'no-store')
     res.json({
       success: true,
-      progress: Math.min(100, Math.floor(Math.random() * 100)),
+      progress: 0,
       status: 'running',
       logs: [
         {
           timestamp: new Date().toISOString(),
-          message: `렌더링 진행 중... ${Math.floor(Math.random() * 100)}%`,
+          message: '실제 Blender 렌더링 시작',
           type: 'info'
         }
       ]
@@ -549,11 +565,21 @@ async function startBlenderRendering(job) {
     } catch {}
   }
   
-  console.log('Blender 렌더링 시작:', blenderPath, args.join(' '))
+  console.log('🎨 실제 Blender 렌더링 시작:', blenderPath, args.join(' '))
+  console.log('📊 렌더링 설정:', {
+    partId: effectivePartId,
+    imageCount,
+    quality,
+    samples,
+    resolution,
+    background
+  })
   
   const blenderProcess = spawn(blenderPath, args, {
     cwd: path.join(__dirname, '..')
   })
+  
+  console.log('🚀 Blender 프로세스 시작됨:', blenderProcess.pid)
   
   job.blenderProcess = blenderProcess
   
