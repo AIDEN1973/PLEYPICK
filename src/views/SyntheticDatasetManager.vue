@@ -183,6 +183,18 @@
 
     <!-- 렌더링 진행 상황 -->
     <div class="progress-panel" v-if="isRendering">
+      <div class="current-job">
+        <h3>🛠️ 현재 렌더링 중</h3>
+        <p>
+          부품: <strong>{{ currentJob.partId || (resolvedPartIdForFiles || selectedPartId) || '-' }}</strong>
+          <span v-if="currentJob.elementId"> / 엘리먼트ID: {{ currentJob.elementId }}</span>
+          <span v-if="currentJob.colorId"> / 색상ID: {{ currentJob.colorId }}</span>
+          <span v-if="currentJob.setNum"> / 세트: {{ currentJob.setNum }}</span>
+        </p>
+        <p>
+          이미지 수: {{ totalImages }} / 품질: {{ currentJob.quality || renderQuality }} / 해상도: {{ resolution }}
+        </p>
+      </div>
       <h3>📈 렌더링 진행 상황</h3>
       <div class="progress-bar">
         <div 
@@ -342,6 +354,7 @@ export default {
     const currentImage = ref(0)
     const totalImages = ref(0)
     const renderLogs = ref([])
+    const currentJob = ref({})
     const renderResults = ref([])
     const resolvedPartIdForFiles = ref('')
     
@@ -451,6 +464,14 @@ export default {
           resolution: resolution.value,
           targetFill: 0.92
         }
+        // 화면 상단 표시용 현재 작업 설정
+        currentJob.value = {
+          partId: selectedPartId.value || resolvedPartIdForFiles.value || renderConfig.elementId || '-',
+          elementId: renderConfig.elementId || null,
+          colorId: null,
+          setNum: selectedSetNum.value || null,
+          quality: renderQuality.value
+        }
         // 숫자만 입력된 경우는 엘리먼트 ID로 처리하도록 전송 값 보강
         if (renderMode.value === 'single' && selectedPartId.value && /^\d+$/.test(selectedPartId.value.trim())) {
           renderConfig.elementId = selectedPartId.value.trim()
@@ -481,6 +502,14 @@ export default {
         if (response && response.success && response.jobId) {
           const jobId = response.jobId
           renderLogs.value.push({ type: 'info', message: `작업 시작: ${jobId}` })
+          // 서버가 회신한 config로 현재 작업 정보 보강
+          if (response.config) {
+            currentJob.value.partId = response.config.partId || currentJob.value.partId
+            currentJob.value.elementId = response.config.elementId || currentJob.value.elementId
+            currentJob.value.setNum = response.config.setNum || currentJob.value.setNum
+            if (Number.isInteger(response.config.colorId)) currentJob.value.colorId = response.config.colorId
+            currentJob.value.quality = response.config.quality || currentJob.value.quality
+          }
           // 2초 간격으로 진행상황과 파일 목록 확인
           const pollInterval = setInterval(async () => {
             try {
@@ -510,6 +539,10 @@ export default {
                 renderProgress.value = Math.round(progressJson.progress || 0)
                 if (progressJson.logs) {
                   renderLogs.value.push(...progressJson.logs)
+              // 로그에서 현재 렌더링 중 부품이 표시되면 UI에 반영
+              const lastLog = progressJson.logs[progressJson.logs.length - 1]?.message || ''
+              const m = String(lastLog).match(/part\s+([A-Za-z0-9_\-]+)/i)
+              if (m && !currentJob.value.partId) currentJob.value.partId = m[1]
                 }
               }
               // 파일 목록: 단일 부품 모드에서만 조회 (set 모드는 partId가 비어 404 발생 방지)
