@@ -438,7 +438,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useSyntheticDataset } from '@/composables/useSyntheticDataset'
 
 export default {
@@ -491,6 +491,90 @@ export default {
     const duplicateCheck = ref(new Map()) // elementId + partNum 조합으로 중복 체크
     const excludedCount = ref(0) // 제외된 부품 수
     const databaseRenderedCount = ref(0) // 데이터베이스에서 렌더링된 부품 수
+
+    // 세션 저장/복원
+    const SESSION_KEY = 'synthetic_dataset_session_v1'
+    let persistTimer = null
+
+    // 렌더 파이프라인 튜닝 상수
+    const POLL_INTERVAL_MS = 3000 // 진행 폴링 간격(표준화)
+    const TIMEOUT_MAX_ATTEMPTS = 300 // 300 * 3s = 900초(10분)
+    const STORAGE_BATCH_SIZE = 6 // 스토리지 폴더 검증 배치 크기 축소로 I/O 완화
+    const DUP_MIN_FILES = 120 // 폴더 내 최소 파일 수 기준으로 중복 판정 강화
+
+    const serializeSession = () => {
+      try {
+        const session = {
+          renderMode: renderMode.value,
+          selectedPartId: selectedPartId.value,
+          selectedSetNum: selectedSetNum.value,
+          imageCount: imageCount.value,
+          renderQuality: renderQuality.value,
+          background: background.value,
+          resolution: resolution.value,
+          // 배열/목록 상태
+          setParts: Array.isArray(setParts.value) ? setParts.value : [],
+          completedParts: Array.isArray(completedParts.value) ? completedParts.value : [],
+          failedParts: Array.isArray(failedParts.value) ? failedParts.value : [],
+          // Set/Map 직렬화
+          renderedItems: Array.from(renderedItems.value || []),
+          duplicateCheck: Array.from((duplicateCheck.value || new Map()).entries())
+        }
+        return JSON.stringify(session)
+      } catch (e) {
+        return null
+      }
+    }
+
+    const persistSession = () => {
+      if (persistTimer) clearTimeout(persistTimer)
+      persistTimer = setTimeout(() => {
+        const json = serializeSession()
+        if (json) {
+          try {
+            localStorage.setItem(SESSION_KEY, json)
+          } catch (_) {}
+        }
+      }, 250)
+    }
+
+    const loadSession = () => {
+      try {
+        const raw = localStorage.getItem(SESSION_KEY)
+        if (!raw) return
+        const s = JSON.parse(raw)
+        if (!s || typeof s !== 'object') return
+
+        if (s.renderMode) renderMode.value = s.renderMode
+        if (typeof s.selectedPartId === 'string') selectedPartId.value = s.selectedPartId
+        if (typeof s.selectedSetNum === 'string') selectedSetNum.value = s.selectedSetNum
+        if (typeof s.imageCount === 'number') imageCount.value = s.imageCount
+        if (typeof s.renderQuality === 'string') renderQuality.value = s.renderQuality
+        if (typeof s.background === 'string') background.value = s.background
+        if (typeof s.resolution === 'string') resolution.value = s.resolution
+
+        if (Array.isArray(s.setParts)) setParts.value = s.setParts
+        if (Array.isArray(s.completedParts)) completedParts.value = s.completedParts
+        if (Array.isArray(s.failedParts)) failedParts.value = s.failedParts
+
+        if (Array.isArray(s.renderedItems)) renderedItems.value = new Set(s.renderedItems)
+        if (Array.isArray(s.duplicateCheck)) duplicateCheck.value = new Map(s.duplicateCheck)
+      } catch (_) {}
+    }
+
+    // 변경 감지하여 자동 저장 (깊은 감시 필요 상태 포함)
+    watch([
+      renderMode,
+      selectedPartId,
+      selectedSetNum,
+      imageCount,
+      renderQuality,
+      background,
+      resolution,
+      setParts,
+      completedParts,
+      failedParts
+    ], persistSession, { deep: true })
 
     // 계산된 속성
     const canStartRendering = computed(() => {
@@ -549,8 +633,9 @@ export default {
             try {
               const { data: folderData, error: folderError } = await supabase.storage
                 .from(bucket)
-                .list(folderPath, { limit: 1 })
-              if (!folderError && Array.isArray(folderData) && folderData.length > 0) {
+                // 최소 파일 수 기준으로 존재 판정 강화
+                .list(folderPath, { limit: DUP_MIN_FILES })
+              if (!folderError && Array.isArray(folderData) && folderData.length >= DUP_MIN_FILES) {
                 return true
               }
             } catch (_) {
@@ -647,8 +732,9 @@ export default {
             try {
               const { data: folderData, error: folderError } = await supabase.storage
                 .from(bucket)
-                .list(folderPath, { limit: 1 })
-              if (!folderError && Array.isArray(folderData) && folderData.length > 0) {
+                // 최소 파일 수 기준으로 존재 판정 강화
+                .list(folderPath, { limit: DUP_MIN_FILES })
+              if (!folderError && Array.isArray(folderData) && folderData.length >= DUP_MIN_FILES) {
                 return true
               }
             } catch (_) {
@@ -672,7 +758,7 @@ export default {
         // 폴더 존재 확인 후, 존재하는 폴더의 elementKey들을 결과로 반환 (배치 병렬 처리)
         const renderedKeys = new Set()
         const folderKeys = Array.from(folderKeyToElementKeys.keys())
-        const batchSize = 10 // 한 번에 처리할 폴더 수
+        const batchSize = STORAGE_BATCH_SIZE // 한 번에 처리할 폴더 수(완화)
         const totalBatches = Math.ceil(folderKeys.length / batchSize)
         
         console.log(`${folderKeys.length}개 폴더를 ${totalBatches}개 배치로 병렬 처리합니다`)
@@ -1036,7 +1122,7 @@ export default {
             } catch (e) {
               console.error(e)
             }
-          }, 2000)
+          }, POLL_INTERVAL_MS)
         } else {
           // 폴백: 시뮬레이션
           simulateRendering()
@@ -1064,7 +1150,7 @@ export default {
           type: 'info',
           message: `이미지 ${currentImage.value} 렌더링 완료`
         })
-      }, 1000)
+      }, POLL_INTERVAL_MS)
     }
 
     const stopRendering = async () => {
@@ -1168,10 +1254,10 @@ export default {
               const jobId = resp.jobId
               let status = 'running'
               let attempts = 0
-              const maxAttempts = 60 // 2분 타임아웃 (복잡한 부품 고려)
+              const maxAttempts = TIMEOUT_MAX_ATTEMPTS // 10분 타임아웃
               
               while (status === 'running' && attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 2000))
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
                 try {
                   const pRes = await fetch(`/api/synthetic/progress/${jobId}`, { cache: 'no-store' })
                   const pJson = await pRes.json()
@@ -1636,6 +1722,8 @@ export default {
 
     // 생명주기
     onMounted(async () => {
+      // 세션 복원 → 통계 로드
+      loadSession()
       await refreshStats()
       
       // 배치 작업 초기화
