@@ -456,7 +456,11 @@ export default {
           renderConfig.elementId = selectedPartId.value.trim()
           // 서버 해석 API 호출해 파일 조회용 partId 미리 확보
           try {
-            const r = await fetch(`/api/synthetic/resolve-element/${renderConfig.elementId}`, { cache: 'no-store' })
+            const resolveUrl = import.meta.env.DEV 
+              ? `/api/synthetic/resolve-element/${renderConfig.elementId}`
+              : `https://brickbox.vercel.app/api/synthetic/resolve-element/${renderConfig.elementId}`
+            
+            const r = await fetch(resolveUrl, { cache: 'no-store' })
             if (r.ok) {
               const j = await r.json()
               if (j && j.success && j.partId) {
@@ -481,7 +485,11 @@ export default {
           const pollInterval = setInterval(async () => {
             try {
               // 진행상황
-              const progressRes = await fetch(`/api/synthetic/progress/${jobId}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+              const progressUrl = import.meta.env.DEV 
+                ? `/api/synthetic/progress/${jobId}`
+                : `https://brickbox.vercel.app/api/synthetic/progress/${jobId}`
+              
+              const progressRes = await fetch(progressUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
               const progressJson = await progressRes.json()
               if (progressJson && progressJson.success) {
                 renderProgress.value = Math.round(progressJson.progress || 0)
@@ -494,7 +502,11 @@ export default {
               const fetchPart = resolvedPartIdForFiles.value || selectedPartId.value
               if (isSingleMode && fetchPart) {
                 try {
-                  const filesRes = await fetch(`/api/synthetic/files/${fetchPart}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+                  const filesUrl = import.meta.env.DEV 
+                    ? `/api/synthetic/files/${fetchPart}`
+                    : `https://brickbox.vercel.app/api/synthetic/files/${fetchPart}`
+                  
+                  const filesRes = await fetch(filesUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
                   if (!filesRes.ok) {
                     // 404 등은 무시하고 다음 폴링으로
                     return
@@ -590,7 +602,11 @@ export default {
             let status = 'running'
             while (status === 'running') {
               await new Promise(r => setTimeout(r, 2000))
-              const pRes = await fetch(`/api/synthetic/progress/${jobId}`, { cache: 'no-store' })
+              const progressUrl = import.meta.env.DEV 
+                ? `/api/synthetic/progress/${jobId}`
+                : `https://brickbox.vercel.app/api/synthetic/progress/${jobId}`
+              
+              const pRes = await fetch(progressUrl, { cache: 'no-store' })
               const pJson = await pRes.json()
               status = pJson.status
             }
