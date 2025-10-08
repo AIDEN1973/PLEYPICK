@@ -54,6 +54,9 @@ export function useSyntheticDataset() {
         ? '/api/synthetic/start-rendering'
         : 'https://brickbox.vercel.app/api/synthetic/start-rendering'
       
+      console.log('🔗 API URL:', apiUrl)
+      console.log('📤 Request config:', config)
+      
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -62,11 +65,27 @@ export function useSyntheticDataset() {
         body: JSON.stringify(config)
       })
       
+      console.log('📥 Response status:', response.status)
+      console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()))
+      
       if (!response.ok) {
-        throw new Error('렌더링 시작 실패')
+        const errorText = await response.text()
+        console.error('❌ API 오류:', response.status, errorText)
+        throw new Error(`렌더링 시작 실패: ${response.status}`)
       }
       
-      return await response.json()
+      const responseText = await response.text()
+      console.log('📥 Response text:', responseText)
+      
+      try {
+        const jsonData = JSON.parse(responseText)
+        console.log('✅ JSON 파싱 성공:', jsonData)
+        return jsonData
+      } catch (parseError) {
+        console.error('❌ JSON 파싱 실패:', parseError)
+        console.error('📥 Raw response:', responseText)
+        throw new Error('JSON 파싱 실패')
+      }
     } catch (error) {
       console.error('렌더링 시작 실패:', error)
       throw error
