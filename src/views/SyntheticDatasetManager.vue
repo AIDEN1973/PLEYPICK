@@ -794,6 +794,7 @@ export default {
       renderLogs,
       renderResults,
       currentJob,
+      resolvedPartIdForFiles,
       availableSets,
       setParts,
       batchJobs,
