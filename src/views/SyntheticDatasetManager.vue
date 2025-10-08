@@ -489,8 +489,23 @@ export default {
                 ? `/api/synthetic/progress/${jobId}`
                 : `https://brickbox.vercel.app/api/synthetic/progress/${jobId}`
               
+              console.log('🔗 Progress URL:', progressUrl)
               const progressRes = await fetch(progressUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
-              const progressJson = await progressRes.json()
+              console.log('📥 Progress Response status:', progressRes.status)
+              console.log('📥 Progress Response headers:', Object.fromEntries(progressRes.headers.entries()))
+              
+              const progressText = await progressRes.text()
+              console.log('📥 Progress Response text:', progressText)
+              
+              let progressJson
+              try {
+                progressJson = JSON.parse(progressText)
+                console.log('✅ Progress JSON 파싱 성공:', progressJson)
+              } catch (parseError) {
+                console.error('❌ Progress JSON 파싱 실패:', parseError)
+                console.error('📥 Raw progress response:', progressText)
+                return
+              }
               if (progressJson && progressJson.success) {
                 renderProgress.value = Math.round(progressJson.progress || 0)
                 if (progressJson.logs) {
@@ -506,12 +521,27 @@ export default {
                     ? `/api/synthetic/files/${fetchPart}`
                     : `https://brickbox.vercel.app/api/synthetic/files/${fetchPart}`
                   
+                  console.log('🔗 Files URL:', filesUrl)
                   const filesRes = await fetch(filesUrl, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+                  console.log('📥 Files Response status:', filesRes.status)
+                  
                   if (!filesRes.ok) {
-                    // 404 등은 무시하고 다음 폴링으로
+                    console.log('⚠️ Files API 404/오류 - 다음 폴링으로')
                     return
                   }
-                  const filesJson = await filesRes.json()
+                  
+                  const filesText = await filesRes.text()
+                  console.log('📥 Files Response text:', filesText)
+                  
+                  let filesJson
+                  try {
+                    filesJson = JSON.parse(filesText)
+                    console.log('✅ Files JSON 파싱 성공:', filesJson)
+                  } catch (parseError) {
+                    console.error('❌ Files JSON 파싱 실패:', parseError)
+                    console.error('📥 Raw files response:', filesText)
+                    return
+                  }
                   if (filesJson && filesJson.success && Array.isArray(filesJson.results)) {
                     renderResults.value = filesJson.results
                     currentImage.value = filesJson.results.length
