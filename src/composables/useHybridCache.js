@@ -465,22 +465,18 @@ export function useHybridCache() {
   // 로컬 캐시에서 부품 검색 (실제 IndexedDB 검색)
   const searchLocalCache = async (partId, colorId) => {
     try {
-      console.log(`🔍 로컬 캐시 검색: ${partId}/${colorId}`)
-      
       // 이미지 검색
       const imageResult = await getImageFromLocal(partId, colorId)
       
       if (imageResult.found) {
-        console.log(`✅ 로컬 캐시 히트: ${partId}/${colorId}`)
-      return {
-        found: true,
+        return {
+          found: true,
           image: imageResult.blob,
           size: imageResult.size,
           timestamp: imageResult.timestamp,
-        cached: true
+          cached: true
         }
       } else {
-        console.log(`❌ 로컬 캐시 미스: ${partId}/${colorId}`)
         return {
           found: false,
           cached: false
@@ -578,8 +574,6 @@ export function useHybridCache() {
   // 원격 벡터 비교 (Supabase에서 벡터만 조회)
   const compareRemoteVectors = async (detection, part) => {
     try {
-    console.log(`🌐 원격 벡터 비교: ${part.part_id}`)
-      
       // Supabase에서 벡터 데이터만 조회
       const { data: vectorData, error: vectorError } = await supabase
         .from('parts_master_features')
@@ -589,7 +583,6 @@ export function useHybridCache() {
         .single()
       
       if (vectorError || !vectorData) {
-        console.log(`❌ 원격 벡터 없음: ${part.part_id}`)
         return 0.2
       }
       
@@ -600,7 +593,6 @@ export function useHybridCache() {
         size_stud: vectorData.feature_json?.size_stud
       })
       
-      console.log(`📊 원격 벡터 유사도: ${similarity.toFixed(3)}`)
       return similarity
       
     } catch (err) {
@@ -777,6 +769,8 @@ export function useHybridCache() {
     // 벡터 비교 함수들
     compareLocalVectors,
     compareRemoteVectors,
-    calculateVectorSimilarity
+    calculateVectorSimilarity,
+    // 로컬 캐시 검색 함수
+    searchLocalCache
   }
 }

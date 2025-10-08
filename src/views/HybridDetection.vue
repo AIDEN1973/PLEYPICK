@@ -125,16 +125,14 @@
 
         <div class="config-group">
           <label>검출 모드</label>
-          <select v-model="detectionMode">
-            <option value="hybrid">하이브리드 (로컬 우선)</option>
-            <option value="local">로컬만</option>
-            <option value="remote">원격만</option>
-            <option value="closed-world">폐쇄 세계 (BOM 기반)</option>
-          </select>
+          <div class="detection-mode-info">
+            <span class="mode-badge">🎯 폐쇄 환경 하이브리드</span>
+            <small>BOM 부품을 기준으로 검출된 객체에서 정확한 매칭 수행</small>
+          </div>
         </div>
 
-        <div class="config-group" v-if="detectionMode === 'closed-world'">
-          <label>폐쇄 세계 필터</label>
+        <div class="config-group">
+          <label>BOM 필터</label>
           <div class="checkbox-group">
             <label>
               <input type="checkbox" v-model="filters.classWhitelist" />
@@ -153,8 +151,8 @@
       </div>
     </div>
 
-    <!-- BOM 정보 (폐쇄 세계 모드) -->
-    <div class="bom-panel" v-if="detectionMode === 'closed-world' && bomParts.length > 0">
+    <!-- BOM 정보 -->
+    <div class="bom-panel" v-if="bomParts.length > 0">
       <h2>📋 BOM 정보</h2>
       <div class="bom-stats">
         <div class="stat-item">
@@ -261,8 +259,68 @@
         <div class="stat-card error">
           <div class="stat-icon">❌</div>
           <div class="stat-content">
-            <h3>{{ detectionResults.missingParts.length }}</h3>
+            <h3>{{ detectionResults.quantityInfo?.totalMissing || 0 }}</h3>
             <p>누락된 부품</p>
+            <small>{{ detectionResults.missingParts.length }}개 부품 유형</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- 하이브리드 + BOM 기반 검출 결과 -->
+      <div class="bom-results" v-if="detectionResults.isBOMBased">
+        <h3>🎯 폐쇄 환경 하이브리드 검출 결과</h3>
+        <div class="bom-summary">
+          <div class="bom-stat success">
+            <div class="stat-icon">✅</div>
+            <div class="stat-content">
+              <h4>{{ detectionResults.quantityInfo?.totalFound || detectionResults.matches.length }}</h4>
+              <p>검출된 부품</p>
+              <small>{{ detectionResults.quantityInfo?.totalRequired || 0 }}개 중</small>
+            </div>
+          </div>
+          <div class="bom-stat error">
+            <div class="stat-icon">❌</div>
+            <div class="stat-content">
+              <h4>{{ detectionResults.quantityInfo?.totalMissing || 0 }}</h4>
+              <p>누락된 부품</p>
+              <small>{{ detectionResults.missingParts.length }}개 부품</small>
+            </div>
+          </div>
+          <div class="bom-stat info">
+            <div class="stat-icon">📊</div>
+            <div class="stat-content">
+              <h4>{{ Math.round(((detectionResults.quantityInfo?.totalFound || 0) / (detectionResults.quantityInfo?.totalRequired || 1)) * 100) }}%</h4>
+              <p>수량 검출률</p>
+              <small>수량 기준</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 수량별 누락 분석 -->
+      <div class="quantity-analysis" v-if="detectionResults.missingParts.length > 0">
+        <h3>📊 수량별 누락 분석</h3>
+        <div class="missing-parts-list">
+          <div 
+            v-for="(part, index) in detectionResults.missingParts" 
+            :key="index"
+            class="missing-part-item"
+            :class="part.match_status"
+          >
+            <div class="part-info">
+              <div class="part-name">{{ part.part_name || part.part_id }}</div>
+              <div class="part-color">{{ part.color_name }}</div>
+            </div>
+            <div class="quantity-info">
+              <div class="quantity-status">
+                <span class="found">{{ part.quantity_found || 0 }}</span>
+                <span class="separator">/</span>
+                <span class="required">{{ part.quantity_required || part.quantity_missing }}</span>
+              </div>
+              <div class="status-badge" :class="part.match_status">
+                {{ part.match_status === 'complete' ? '완전' : part.match_status === 'partial' ? '부분' : '누락' }}
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -317,12 +375,15 @@ export default {
       hybridMatching,
       getCacheStats,
       clearCache,
-      autoSync
+      autoSync,
+      searchLocalCache,
+      compareLocalVectors,
+      compareRemoteVectors
     } = useHybridCache()
 
     // 반응형 데이터
     const setNumber = ref('')
-    const detectionMode = ref('hybrid')
+    const detectionMode = ref('hybrid-bom') // 하이브리드 + BOM 기반으로 고정
     const cameraActive = ref(false)
     const cameraVideo = ref(null)
     let cameraStream = null
@@ -383,10 +444,8 @@ export default {
           }))
         }
 
-        // 폐쇄 세계 모드인 경우 BOM 데이터 로드
-        if (detectionMode.value === 'closed-world') {
-          await loadBOMData(result.targetParts)
-        }
+        // BOM 데이터 로드 (하이브리드 + BOM 기반)
+        await loadBOMData(result.targetParts)
         
         console.log('✅ 메타데이터 로드 완료')
       } catch (err) {
@@ -428,40 +487,323 @@ export default {
       }
     }
 
-    // 폐쇄 세계 필터 적용
+    // 폐쇄 환경 필터 적용
     const applyClosedWorldFilters = (partsMetadata) => {
       try {
-        console.log('🔍 폐쇄 세계 필터 적용 중...')
+        console.log('🔍 폐쇄 환경 필터 적용 중...')
         
-        let filtered = [...partsMetadata]
+        // 폐쇄 환경에서는 BOM 부품만 검출 대상
+        // partsMetadata는 이미 BOM 부품들이므로 필터링이 필요 없음
+        console.log(`📋 폐쇄 환경: BOM 부품 ${partsMetadata.length}개가 검출 대상`)
         
-        // BOM 클래스만 허용
+        // BOM 필터 옵션 적용 (향후 확장용)
         if (filters.value.classWhitelist) {
-          const bomPartIds = new Set(bomParts.value.map(p => p.part_id))
-          filtered = filtered.filter(part => bomPartIds.has(part.part_id))
-          console.log(`📋 BOM 클래스 필터: ${filtered.length}개 부품`)
+          console.log('📋 BOM 클래스 필터: 활성화')
         }
         
-        // BOM 색상 우선
         if (filters.value.colorWhitelist) {
-          const bomColorIds = new Set(bomParts.value.map(p => p.color_id))
-          filtered = filtered.filter(part => bomColorIds.has(part.color_id))
-          console.log(`🎨 BOM 색상 필터: ${filtered.length}개 부품`)
+          console.log('🎨 BOM 색상 필터: 활성화')
         }
         
-        // 대체 부품 허용 (현재는 기본적으로 허용)
         if (!filters.value.allowAlternates) {
-          // 대체 부품 제외 로직 (실제 구현에서는 데이터베이스에서 대체 부품 정보 조회)
-          console.log('🚫 대체 부품 제외')
+          console.log('🚫 대체 부품 제외: 활성화')
         }
         
-        console.log(`✅ 폐쇄 세계 필터 완료: ${filtered.length}개 부품`)
-        return filtered
+        console.log(`✅ 폐쇄 환경 필터 완료: ${partsMetadata.length}개 부품`)
+        return partsMetadata
         
       } catch (err) {
-        console.error('❌ 폐쇄 세계 필터 실패:', err)
+        console.error('❌ 폐쇄 환경 필터 실패:', err)
         return partsMetadata // 필터 실패 시 원본 반환
       }
+    }
+
+    // 폐쇄 환경 하이브리드 검출 수행 (수량 고려)
+    const performBOMBasedHybridDetection = async (detections, bomMetadata) => {
+      try {
+        console.log('🎯 폐쇄 환경 하이브리드 검출 시작...')
+        
+        const matches = []
+        const missingSlots = []
+        const usedDetections = new Set() // 사용된 검출 객체 추적
+        const processedParts = new Set() // 처리된 부품 추적
+        const vectorCache = new Map() // 벡터 비교 결과 캐싱
+        
+        // BOM의 각 부품에 대해 수량만큼 검출된 객체에서 찾기
+        for (const bomPart of bomMetadata) {
+          const requiredQuantity = bomPart.quantity || 1
+          const foundMatches = []
+          const partKey = `${bomPart.part_id}/${bomPart.color_id}`
+          
+          // 중복 로그 방지
+          if (!processedParts.has(partKey)) {
+            console.log(`🔍 BOM 부품 검색: ${bomPart.part_id} (${bomPart.color_name}) - 필요 수량: ${requiredQuantity}개`)
+            processedParts.add(partKey)
+          }
+          
+          // 필요한 수량만큼 반복하여 매칭 시도
+          for (let q = 0; q < requiredQuantity; q++) {
+            let bestMatch = null
+            let bestScore = 0
+            let bestDetectionIndex = -1
+            let bestSource = null
+            
+            // 검출된 객체들 중에서 BOM 부품과 가장 유사한 것 찾기
+            for (let i = 0; i < detections.length; i++) {
+              if (usedDetections.has(i)) continue // 이미 사용된 검출 객체는 제외
+              
+              const detection = detections[i]
+              const cacheKey = `${partKey}/${i}`
+              
+              let hybridScore = 0
+              let source = null
+              
+              // 벡터 비교 결과 캐싱
+              if (vectorCache.has(cacheKey)) {
+                const cached = vectorCache.get(cacheKey)
+                hybridScore = cached.score
+                source = cached.source
+              } else {
+                // 1. 로컬 캐시에서 먼저 검색
+                const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
+                
+                if (localResult.found) {
+                  // 로컬에서 벡터 비교
+                  hybridScore = await compareLocalVectors(detection, bomPart)
+                  source = 'local'
+                } else {
+                  // 원격에서 벡터만 가져와서 비교
+                  hybridScore = await compareRemoteVectors(detection, bomPart)
+                  source = 'remote'
+                }
+                
+                // 결과 캐싱
+                vectorCache.set(cacheKey, { score: hybridScore, source })
+              }
+              
+              // BOM 매칭 점수와 하이브리드 점수 결합
+              const bomScore = await calculateBOMMatchScore(detection, bomPart)
+              const combinedScore = (hybridScore * 0.6) + (bomScore * 0.4) // 하이브리드 60% + BOM 40%
+              
+              if (combinedScore > bestScore && combinedScore > 0.3) {
+                bestScore = combinedScore
+                bestMatch = {
+                  ...bomPart,
+                  detection: detection,
+                  score: combinedScore,
+                  source: source,
+                  hybridScore: hybridScore,
+                  bomScore: bomScore,
+                  instanceNumber: q + 1, // 인스턴스 번호 (1, 2, 3, ...)
+                  totalRequired: requiredQuantity
+                }
+                bestDetectionIndex = i
+                bestSource = source
+              }
+            }
+            
+            if (bestMatch) {
+              foundMatches.push(bestMatch)
+              usedDetections.add(bestDetectionIndex) // 사용된 검출 객체 표시
+              console.log(`✅ 폐쇄 환경 매칭: ${bomPart.part_id} (${bomPart.color_name}) - ${q + 1}/${requiredQuantity} - 점수: ${bestMatch.score.toFixed(3)} (${bestSource})`)
+            } else {
+              // 이 수량에서 매칭 실패
+              console.log(`❌ 매칭 실패: ${bomPart.part_id} (${bomPart.color_name}) - ${q + 1}/${requiredQuantity}`)
+              break // 더 이상 매칭 시도하지 않음
+            }
+          }
+          
+          // 매칭 결과 처리
+          if (foundMatches.length === requiredQuantity) {
+            // 모든 수량 매칭 성공
+            matches.push(...foundMatches)
+            console.log(`✅ 완전 매칭: ${bomPart.part_id} (${bomPart.color_name}) - ${foundMatches.length}/${requiredQuantity}개`)
+          } else if (foundMatches.length > 0) {
+            // 부분 매칭 (일부만 찾음)
+            matches.push(...foundMatches)
+            const missingCount = requiredQuantity - foundMatches.length
+            missingSlots.push({
+              part_id: bomPart.part_id,
+              color_id: bomPart.color_id,
+              part_name: bomPart.part_name,
+              color_name: bomPart.color_name,
+              quantity: missingCount,
+              reason: 'partial_match',
+              found: foundMatches.length,
+              required: requiredQuantity
+            })
+            console.log(`⚠️ 부분 매칭: ${bomPart.part_id} (${bomPart.color_name}) - ${foundMatches.length}/${requiredQuantity}개 (누락: ${missingCount}개)`)
+          } else {
+            // 완전 누락
+            missingSlots.push({
+              part_id: bomPart.part_id,
+              color_id: bomPart.color_id,
+              part_name: bomPart.part_name,
+              color_name: bomPart.color_name,
+              quantity: requiredQuantity,
+              reason: 'not_detected_in_bom',
+              found: 0,
+              required: requiredQuantity
+            })
+            console.log(`❌ 완전 누락: ${bomPart.part_id} (${bomPart.color_name}) - 0/${requiredQuantity}개`)
+          }
+        }
+        
+        console.log(`🎯 폐쇄 환경 하이브리드 검출 완료: ${matches.length}개 매칭, ${missingSlots.length}개 누락`)
+        
+        return { matches, missingSlots }
+        
+      } catch (err) {
+        console.error('❌ 폐쇄 환경 하이브리드 검출 실패:', err)
+        throw err
+      }
+    }
+
+    // BOM 기반 검출 수행 (기존 함수 유지)
+    const performBOMBasedDetection = async (detections, bomMetadata) => {
+      try {
+        console.log('🎯 BOM 기반 검출 시작...')
+        
+        const matches = []
+        const missingSlots = []
+        
+        // BOM에서 각 부품별로 검출 수행
+        for (const bomPart of bomMetadata) {
+          let bestMatch = null
+          let bestScore = 0
+          
+          // 검출된 객체들 중에서 BOM 부품과 매칭 시도
+          for (const detection of detections) {
+            // BOM 부품과 검출된 객체의 매칭 점수 계산
+            const score = await calculateBOMMatchScore(detection, bomPart)
+            
+            if (score > bestScore && score > 0.6) {
+              bestScore = score
+              bestMatch = {
+                ...bomPart,
+                detection: detection,
+                score: score,
+                source: 'bom-based'
+              }
+            }
+          }
+          
+          if (bestMatch) {
+            matches.push(bestMatch)
+            console.log(`✅ BOM 매칭: ${bomPart.part_id} (${bomPart.color_name}) - 점수: ${bestScore.toFixed(3)}`)
+          } else {
+            // BOM에 있지만 검출되지 않은 부품 = 누락
+            missingSlots.push({
+              part_id: bomPart.part_id,
+              color_id: bomPart.color_id,
+              part_name: bomPart.part_name,
+              color_name: bomPart.color_name,
+              quantity: bomPart.quantity,
+              reason: 'not_detected_in_bom'
+            })
+            console.log(`❌ BOM 누락: ${bomPart.part_id} (${bomPart.color_name})`)
+          }
+        }
+        
+        console.log(`🎯 BOM 기반 검출 완료: ${matches.length}개 매칭, ${missingSlots.length}개 누락`)
+        
+        return { matches, missingSlots }
+        
+      } catch (err) {
+        console.error('❌ BOM 기반 검출 실패:', err)
+        throw err
+      }
+    }
+
+    // BOM 매칭 점수 계산
+    const calculateBOMMatchScore = async (detection, bomPart) => {
+      try {
+        let score = 0
+        
+        // 1. 모양 유사도 (CLIP 벡터 비교)
+        if (detection.features?.shape_vector && bomPart.features?.shape_vector) {
+          const shapeScore = calculateCosineSimilarity(detection.features.shape_vector, bomPart.features.shape_vector)
+          score += shapeScore * 0.4 // 40% 가중치
+        }
+        
+        // 2. 색상 유사도 (Lab 색상 공간)
+        if (detection.features?.color_lab && bomPart.features?.color_lab) {
+          const colorScore = calculateColorSimilarity(detection.features.color_lab, bomPart.features.color_lab)
+          score += colorScore * 0.3 // 30% 가중치
+        }
+        
+        // 3. 크기 유사도 (스터드 수)
+        if (detection.features?.size_stud && bomPart.features?.size_stud) {
+          const sizeScore = calculateSizeSimilarity(detection.features.size_stud, bomPart.features.size_stud)
+          score += sizeScore * 0.2 // 20% 가중치
+        }
+        
+        // 4. 위치 유사도 (바운딩 박스)
+        if (detection.bbox && bomPart.expected_bbox) {
+          const positionScore = calculatePositionSimilarity(detection.bbox, bomPart.expected_bbox)
+          score += positionScore * 0.1 // 10% 가중치
+        }
+        
+        return Math.min(score, 1.0) // 최대 1.0으로 제한
+        
+      } catch (err) {
+        console.error('❌ BOM 매칭 점수 계산 실패:', err)
+        return 0
+      }
+    }
+
+    // 코사인 유사도 계산
+    const calculateCosineSimilarity = (vec1, vec2) => {
+      if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0
+      
+      let dotProduct = 0
+      let norm1 = 0
+      let norm2 = 0
+      
+      for (let i = 0; i < vec1.length; i++) {
+        dotProduct += vec1[i] * vec2[i]
+        norm1 += vec1[i] * vec1[i]
+        norm2 += vec2[i] * vec2[i]
+      }
+      
+      return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2))
+    }
+
+    // 색상 유사도 계산 (Lab 색상 공간)
+    const calculateColorSimilarity = (lab1, lab2) => {
+      if (!lab1 || !lab2) return 0
+      
+      const deltaL = lab1.L - lab2.L
+      const deltaA = lab1.a - lab2.a
+      const deltaB = lab1.b - lab2.b
+      
+      const deltaE = Math.sqrt(deltaL * deltaL + deltaA * deltaA + deltaB * deltaB)
+      
+      // Delta E < 5는 거의 동일한 색상으로 간주
+      return Math.max(0, 1 - (deltaE / 50))
+    }
+
+    // 크기 유사도 계산
+    const calculateSizeSimilarity = (size1, size2) => {
+      if (!size1 || !size2) return 0
+      
+      const ratio = Math.min(size1, size2) / Math.max(size1, size2)
+      return ratio
+    }
+
+    // 위치 유사도 계산
+    const calculatePositionSimilarity = (bbox1, bbox2) => {
+      if (!bbox1 || !bbox2) return 0
+      
+      const center1 = { x: (bbox1.x1 + bbox1.x2) / 2, y: (bbox1.y1 + bbox1.y2) / 2 }
+      const center2 = { x: (bbox2.x1 + bbox2.x2) / 2, y: (bbox2.y1 + bbox2.y2) / 2 }
+      
+      const distance = Math.sqrt(
+        Math.pow(center1.x - center2.x, 2) + Math.pow(center1.y - center2.y, 2)
+      )
+      
+      // 거리가 가까울수록 높은 점수
+      return Math.max(0, 1 - (distance / 100))
     }
 
     const checkVersionAction = async () => {
@@ -622,14 +964,20 @@ export default {
           }
         }))
         
-        // 하이브리드 매칭 (폐쇄 세계 필터 적용)
-        let filteredMetadata = setMetadata.value.partsMetadata
+        // 폐쇄 환경 하이브리드 검출
+        console.log('🎯 폐쇄 환경 하이브리드 검출 시작...')
         
-        if (detectionMode.value === 'closed-world') {
-          filteredMetadata = applyClosedWorldFilters(setMetadata.value.partsMetadata)
-        }
+        // 1. 폐쇄 환경 필터 적용 (BOM 부품만 검출 대상)
+        const closedWorldMetadata = applyClosedWorldFilters(setMetadata.value.partsMetadata)
         
-        const { matches, missingSlots } = await hybridMatching(enhancedDetections, filteredMetadata)
+        // 2. 폐쇄 환경 하이브리드 매칭 수행
+        const closedWorldResult = await performBOMBasedHybridDetection(enhancedDetections, closedWorldMetadata)
+        
+        // 3. 폐쇄 환경 결과 사용
+        const matches = closedWorldResult.matches
+        const missingSlots = closedWorldResult.missingSlots
+        
+        console.log(`🎯 폐쇄 환경 하이브리드 검출 완료: ${matches.length}개 매칭, ${missingSlots.length}개 누락`)
         
         const processingTime = Date.now() - startTime
         
@@ -637,16 +985,29 @@ export default {
         const localMatches = matches.filter(m => m.source === 'local').length
         const remoteMatches = matches.filter(m => m.source === 'remote').length
         
-        // 결과 저장
+        // 결과 저장 (수량 정보 포함)
         detectionResults.value = {
           matches,
           missingParts: missingSlots.map(slot => ({
             part_id: slot.part_id,
             color_id: slot.color_id,
-            quantity_missing: 1,
+            part_name: slot.part_name,
+            color_name: slot.color_name,
+            quantity_missing: slot.quantity || 1,
+            quantity_found: slot.found || 0,
+            quantity_required: slot.required || slot.quantity || 1,
             confidence: 'high',
-            reason: 'not_detected'
-          }))
+            reason: slot.reason || 'not_detected',
+            match_status: slot.found > 0 ? (slot.found === slot.required ? 'complete' : 'partial') : 'missing'
+          })),
+          detectionMode: 'hybrid-bom',
+          isBOMBased: true,
+          isHybridBased: true,
+          quantityInfo: {
+            totalRequired: matches.reduce((sum, m) => sum + (m.totalRequired || 1), 0),
+            totalFound: matches.length,
+            totalMissing: missingSlots.reduce((sum, s) => sum + (s.quantity || 0), 0)
+          }
         }
         
         // 성능 지표 업데이트
@@ -757,6 +1118,13 @@ export default {
       loadSetMetadata,
       loadBOMData,
       applyClosedWorldFilters,
+      performBOMBasedHybridDetection,
+      performBOMBasedDetection,
+      calculateBOMMatchScore,
+      // 하이브리드 캐시 함수들
+      searchLocalCache,
+      compareLocalVectors,
+      compareRemoteVectors,
       checkVersionAction,
       syncIncrementalAction,
       autoSyncAction,
@@ -1016,6 +1384,32 @@ export default {
   margin: 0;
 }
 
+.detection-mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #3498db;
+}
+
+.mode-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.detection-mode-info small {
+  color: #7f8c8d;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .bom-panel {
   background: #f8f9fa;
   border-radius: 8px;
@@ -1056,6 +1450,175 @@ export default {
   font-size: 18px;
   font-weight: 700;
   color: #2c3e50;
+}
+
+/* BOM 기반 검출 결과 스타일 */
+.bom-results {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+  border-left: 4px solid #e74c3c;
+}
+
+.bom-results h3 {
+  margin: 0 0 15px 0;
+  color: #2c3e50;
+  font-size: 18px;
+}
+
+.bom-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+}
+
+.bom-stat {
+  background: white;
+  border-radius: 8px;
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 2px solid transparent;
+}
+
+.bom-stat.success {
+  border-color: #27ae60;
+}
+
+.bom-stat.error {
+  border-color: #e74c3c;
+}
+
+.bom-stat.info {
+  border-color: #3498db;
+}
+
+.bom-stat .stat-icon {
+  font-size: 24px;
+}
+
+.bom-stat .stat-content h4 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.bom-stat .stat-content p {
+  margin: 5px 0 0 0;
+  font-size: 12px;
+  color: #7f8c8d;
+}
+
+/* 수량별 누락 분석 스타일 */
+.quantity-analysis {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px 0;
+  border-left: 4px solid #e74c3c;
+}
+
+.quantity-analysis h3 {
+  margin: 0 0 15px 0;
+  color: #2c3e50;
+  font-size: 18px;
+}
+
+.missing-parts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.missing-part-item {
+  background: white;
+  border-radius: 6px;
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 2px solid transparent;
+}
+
+.missing-part-item.complete {
+  border-color: #27ae60;
+  background: #d5f4e6;
+}
+
+.missing-part-item.partial {
+  border-color: #f39c12;
+  background: #fef5e7;
+}
+
+.missing-part-item.missing {
+  border-color: #e74c3c;
+  background: #fadbd8;
+}
+
+.part-info {
+  flex: 1;
+}
+
+.part-name {
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.part-color {
+  font-size: 12px;
+  color: #7f8c8d;
+}
+
+.quantity-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quantity-status {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.quantity-status .found {
+  color: #27ae60;
+}
+
+.quantity-status .separator {
+  color: #7f8c8d;
+}
+
+.quantity-status .required {
+  color: #2c3e50;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.status-badge.complete {
+  background: #27ae60;
+  color: white;
+}
+
+.status-badge.partial {
+  background: #f39c12;
+  color: white;
+}
+
+.status-badge.missing {
+  background: #e74c3c;
+  color: white;
 }
 
 .performance-metrics {
