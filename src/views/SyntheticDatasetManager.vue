@@ -793,6 +793,7 @@ export default {
       totalImages,
       renderLogs,
       renderResults,
+      currentJob,
       availableSets,
       setParts,
       batchJobs,
