@@ -50,14 +50,7 @@ export function useSyntheticDataset() {
       
       // 실제 렌더링 로직은 백엔드에서 처리
       // 여기서는 시뮬레이션
-      const apiUrl = import.meta.env.DEV 
-        ? '/api/synthetic/start-rendering'
-        : 'https://brickbox.vercel.app/api/synthetic/start-rendering'
-      
-      console.log('🔗 API URL:', apiUrl)
-      console.log('📤 Request config:', config)
-      
-      const response = await fetch(apiUrl, {
+      const response = await fetch('/api/synthetic/start-rendering', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -65,27 +58,11 @@ export function useSyntheticDataset() {
         body: JSON.stringify(config)
       })
       
-      console.log('📥 Response status:', response.status)
-      console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()))
-      
       if (!response.ok) {
-        const errorText = await response.text()
-        console.error('❌ API 오류:', response.status, errorText)
-        throw new Error(`렌더링 시작 실패: ${response.status}`)
+        throw new Error('렌더링 시작 실패')
       }
       
-      const responseText = await response.text()
-      console.log('📥 Response text:', responseText)
-      
-      try {
-        const jsonData = JSON.parse(responseText)
-        console.log('✅ JSON 파싱 성공:', jsonData)
-        return jsonData
-      } catch (parseError) {
-        console.error('❌ JSON 파싱 실패:', parseError)
-        console.error('📥 Raw response:', responseText)
-        throw new Error('JSON 파싱 실패')
-      }
+      return await response.json()
     } catch (error) {
       console.error('렌더링 시작 실패:', error)
       throw error
@@ -95,11 +72,7 @@ export function useSyntheticDataset() {
   // 렌더링 중지
   const stopRendering = async () => {
     try {
-      const apiUrl = import.meta.env.DEV 
-        ? '/api/synthetic/stop-rendering'
-        : 'https://brickbox.vercel.app/api/synthetic/stop-rendering'
-      
-      const response = await fetch(apiUrl, {
+      const response = await fetch('/api/synthetic/stop-rendering', {
         method: 'POST'
       })
       
@@ -211,11 +184,7 @@ export function useSyntheticDataset() {
   const getRenderProgress = async (jobId) => {
     try {
       // 실제 구현에서는 WebSocket이나 Server-Sent Events 사용
-      const apiUrl = import.meta.env.DEV 
-        ? `/api/synthetic/progress/${jobId}`
-        : `https://brickbox.vercel.app/api/synthetic/progress/${jobId}`
-      
-      const response = await fetch(apiUrl)
+      const response = await fetch(`/api/synthetic/progress/${jobId}`)
       
       if (!response.ok) {
         throw new Error('진행 상황 조회 실패')

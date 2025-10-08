@@ -111,10 +111,6 @@ app.post('/api/synthetic/stop-rendering', async (req, res) => {
 app.get('/api/synthetic/progress/:jobId', (req, res) => {
   const { jobId } = req.params
   
-  console.log('🔍 진행 상황 조회:', jobId)
-  console.log('📊 활성 작업 수:', activeJobs.size)
-  console.log('📋 활성 작업 목록:', Array.from(activeJobs.keys()))
-  
   if (activeJobs.has(jobId)) {
     const job = activeJobs.get(jobId)
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
@@ -128,39 +124,13 @@ app.get('/api/synthetic/progress/:jobId', (req, res) => {
       logs: job.logs.slice(-10) // 최근 10개 로그만
     })
   } else {
-    // 작업이 없으면 실제 Blender 프로세스 시작
-    console.log('⚠️ 작업을 찾을 수 없음, 실제 Blender 프로세스 시작')
-    
-    // 실제 Blender 렌더링 시작
-    const job = {
-      id: jobId,
-      status: 'running',
-      progress: 0,
-      config: { partId: '35480', setNum: '76917', imageCount: 200, quality: 'high' },
-      startTime: new Date(),
-      logs: []
-    }
-    
-    activeJobs.set(jobId, job)
-    
-    // 실제 Blender 프로세스 시작
-    startBlenderRendering(job)
-    
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     res.set('Pragma', 'no-cache')
     res.set('Expires', '0')
     res.set('Surrogate-Control', 'no-store')
     res.json({
-      success: true,
-      progress: 0,
-      status: 'running',
-      logs: [
-        {
-          timestamp: new Date().toISOString(),
-          message: '실제 Blender 렌더링 시작',
-          type: 'info'
-        }
-      ]
+      success: false,
+      message: '작업을 찾을 수 없습니다'
     })
   }
 })
@@ -565,21 +535,11 @@ async function startBlenderRendering(job) {
     } catch {}
   }
   
-  console.log('🎨 실제 Blender 렌더링 시작:', blenderPath, args.join(' '))
-  console.log('📊 렌더링 설정:', {
-    partId: effectivePartId,
-    imageCount,
-    quality,
-    samples,
-    resolution,
-    background
-  })
+  console.log('Blender 렌더링 시작:', blenderPath, args.join(' '))
   
   const blenderProcess = spawn(blenderPath, args, {
     cwd: path.join(__dirname, '..')
   })
-  
-  console.log('🚀 Blender 프로세스 시작됨:', blenderProcess.pid)
   
   job.blenderProcess = blenderProcess
   
