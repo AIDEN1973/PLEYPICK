@@ -472,9 +472,13 @@ export default {
           setNum: selectedSetNum.value || null,
           quality: renderQuality.value
         }
+        console.log('🔧 Current Job 설정:', currentJob.value)
         // 숫자만 입력된 경우는 엘리먼트 ID로 처리하도록 전송 값 보강
         if (renderMode.value === 'single' && selectedPartId.value && /^\d+$/.test(selectedPartId.value.trim())) {
           renderConfig.elementId = selectedPartId.value.trim()
+          // currentJob도 업데이트
+          currentJob.value.elementId = renderConfig.elementId
+          console.log('🔧 Element ID 설정:', renderConfig.elementId)
           // 서버 해석 API 호출해 파일 조회용 partId 미리 확보
           try {
             const resolveUrl = import.meta.env.DEV 
@@ -509,6 +513,7 @@ export default {
             currentJob.value.setNum = response.config.setNum || currentJob.value.setNum
             if (Number.isInteger(response.config.colorId)) currentJob.value.colorId = response.config.colorId
             currentJob.value.quality = response.config.quality || currentJob.value.quality
+            console.log('🔧 서버 응답 후 Current Job:', currentJob.value)
           }
           // 2초 간격으로 진행상황과 파일 목록 확인
           const pollInterval = setInterval(async () => {
