@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""
+Colab 노트북의 Supabase 설정을 동적으로 업데이트하는 스크립트
+Edge Function에서 전달받은 API 키를 사용하도록 수정
+"""
+
+import json
+import re
+
+def update_colab_notebook():
+    """Colab 노트북의 Supabase 설정을 업데이트"""
+    
+    notebook_path = "scripts/brickbox_yolo_automated_training_auto.ipynb"
+    
+    # 노트북 읽기
+    with open(notebook_path, 'r', encoding='utf-8') as f:
+        notebook = json.load(f)
+    
+    # 새로운 Supabase 설정 셀 추가
+    new_cell = {
+        "cell_type": "code",
+        "execution_count": None,
+        "metadata": {},
+        "outputs": [],
+        "source": [
+            "# 🔧 Supabase 설정 (Edge Function에서 전달받은 값 사용)\n",
+            "import os\n",
+            "from supabase import create_client, Client\n",
+            "from datetime import datetime\n",
+            "import json\n",
+            "\n",
+            "# Edge Function에서 전달받은 설정 사용\n",
+            "SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://npferbxuxocbfnfbpcnz.supabase.co')\n",
+            "SUPABASE_ANON_KEY = os.getenv('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk')\n",
+            "SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_KEY', '')\n",
+            "\n",
+            "# Supabase 클라이언트 생성 (anon key 사용)\n",
+            "supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)\n",
+            "\n",
+            "print(\"✅ Supabase 연결 완료\")\n",
+            "print(f\"📊 URL: {SUPABASE_URL}\")\n",
+            "print(f\"🔑 Anon Key: {SUPABASE_ANON_KEY[:20]}...\")\n"
+        ]
+    }
+    
+    # 기존 Supabase 설정 셀 찾아서 교체
+    for i, cell in enumerate(notebook['cells']):
+        if cell['cell_type'] == 'code' and 'supabase' in ''.join(cell.get('source', [])).lower():
+            # 기존 셀을 새 셀로 교체
+            notebook['cells'][i] = new_cell
+            break
+    else:
+        # 기존 셀이 없으면 첫 번째 셀 뒤에 추가
+        notebook['cells'].insert(1, new_cell)
+    
+    # 노트북 저장
+    with open(notebook_path, 'w', encoding='utf-8') as f:
+        json.dump(notebook, f, indent=2, ensure_ascii=False)
+    
+    print("✅ Colab 노트북 Supabase 설정 업데이트 완료!")
+
+if __name__ == "__main__":
+    update_colab_notebook()

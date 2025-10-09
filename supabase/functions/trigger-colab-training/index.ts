@@ -108,7 +108,10 @@ serve(async (req: Request) => {
     console.log(`📊 데이터셋 확인: ${dataset_info.name} (${dataset_info.total_images}개 이미지)`)
 
     // 2. 학습 작업 생성 (dataset_id 없이)
-    const job_name = `brickbox_yolo_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`
+    const timestamp = Date.now()
+    const randomSuffix = Math.random().toString(36).substring(2, 8)
+    const setNumSuffix = set_num ? `_${set_num}` : ''
+    const job_name = `brickbox_yolo_${timestamp}_${randomSuffix}${setNumSuffix}`
     const config = {
       epochs: training_config?.epochs || 100,
       batch_size: training_config?.batch_size || 16,
@@ -121,7 +124,7 @@ serve(async (req: Request) => {
     
     const { data: training_job, error: jobError } = await supabase
       .from('training_jobs')
-      .insert({
+      .upsert({
         job_name,
         dataset_id: null, // 외래키 제약조건 우회
         status: 'pending',
@@ -129,6 +132,8 @@ serve(async (req: Request) => {
           ...config,
           set_num: set_num  // 세트 번호 포함
         }
+      }, {
+        onConflict: 'job_name'
       })
       .select()
       .single()
@@ -167,8 +172,15 @@ serve(async (req: Request) => {
         set_num: set_num  // 세트 번호 전달
       },
       supabase_url: supabaseUrl,
-      supabase_key: supabaseServiceKey,
-      webhook_url: webhook_url || Deno.env.get('WEBHOOK_URL')
+      supabase_anon_key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk', // 실제 anon key
+      supabase_service_key: supabaseServiceKey, // 서비스 키도 함께 전달
+      webhook_url: webhook_url || Deno.env.get('WEBHOOK_URL'),
+      // 환경 변수로 전달
+      env_vars: {
+        SUPABASE_URL: supabaseUrl,
+        SUPABASE_ANON_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk',
+        SUPABASE_SERVICE_KEY: supabaseServiceKey
+      }
     }
 
     console.log(`🚀 Colab 노트북 실행 요청: ${colabNotebookUrl}`)

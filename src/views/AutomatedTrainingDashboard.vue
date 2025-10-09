@@ -420,25 +420,30 @@ const loadSetInfo = async () => {
         trainedPartsCount = trainingStatus.unique_parts_trained
         console.log('unique_parts_trained 사용:', trainedPartsCount)
       } else {
-        // 3-2) model_registry.training_metadata에서 세트별 학습 이력 확인
-        const baseSetNum = selectedSetNum.value.split('-')[0]
-        const { data: modelRows, error: modelError } = await supabase
-          .from('model_registry')
-          .select('training_metadata, created_at')
-          .contains('training_metadata', { set_num: baseSetNum })
-          .order('created_at', { ascending: false })
-          .limit(1)
+        // 3-2) model_registry에서 세트별 학습 이력 확인 (training_metadata 컬럼이 있는 경우만)
+        try {
+          const baseSetNum = selectedSetNum.value.split('-')[0]
+          const { data: modelRows, error: modelError } = await supabase
+            .from('model_registry')
+            .select('training_metadata, created_at')
+            .contains('training_metadata', { set_num: baseSetNum })
+            .order('created_at', { ascending: false })
+            .limit(1)
 
-        if (modelError) {
-          console.warn('모델 이력 조회 실패:', modelError)
-        }
-
-        if (modelRows && modelRows.length > 0) {
-          const meta = modelRows[0]?.training_metadata || {}
-          trainedPartsCount = typeof meta.trained_parts_count === 'number'
-            ? meta.trained_parts_count
-            : Array.isArray(meta.trained_parts) ? meta.trained_parts.length : 0
-          console.log('model_registry 메타에서 계산:', trainedPartsCount)
+          if (modelError) {
+            console.warn('모델 이력 조회 실패 (training_metadata 컬럼 없음):', modelError)
+            // training_metadata 컬럼이 없는 경우 기본값 사용
+            trainedPartsCount = 0
+          } else if (modelRows && modelRows.length > 0) {
+            const meta = modelRows[0]?.training_metadata || {}
+            trainedPartsCount = typeof meta.trained_parts_count === 'number'
+              ? meta.trained_parts_count
+              : Array.isArray(meta.trained_parts) ? meta.trained_parts.length : 0
+            console.log('model_registry 메타에서 계산:', trainedPartsCount)
+          }
+        } catch (error) {
+          console.warn('training_metadata 컬럼 조회 실패, 기본값 사용:', error)
+          trainedPartsCount = 0
         }
       }
     } catch (e) {
@@ -481,6 +486,8 @@ const startSetTraining = async () => {
         status: 'training',
         total_parts_in_set: setInfo.value.total_parts,
         last_rendered_at: new Date().toISOString()
+      }, {
+        onConflict: 'set_num'
       })
     
     if (updateError) {
