@@ -711,7 +711,7 @@ const saveSetToMasterPartsDB = async () => {
             try {
               const imageResult = await uploadImageFromUrl(
                 originalPart.part.part_img_url,
-                `${originalPart.part.part_num}_${originalPart.color.id}.jpg`,
+                `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
                 'lego_parts_images'
               )
               
@@ -720,7 +720,7 @@ const saveSetToMasterPartsDB = async () => {
                 original_url: originalPart.part.part_img_url,
                 supabase_url: imageResult.url,
                 file_path: imageResult.path,
-                file_name: `${originalPart.part.part_num}_${originalPart.color.id}.jpg`,
+                file_name: `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
                 part_num: originalPart.part.part_num,
                 color_id: originalPart.color.id,
                 set_num: targetSetNumber.value
@@ -841,7 +841,7 @@ const getPartImageUrl = (record) => {
   // Supabase Storage에서 이미지 URL 생성
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
   const bucketName = 'lego_parts_images'
-  const fileName = `${partId}_${colorId}.jpg`
+  const fileName = `${partId}_${colorId}.webp`
   
   if (supabaseUrl) {
     const url = `${supabaseUrl}/storage/v1/object/public/${bucketName}/${fileName}`
@@ -850,7 +850,7 @@ const getPartImageUrl = (record) => {
   }
   
   // Supabase URL이 없으면 Rebrickable URL 사용
-  const rebrickableUrl = `https://cdn.rebrickable.com/media/parts/elements/${partId}.jpg`
+  const rebrickableUrl = `https://cdn.rebrickable.com/media/parts/elements/${partId}.webp`
   console.log('⚠️ Rebrickable URL 사용:', rebrickableUrl)
   return rebrickableUrl
 }

@@ -120,30 +120,7 @@ export function useClosedWorldDetection() {
     }
   }
 
-  // 실제 데이터가 없을 때만 사용하는 샘플 데이터 (최후의 수단)
-  const loadSampleBOMData = async (setNum) => {
-    console.log(`⚠️ 실제 데이터를 찾을 수 없습니다. 샘플 데이터를 사용합니다: ${setNum}`)
-    
-    // 샘플 부품 데이터 (일반적인 레고 부품들)
-    const sampleParts = [
-      { part_id: '3001', color_id: 0, quantity: 10, is_spare: false, part_name: 'Brick 2 x 4', color_name: 'Black', color_rgb: '#000000' },
-      { part_id: '3002', color_id: 1, quantity: 5, is_spare: false, part_name: 'Brick 2 x 3', color_name: 'Blue', color_rgb: '#0052A5' },
-      { part_id: '3003', color_id: 4, quantity: 8, is_spare: false, part_name: 'Brick 2 x 2', color_name: 'Bright Red', color_rgb: '#C91A09' },
-      { part_id: '3004', color_id: 21, quantity: 12, is_spare: false, part_name: 'Brick 1 x 2', color_name: 'Bright Blue', color_rgb: '#0052A5' },
-      { part_id: '3005', color_id: 24, quantity: 15, is_spare: false, part_name: 'Brick 1 x 1', color_name: 'Bright Yellow', color_rgb: '#F2CD37' },
-      { part_id: '3001', color_id: 26, quantity: 3, is_spare: true, part_name: 'Brick 2 x 4', color_name: 'Bright Green', color_rgb: '#00852B' }
-    ]
-    
-    const bomColors = [...new Set(sampleParts.map(p => p.color_id))]
-    
-    detectionState.targetSet = setNum
-    detectionState.bomParts = sampleParts
-    detectionState.bomColors = bomColors
-    
-    console.log(`📋 샘플 BOM 로드 완료: ${sampleParts.length}개 부품, ${bomColors.length}개 색상`)
-    
-    return { bomParts: sampleParts, bomColors }
-  }
+  // 샘플/목업 데이터 사용 금지: 함수 제거
 
   // 폐쇄 세계 필터 적용
   const applyClosedWorldFilter = (detections) => {
@@ -289,14 +266,10 @@ export function useClosedWorldDetection() {
       const { detectPartsWithYOLO } = useOptimizedRealtimeDetection()
       const detections = await detectPartsWithYOLO(imageData)
       
-      // 3. 검출된 객체에 특징 벡터 추가 (실제 구현에서는 CLIP/ViT 사용)
+      // 3. 특징 벡터는 외부 파이프라인에서만 주입 (목업 금지)
       const enhancedDetections = detections.map(detection => ({
         ...detection,
-        features: {
-          shape_vector: generateMockShapeVector(), // 실제로는 CLIP 인코딩
-          color_lab: generateMockColorLab(), // 실제로는 색상 분석
-          size_stud: generateMockSizeStud() // 실제로는 크기 측정
-        }
+        features: detection.features || null
       }))
       
       console.log(`🔍 YOLO 검출 + 특징 추출: ${enhancedDetections.length}개 객체`)
@@ -352,18 +325,7 @@ export function useClosedWorldDetection() {
     }
   }
 
-  // Mock 함수들 (실제 구현에서는 CLIP/ViT 모델 사용)
-  const generateMockShapeVector = () => {
-    return Array.from({ length: 512 }, () => Math.random() * 2 - 1)
-  }
-  
-  const generateMockColorLab = () => {
-    return { L: Math.random() * 100, a: Math.random() * 200 - 100, b: Math.random() * 200 - 100 }
-  }
-  
-  const generateMockSizeStud = () => {
-    return Math.random() * 10 + 1
-  }
+  // 목업 생성 함수 삭제
 
   return {
     detectionState,

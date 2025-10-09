@@ -5,6 +5,55 @@
       <p>LDraw + Blender + Supabase 기반 자동 렌더링 파이프라인</p>
     </div>
 
+    <!-- 자동 학습 설정 -->
+    <div class="auto-training-settings">
+      <h3>🤖 자동 학습 설정</h3>
+      <div class="settings-controls">
+        <div class="setting-item">
+          <label class="toggle-label">
+            <input 
+              type="checkbox" 
+              v-model="autoTrainingEnabled" 
+              @change="updateAutoTrainingSetting"
+              class="toggle-input"
+            >
+            <span class="toggle-slider"></span>
+            <span class="toggle-text">
+              {{ autoTrainingEnabled ? '자동 학습 활성화' : '자동 학습 비활성화' }}
+            </span>
+          </label>
+        </div>
+        <div class="setting-info">
+          <p v-if="autoTrainingEnabled" class="info-text enabled">
+            ✅ 렌더링 완료 시 자동으로 학습이 시작됩니다
+          </p>
+          <p v-else class="info-text disabled">
+            ⏸️ 렌더링 완료 후 수동으로 학습을 시작해야 합니다
+          </p>
+        </div>
+      </div>
+      
+      <!-- 세트 단위 학습 설정 -->
+      <div class="set-training-settings">
+        <h4>🎯 세트 단위 학습</h4>
+        <div class="set-training-info">
+          <p class="info-text">
+            📊 세트별로 학습하여 중복을 방지하고 점진적으로 검수 가능한 세트를 확장합니다
+          </p>
+          <div class="set-stats">
+            <div class="stat-item">
+              <span class="stat-label">학습 완료 세트:</span>
+              <span class="stat-value">{{ trainedSetsCount }}개</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-label">검수 가능 세트:</span>
+              <span class="stat-value">{{ availableSetsCount }}개</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 통계 대시보드 -->
     <div class="stats-grid">
       <div class="stat-card">
@@ -440,16 +489,23 @@
 <script>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSyntheticDataset } from '@/composables/useSyntheticDataset'
+import { createClient } from '@supabase/supabase-js'
 
 export default {
   name: 'SyntheticDatasetManager',
   setup() {
+    // Supabase 클라이언트 초기화
+    const supabase = createClient(
+      import.meta.env.VITE_SUPABASE_URL,
+      import.meta.env.VITE_SUPABASE_ANON_KEY
+    )
+    
     const { 
-      getStats, 
-      startRendering: startRenderingAPI, 
-      stopRendering: stopRenderingAPI, 
+      getStats,
+      startRendering: startRenderingAPI,
+      stopRendering: stopRenderingAPI,
       getRenderResults,
-      uploadToSupabase: uploadToSupabaseAPI 
+      uploadToSupabase: uploadToSupabaseAPI
     } = useSyntheticDataset()
 
     // 반응형 데이터
@@ -500,7 +556,7 @@ export default {
     const POLL_INTERVAL_MS = 3000 // 진행 폴링 간격(표준화)
     const TIMEOUT_MAX_ATTEMPTS = 300 // 300 * 3s = 900초(10분)
     const STORAGE_BATCH_SIZE = 6 // 스토리지 폴더 검증 배치 크기 축소로 I/O 완화
-    const DUP_MIN_FILES = 120 // 폴더 내 최소 파일 수 기준으로 중복 판정 강화
+    const DUP_MIN_FILES = 150 // 폴더 내 최소 파일 수 기준으로 중복 판정 강화
 
     const serializeSession = () => {
       try {
@@ -899,10 +955,11 @@ export default {
         const { useSupabase } = await import('@/composables/useSupabase')
         const { supabase } = useSupabase()
         
-        // lego_sets 테이블에서 사용 가능한 세트 목록 조회
+        // synthetic_dataset에서 사용 가능한 세트 목록 조회
         const { data, error } = await supabase
-          .from('lego_sets')
+          .from('synthetic_dataset')
           .select('set_num')
+          .not('set_num', 'is', null)
           .order('set_num')
           .limit(50)
         
@@ -910,7 +967,9 @@ export default {
           throw error
         }
         
-        availableSets.value = data.map(set => set.set_num)
+        // 중복 제거하여 고유한 세트 목록 생성
+        const uniqueSets = [...new Set(data.map(item => item.set_num))]
+        availableSets.value = uniqueSets
         renderLogs.value.push({ 
           type: 'info', 
           message: `사용 가능한 세트 ${availableSets.value.length}개 로드됨` 
@@ -1099,6 +1158,9 @@ export default {
                 isRendering.value = false
                 renderProgress.value = 100
                 renderLogs.value.push({ type: 'success', message: '렌더링 완료' })
+                
+                // 🚀 자동 학습 트리거
+                await triggerAutoTraining()
                 
                 // 완료된 부품을 목록에 추가
                 if (currentRenderingPart.value) {
@@ -1353,9 +1415,185 @@ export default {
         currentRenderingPart.value = null
         
         // 최종 요약
+        renderLogs.value.push({
+          type: 'info',
+          message: `세트 렌더링 완료: 완료 ${completedParts.value.length}개, 실패 ${failedParts.value.length}개`
+        })
+        
+        // 🚀 자동 학습 트리거 (세트 렌더링 완료 시)
+        await triggerAutoTraining()
+      }
+    }
+
+    // 🤖 자동 학습 설정
+    const autoTrainingEnabled = ref(false)
+    const trainedSetsCount = ref(0)
+    const availableSetsCount = ref(0)
+    
+    // 자동 학습 설정 로드
+    const loadAutoTrainingSetting = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('automation_config')
+          .select('config_value')
+          .eq('config_key', 'auto_training_enabled')
+          .single()
+        
+        if (data && data.config_value) {
+          autoTrainingEnabled.value = data.config_value.enabled || false
+        }
+      } catch (error) {
+        console.error('자동 학습 설정 로드 실패:', error)
+      }
+    }
+    
+    // 세트 학습 통계 로드
+    const loadSetTrainingStats = async () => {
+      try {
+        // 학습 완료된 세트 수 조회
+        const { data: trainedData, error: trainedError } = await supabase
+          .from('set_training_status')
+          .select('id')
+          .eq('status', 'completed')
+        
+        if (trainedError) {
+          console.warn('set_training_status 테이블이 아직 생성되지 않았습니다:', trainedError.message)
+          trainedSetsCount.value = 0
+        } else if (trainedData) {
+          trainedSetsCount.value = trainedData.length
+        }
+        
+        // 검수 가능한 세트 수 조회
+        const { data: availableData, error: availableError } = await supabase
+          .from('set_training_status')
+          .select('id')
+          .eq('is_available_for_inspection', true)
+        
+        if (availableError) {
+          console.warn('set_training_status 테이블이 아직 생성되지 않았습니다:', availableError.message)
+          availableSetsCount.value = 0
+        } else if (availableData) {
+          availableSetsCount.value = availableData.length
+        }
+        
+        console.log(`📊 세트 학습 통계: 학습 완료 ${trainedSetsCount.value}개, 검수 가능 ${availableSetsCount.value}개`)
+      } catch (error) {
+        console.error('세트 학습 통계 로드 실패:', error)
+        // 오류 시 기본값 설정
+        trainedSetsCount.value = 0
+        availableSetsCount.value = 0
+      }
+    }
+    
+    // 자동 학습 설정 업데이트
+    const updateAutoTrainingSetting = async () => {
+      try {
+        // 1. 기존 설정 확인
+        const { data: existingData, error: selectError } = await supabase
+          .from('automation_config')
+          .select('*')
+          .eq('config_key', 'auto_training_enabled')
+          .single()
+        
+        if (selectError && selectError.code !== 'PGRST116') {
+          console.error('기존 설정 조회 실패:', selectError)
+        }
+        
+        let result
+        if (existingData) {
+          // 기존 설정이 있으면 업데이트
+          const { data, error } = await supabase
+            .from('automation_config')
+            .update({
+              config_value: { enabled: autoTrainingEnabled.value },
+              description: '자동 학습 활성화 설정',
+              is_active: true
+            })
+            .eq('config_key', 'auto_training_enabled')
+            .select()
+          
+          result = { data, error }
+        } else {
+          // 기존 설정이 없으면 삽입
+          const { data, error } = await supabase
+            .from('automation_config')
+            .insert({
+              config_key: 'auto_training_enabled',
+              config_value: { enabled: autoTrainingEnabled.value },
+              description: '자동 학습 활성화 설정',
+              is_active: true
+            })
+            .select()
+          
+          result = { data, error }
+        }
+        
+        if (result.error) {
+          console.error('자동 학습 설정 업데이트 실패:', result.error)
+          renderLogs.value.push({ 
+            type: 'error', 
+            message: `❌ 자동 학습 설정 업데이트 실패: ${result.error.message}` 
+          })
+          return
+        }
+        
+        console.log(`✅ 자동 학습 설정 업데이트: ${autoTrainingEnabled.value ? '활성화' : '비활성화'}`)
+        renderLogs.value.push({ 
+          type: 'success', 
+          message: `🤖 자동 학습 ${autoTrainingEnabled.value ? '활성화' : '비활성화'}됨` 
+        })
+      } catch (error) {
+        console.error('자동 학습 설정 업데이트 실패:', error)
+        renderLogs.value.push({ 
+          type: 'error', 
+          message: `❌ 자동 학습 설정 업데이트 실패: ${error.message}` 
+        })
+      }
+    }
+
+    // 🚀 자동 학습 트리거 함수
+    const triggerAutoTraining = async () => {
+      // 자동 학습이 비활성화된 경우 스킵
+      if (!autoTrainingEnabled.value) {
+        console.log('⏸️ 자동 학습이 비활성화되어 있습니다')
         renderLogs.value.push({ 
           type: 'info', 
-          message: `세트 렌더링 완료: 완료 ${completedParts.value.length}개, 실패 ${failedParts.value.length}개` 
+          message: '⏸️ 자동 학습이 비활성화되어 있습니다. 수동으로 학습을 시작하세요.' 
+        })
+        return
+      }
+      
+      try {
+        console.log('🚀 자동 학습 트리거 시작...')
+        
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/auto-training-trigger`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        const result = await response.json()
+        
+        if (result.success) {
+          console.log('✅ 자동 학습 트리거 성공:', result.message)
+          renderLogs.value.push({ 
+            type: 'success', 
+            message: `🤖 자동 학습 시작: ${result.message}` 
+          })
+        } else {
+          console.log('ℹ️ 자동 학습 조건 미충족:', result.message)
+          renderLogs.value.push({ 
+            type: 'info', 
+            message: `ℹ️ 자동 학습 조건: ${result.message}` 
+          })
+        }
+      } catch (error) {
+        console.error('❌ 자동 학습 트리거 실패:', error)
+        renderLogs.value.push({ 
+          type: 'error', 
+          message: `❌ 자동 학습 트리거 실패: ${error.message}` 
         })
       }
     }
@@ -1725,6 +1963,8 @@ export default {
       // 세션 복원 → 통계 로드
       loadSession()
       await refreshStats()
+      await loadAutoTrainingSetting()
+      await loadSetTrainingStats()
       
       // 배치 작업 초기화
       batchJobs.value = [
@@ -1794,7 +2034,13 @@ export default {
       showRenderedItems,
       retryFailedParts,
       retrySinglePart,
-      cleanupInvalidData
+      cleanupInvalidData,
+      autoTrainingEnabled,
+      updateAutoTrainingSetting,
+      loadAutoTrainingSetting,
+      loadSetTrainingStats,
+      trainedSetsCount,
+      availableSetsCount
     }
   }
 }
@@ -1805,6 +2051,101 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
+}
+
+/* 자동 학습 설정 스타일 */
+.auto-training-settings {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.auto-training-settings h3 {
+  margin: 0 0 15px 0;
+  color: #2c3e50;
+  font-size: 18px;
+}
+
+.settings-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.setting-item {
+  display: flex;
+  align-items: center;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-input {
+  display: none;
+}
+
+.toggle-slider {
+  position: relative;
+  width: 50px;
+  height: 24px;
+  background: #ccc;
+  border-radius: 12px;
+  margin-right: 12px;
+  transition: background 0.3s;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.3s;
+}
+
+.toggle-input:checked + .toggle-slider {
+  background: #4CAF50;
+}
+
+.toggle-input:checked + .toggle-slider::before {
+  transform: translateX(26px);
+}
+
+.toggle-text {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+.setting-info {
+  margin-left: 62px;
+}
+
+.info-text {
+  margin: 0;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.info-text.enabled {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.info-text.disabled {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
 }
 
 .header {
@@ -1972,6 +2313,56 @@ export default {
 .adaptive-features small {
   color: #27ae60;
   font-weight: 500;
+}
+
+/* 세트 단위 학습 설정 스타일 */
+.set-training-settings {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border-left: 4px solid #3498db;
+}
+
+.set-training-settings h4 {
+  margin: 0 0 10px 0;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.set-training-info {
+  margin-bottom: 15px;
+}
+
+.set-training-info .info-text {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #2c3e50;
+  line-height: 1.5;
+}
+
+.set-stats {
+  display: flex;
+  gap: 20px;
+  margin-top: 10px;
+}
+
+.set-stats .stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.set-stats .stat-label {
+  font-size: 14px;
+  color: #7f8c8d;
+  font-weight: 500;
+}
+
+.set-stats .stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #3498db;
 }
 
 .available-sets {

@@ -254,7 +254,7 @@ export function useImageManager() {
       return filename
     } catch (err) {
       console.warn('Failed to extract filename from URL:', err.message)
-      return `image_${Date.now()}.jpg`
+      return `image_${Date.now()}.webp`
     }
   }
 
@@ -291,8 +291,8 @@ export function useImageManager() {
         const blob = await downloadImage(imageUrl)
         
         // 파일명을 partNum_colorId.jpg 형식으로 통일
-        const fileName = `${partNum}_${colorId}.jpg`
-        const file = new File([blob], fileName, { type: 'image/jpeg' })
+        const fileName = `${partNum}_${colorId}.webp`
+        const file = new File([blob], fileName, { type: 'image/webp' })
         
         // 서버에 업로드 (원본 파일명 그대로 사용)
         const result = await uploadImage(file, uploadPath)
@@ -314,7 +314,7 @@ export function useImageManager() {
         try {
           // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
           // 파일명도 일관되게 partNum_colorId.jpg 사용
-          const combinedFilename = `${partNum}_${colorId}.jpg`
+          const combinedFilename = `${partNum}_${colorId}.webp`
           const result = await uploadImageFromUrl(imageUrl, combinedFilename, uploadPath)
           
           // part_images 동기화
@@ -471,7 +471,7 @@ export function useImageManager() {
         color_id: colorId,
         original_url: uploadedUrl,
         uploaded_url: uploadedUrl,
-        filename: filename || `${partNum}_${colorId}.jpg`,
+        filename: filename || `${partNum}_${colorId}.webp`,
         upload_status: 'completed'
       }
 

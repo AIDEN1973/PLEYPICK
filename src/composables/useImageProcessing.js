@@ -258,22 +258,22 @@ export function useImageProcessing() {
 
   const calculateBrightness = async (imageData) => {
     // 실제 구현에서는 이미지 픽셀 분석
-    return 0.7 // 시뮬레이션
+    return 0
   }
 
   const calculateContrast = async (imageData) => {
     // 실제 구현에서는 이미지 픽셀 분석
-    return 0.8 // 시뮬레이션
+    return 0
   }
 
   const calculateSharpness = async (imageData) => {
     // 실제 구현에서는 라플라시안 필터 등 사용
-    return 0.75 // 시뮬레이션
+    return 0
   }
 
   const calculateNoise = async (imageData) => {
     // 실제 구현에서는 노이즈 분석
-    return 0.2 // 시뮬레이션
+    return 0
   }
 
   const enhanceContrast = (ctx, width, height) => {
@@ -340,7 +340,7 @@ export function useImageProcessing() {
 
   const calculateImageSimilarity = async (image1, image2) => {
     // 실제 구현에서는 구조적 유사도(SSIM) 등 사용
-    return 0.85 // 시뮬레이션
+    return 0
   }
 
   return {

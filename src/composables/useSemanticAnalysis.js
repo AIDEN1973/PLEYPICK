@@ -83,10 +83,10 @@ export function useSemanticAnalysis() {
       // 실제 구현에서는 이미지 처리 라이브러리 사용
       // 여기서는 시뮬레이션
       const complexity = {
-        texture_entropy: Math.random() * 0.5 + 0.3,
-        edge_diversity: Math.random() * 0.5 + 0.3,
-        shape_irregularity: Math.random() * 0.5 + 0.3,
-        color_variation: Math.random() * 0.5 + 0.3
+        texture_entropy: 0,
+        edge_diversity: 0,
+        shape_irregularity: 0,
+        color_variation: 0
       }
       
       const score = (
@@ -184,14 +184,14 @@ export function useSemanticAnalysis() {
   const generateTextEmbedding = async (text) => {
     // 실제 구현에서는 OpenAI API 사용
     // 여기서는 시뮬레이션
-    return Array.from({ length: 1536 }, () => Math.random() * 2 - 1)
+    return null
   }
 
   // CLIP 이미지 임베딩 생성
   const generateClipEmbedding = async (imageUrl) => {
     // 실제 구현에서는 CLIP 모델 사용
     // 여기서는 시뮬레이션
-    return Array.from({ length: 1536 }, () => Math.random() * 2 - 1)
+    return null
   }
 
   // 키워드 기반 유사도
@@ -285,7 +285,7 @@ export function useSemanticAnalysis() {
   // 위치 일관성 계산
   const calculatePositionConsistency = (keypoints) => {
     // 실제 구현에서는 키포인트 간 상대 위치 일관성 계산
-    return Math.random() * 0.5 + 0.3
+    return 0
   }
 
   // 대칭축 맵 생성
@@ -297,7 +297,7 @@ export function useSemanticAnalysis() {
   // 대칭성 점수 계산
   const calculateSymmetryScore = (symmetryMap) => {
     // 실제 구현에서는 대칭성 분석 알고리즘 사용
-    return Math.random() * 0.5 + 0.3
+    return 0
   }
 
   // 코사인 유사도 계산

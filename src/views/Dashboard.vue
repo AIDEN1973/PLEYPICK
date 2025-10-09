@@ -107,8 +107,8 @@ export default {
       window.addEventListener('online', () => isOnline.value = true)
       window.addEventListener('offline', () => isOnline.value = false)
       
-      // 사용자 수 시뮬레이션 (실제로는 Supabase에서 가져와야 함)
-      userCount.value = Math.floor(Math.random() * 1000) + 100
+      // 시뮬레이션 제거: 실제 데이터 연동 전까지 0
+      userCount.value = 0
     })
 
     return {

@@ -109,7 +109,7 @@ export function useSyntheticDataset() {
   const uploadToSupabase = async (result) => {
     try {
       // 이미지 파일을 Supabase Storage에 업로드
-      const fileName = `${result.partId}_${Date.now()}.png`
+      const fileName = `${result.partId}_${Date.now()}.webp`
       const filePath = `synthetic/${result.partId}/${fileName}`
       
       // 실제 파일 업로드 로직은 백엔드에서 처리

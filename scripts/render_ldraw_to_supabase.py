@@ -35,6 +35,24 @@ import numpy as np
 from pathlib import Path
 import argparse
 from datetime import datetime
+import yaml
+
+def create_dataset_yaml(output_dir, class_names, part_id):
+    """YOLO 데이터셋용 YAML 파일 생성"""
+    dataset_config = {
+        'path': str(output_dir),
+        'train': 'images',
+        'val': 'images',
+        'nc': len(class_names),
+        'names': class_names
+    }
+    
+    yaml_path = output_dir / 'dataset.yaml'
+    with open(yaml_path, 'w') as f:
+        yaml.dump(dataset_config, f, default_flow_style=False)
+    
+    print(f"✅ dataset.yaml 생성: {yaml_path}")
+    return yaml_path
 
 # 환경 선로드: 스크립트 진입 즉시 .env 계열 강제 로드(Blender 인자 전달 실패 대비)
 try:
@@ -306,10 +324,10 @@ class LDrawRenderer:
         bpy.context.scene.cycles.use_denoising = True  # 노이즈 제거 활성화
         bpy.context.scene.cycles.denoiser = 'OPTIX' if bpy.context.scene.cycles.device == 'GPU' else 'OPENIMAGEDENOISE'
         
-        # 출력 포맷 (용량 최적화)
-        bpy.context.scene.render.image_settings.file_format = 'PNG'
+        # 출력 포맷 (WebP Q80으로 용량 최적화)
+        bpy.context.scene.render.image_settings.file_format = 'WEBP'
         bpy.context.scene.render.image_settings.color_mode = 'RGB'  # RGBA → RGB (25% 용량 절약)
-        bpy.context.scene.render.image_settings.compression = 15  # PNG 압축 레벨 (0-100)
+        bpy.context.scene.render.image_settings.quality = 80  # WebP Q80 품질 설정
 
         # 노출/색공간
         try:
@@ -1361,6 +1379,13 @@ class LDrawRenderer:
         # 색상 선택
         color_name = None
         color_rgba = None
+        is_transparent = False
+        is_white = False
+        
+        # 투명 색상 ID 감지
+        if force_color_id in [47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60]:
+            is_transparent = True
+        
         # color_hex 우선 적용 (정확도 최우선)
         if force_color_hex and isinstance(force_color_hex, str):
             hexstr = force_color_hex.strip()
@@ -1371,13 +1396,21 @@ class LDrawRenderer:
                     r = int(hexstr[0:2], 16) / 255.0
                     g = int(hexstr[2:4], 16) / 255.0
                     b = int(hexstr[4:6], 16) / 255.0
+                    
+                    # 흰색 감지 (RGB 모두 0.9 이상)
+                    if r >= 0.9 and g >= 0.9 and b >= 0.9:
+                        is_white = True
+                    
                     # sRGB → Linear 변환 (Blender는 기본적으로 선형 워크플로우)
                     def srgb_to_linear(c):
                         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
                     lr = srgb_to_linear(r)
                     lg = srgb_to_linear(g)
                     lb = srgb_to_linear(b)
-                    color_rgba = (lr, lg, lb, 1.0)
+                    
+                    # Alpha 값 동적 설정
+                    alpha_value = 0.6 if is_transparent else 1.0
+                    color_rgba = (lr, lg, lb, alpha_value)
                     color_name = f"hex_{force_color_hex.upper()}"
                 except Exception:
                     pass
@@ -1401,21 +1434,64 @@ class LDrawRenderer:
 
         if color_rgba is None and force_color_id is not None:
             if force_color_id in id_to_rgba:
-                color_rgba = id_to_rgba[force_color_id]
+                base_rgba = id_to_rgba[force_color_id]
+                # 흰색 감지 (ID 0)
+                if force_color_id == 0:
+                    is_white = True
+                # 투명도 적용
+                alpha_value = 0.6 if is_transparent else 1.0
+                color_rgba = (base_rgba[0], base_rgba[1], base_rgba[2], alpha_value)
                 color_name = f"color_{force_color_id}"
             else:
                 # 강제 색상이지만 매핑이 없으면 중립 회색으로 고정 (무작위 금지)
-                color_rgba = id_to_rgba.get(9)
+                base_rgba = id_to_rgba.get(9)
+                alpha_value = 0.6 if is_transparent else 1.0
+                color_rgba = (base_rgba[0], base_rgba[1], base_rgba[2], alpha_value)
                 color_name = f"color_{force_color_id}_fallback_gray"
         elif color_rgba is None:
             # 무작위 컬러 (강제 색상이 없을 때만)
             color_name = random.choice(list(self.lego_colors.keys()))
-            color_rgba = self.lego_colors[color_name]
+            base_rgba = self.lego_colors[color_name]
+            alpha_value = 0.6 if is_transparent else 1.0
+            color_rgba = (base_rgba[0], base_rgba[1], base_rgba[2], alpha_value)
         
         # 플라스틱 재질 파라미터
         bsdf.inputs['Base Color'].default_value = color_rgba
         bsdf.inputs['Metallic'].default_value = 0.0
         bsdf.inputs['Roughness'].default_value = 0.35
+        
+        # 투명도 설정
+        if is_transparent:
+            bsdf.inputs['Alpha'].default_value = color_rgba[3]  # Alpha 값 사용
+            bsdf.inputs['Transmission'].default_value = 0.8  # 투명도 강화
+            material.blend_method = 'BLEND'  # 블렌딩 모드
+            material.use_transparency = True
+        else:
+            bsdf.inputs['Alpha'].default_value = 1.0
+            bsdf.inputs['Transmission'].default_value = 0.0
+            material.blend_method = 'OPAQUE'
+            material.use_transparency = False
+        
+        # 밝은 부품 가시성 개선 (Adaptive Bright-Part Rendering)
+        if is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9):
+            # 조건부 병합 방식: 밝은 부품 처리
+            adjusted_color = (
+                color_rgba[0] * 0.95,  # 5% 어둡게
+                color_rgba[1] * 0.95,
+                color_rgba[2] * 0.95,
+                color_rgba[3]
+            )
+            bsdf.inputs['Base Color'].default_value = adjusted_color
+            bsdf.inputs['Roughness'].default_value = 0.5  # 경계선 강화
+            
+            # 배경 밝기 조정을 위한 메타데이터 저장
+            self.bright_part_rendering = True
+            self.world_bg_strength = 0.85  # 배경을 밝은 회색으로
+        else:
+            # 일반 부품
+            bsdf.inputs['Roughness'].default_value = 0.35
+            self.bright_part_rendering = False
+            self.world_bg_strength = 1.0
 
         # 재질을 객체에 적용 (모든 슬롯 일관 교체)
         try:
@@ -1436,7 +1512,10 @@ class LDrawRenderer:
         
         return {
             'color_name': color_name,
-            'color_rgba': color_rgba
+            'color_rgba': color_rgba,
+            'is_bright_part': is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9),
+            'is_transparent': is_transparent,
+            'visibility_boost': is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9)
         }
     
     def calculate_bounding_box(self, part_object):
@@ -1564,6 +1643,39 @@ class LDrawRenderer:
             hull = hull[::step]
         return hull
     
+    def setup_adaptive_lighting(self, is_bright_part=False):
+        """밝은 부품을 위한 적응형 조명 설정"""
+        scene = bpy.context.scene
+        
+        # 월드 노드 설정
+        world = bpy.context.scene.world
+        if world and world.use_nodes:
+            world_nodes = world.node_tree.nodes
+            world_output = world_nodes.get('World Output')
+            
+            if world_output and hasattr(self, 'world_bg_strength'):
+                # 배경 강도 조정
+                if hasattr(world_output.inputs, 'Surface'):
+                    bg_node = world_nodes.get('Background')
+                    if bg_node:
+                        # 밝은 부품일 때 배경을 밝은 회색으로 조정
+                        if is_bright_part:
+                            bg_node.inputs['Color'].default_value = (0.85, 0.85, 0.85, 1.0)  # #D9D9D9
+                            bg_node.inputs['Strength'].default_value = self.world_bg_strength
+                        else:
+                            bg_node.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)  # 순백색
+                            bg_node.inputs['Strength'].default_value = 1.0
+        
+        # 조명 강화 (밝은 부품용)
+        if is_bright_part:
+            for obj in bpy.context.scene.objects:
+                if obj.type == 'LIGHT':
+                    # 키 라이트 강도 증가
+                    if obj.data.type == 'SUN':
+                        obj.data.energy *= 1.2
+                    elif obj.data.type == 'AREA':
+                        obj.data.energy *= 1.1
+
     def render_image(self, output_path):
         """이미지 렌더링"""
         # 출력 경로 설정
@@ -1874,6 +1986,12 @@ class LDrawRenderer:
         
         # 11. 렌더링 직전 배경 재확인 (다른 설정에 의해 덮어씌워졌을 수 있음)
         self.setup_background()
+        
+        # 11.5. 밝은 부품을 위한 적응형 조명 설정
+        is_bright_part = material_data and material_data.get('is_bright_part', False)
+        if is_bright_part:
+            print("🔆 밝은 부품 감지: 적응형 조명 적용")
+            self.setup_adaptive_lighting(is_bright_part=True)
         
         # 12. 출력 파일 경로 (엘리먼트 아이디가 있으면 파일명에도 반영)
         base_id_for_filename = element_id_value if element_id_value else part_id
@@ -2204,11 +2322,24 @@ def main():
     
     print(f"\n🎉 렌더링 완료: {len(results)}/{args.count} 성공")
     
+    # YAML 파일 생성 (렌더링 완료 후)
+    if results:
+        try:
+            yaml_path = create_dataset_yaml(
+                part_output_dir, 
+                ['lego_part'],  # 클래스 이름
+                args.part_id
+            )
+            print(f"📋 dataset.yaml 생성 완료: {yaml_path}")
+        except Exception as e:
+            print(f"⚠️ YAML 파일 생성 실패: {e}")
+    
     # 결과 요약
     if results:
         print(f"📁 출력 디렉토리: {args.output_dir}/{args.part_id}")
         print(f"🖼️ 이미지: {len(results)}개")
         print(f"📝 어노테이션: {len(results)}개")
+        print(f"📋 YAML: dataset.yaml")
         
         if any(r.get('urls') for r in results):
             print("☁️ Supabase 업로드: 완료")

@@ -353,7 +353,7 @@ export function useMasterPartsMatching() {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
       if (supabaseUrl) {
         const bucketName = 'lego_parts_images'
-        const fileName = `${partId}_${colorId}.jpg`
+        const fileName = `${partId}_${colorId}.webp`
         const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/${fileName}`
         
         // 이미지 존재 여부 확인

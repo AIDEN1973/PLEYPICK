@@ -312,7 +312,7 @@ class YOLOAnnotationGenerator:
             'image_info': {
                 'width': self.image_width,
                 'height': self.image_height,
-                'format': 'PNG'
+                'format': 'WEBP'
             },
             'objects': [],
             'statistics': {

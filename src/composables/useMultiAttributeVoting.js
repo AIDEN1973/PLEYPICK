@@ -216,17 +216,17 @@ export function useMultiAttributeVoting() {
   }
 
   // 개별 속성 감지 함수들 (실제 구현에서는 이미지 처리 라이브러리 사용)
-  const detectRoundShape = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const detectCenterStud = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const detectGroove = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const countStuds = async (imageUrl) => Math.floor(Math.random() * 10) + 1
-  const detectTubePattern = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const countHoles = async (imageUrl) => Math.floor(Math.random() * 5)
-  const calculateSymmetry = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeEdgeQuality = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeTextureComplexity = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeColorConsistency = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const recognizePatterns = async (imageUrl) => Math.random() * 0.5 + 0.3
+  const detectRoundShape = async (imageUrl) => 0
+  const detectCenterStud = async (imageUrl) => 0
+  const detectGroove = async (imageUrl) => 0
+  const countStuds = async (imageUrl) => 0
+  const detectTubePattern = async (imageUrl) => 0
+  const countHoles = async (imageUrl) => 0
+  const calculateSymmetry = async (imageUrl) => 0
+  const analyzeEdgeQuality = async (imageUrl) => 0
+  const analyzeTextureComplexity = async (imageUrl) => 0
+  const analyzeColorConsistency = async (imageUrl) => 0
+  const recognizePatterns = async (imageUrl) => 0
 
   // 혼동군 페널티 적용
   const applyConfusionPenalty = (votingResults, confusionMatrix) => {

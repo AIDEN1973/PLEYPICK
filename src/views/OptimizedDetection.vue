@@ -375,19 +375,8 @@ export default {
         
         await cachePartImages(partIds.slice(0, cacheCount))
         
-        // Mock 검출 (실제로는 YOLO + CLIP 사용)
-        const mockDetections = Array.from({ length: 5 }, (_, i) => ({
-          id: `detection_${i}`,
-          confidence: 0.7 + Math.random() * 0.3,
-          features: {
-            shape_vector: Array.from({ length: 512 }, () => Math.random() * 2 - 1),
-            color_lab: { L: Math.random() * 100, a: Math.random() * 200 - 100, b: Math.random() * 200 - 100 },
-            size_stud: Math.random() * 10 + 1
-          }
-        }))
-        
-        // BOM 매칭
-        const { matches, missingSlots } = performBOMMatching(mockDetections, metadataInfo.value.partsMetadata)
+        // Mock 제거: 실제 경로만 허용 (빈 결과로 진행)
+        const { matches, missingSlots } = performBOMMatching([], metadataInfo.value.partsMetadata)
         
         const processingTime = Date.now() - startTime
         

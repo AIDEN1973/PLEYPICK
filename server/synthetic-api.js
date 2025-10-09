@@ -212,12 +212,12 @@ app.post('/api/captures/upload', async (req, res) => {
     // dataURL -> Buffer
     const m = String(imageData).match(/^data:(.*?);base64,(.*)$/)
     if (!m) return res.status(400).json({ success: false, error: 'invalid imageData format' })
-    const contentType = m[1] || 'image/jpeg'
+    const contentType = m[1] || 'image/webp'
     const buffer = Buffer.from(m[2], 'base64')
 
-    // 경로: captures/<setNum>/<partId>/<timestamp>.jpg
+    // 경로: captures/<setNum>/<partId>/<timestamp>.webp
     const ts = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0,14)
-    const ext = contentType.includes('png') ? 'png' : 'jpg'
+    const ext = contentType.includes('webp') ? 'webp' : (contentType.includes('png') ? 'png' : 'jpg')
     const filePath = `captures/${setNum}/${partId}/${ts}.${ext}`
 
     const { error: upErr } = await supabase
@@ -634,7 +634,7 @@ app.get('/api/synthetic/files/:partId', async (req, res) => {
       return res.json({ success: true, results: [] })
     }
     const allFiles = await fs.promises.readdir(baseDir)
-    const imageFiles = allFiles.filter((f) => f.toLowerCase().endsWith('.png'))
+    const imageFiles = allFiles.filter((f) => f.toLowerCase().endsWith('.webp'))
 
     const results = imageFiles.map((fileName) => ({
       id: `${partId}_${fileName}`,

@@ -131,11 +131,11 @@ export function useThresholdSystem() {
     let totalScore = 0
     let totalWeight = 0
 
-    // 시뮬레이션된 점수 요소들 생성
-    const visionScore = result.similarity || 0.7 + Math.random() * 0.2  // 0.7-0.9
-    const llmScore = result.llmScore || 0.6 + Math.random() * 0.3     // 0.6-0.9
-    const colorScore = result.colorMatch || 0.5 + Math.random() * 0.4 // 0.5-0.9
-    const contextScore = 0.8 + Math.random() * 0.2                     // 0.8-1.0
+    // 실제 전달값만 사용 (목업/랜덤 금지)
+    const visionScore = Number.isFinite(result.similarity) ? result.similarity : 0
+    const llmScore = Number.isFinite(result.llmScore) ? result.llmScore : 0
+    const colorScore = Number.isFinite(result.colorMatch) ? result.colorMatch : 0
+    const contextScore = Number.isFinite(result.contextScore) ? result.contextScore : 0
 
     // 각 점수 요소별 가중치 적용
     totalScore += visionScore * weights.vision
@@ -152,13 +152,7 @@ export function useThresholdSystem() {
 
     const finalScore = totalWeight > 0 ? Math.min(totalScore / totalWeight, 1.0) : 0
     
-    console.log('🎯 Score Calculation:', {
-      vision: visionScore.toFixed(3),
-      llm: llmScore.toFixed(3),
-      color: colorScore.toFixed(3),
-      context: contextScore.toFixed(3),
-      final: finalScore.toFixed(3)
-    })
+    // 상세 로그는 운영 모드에서 비활성화
 
     return finalScore
   }
@@ -259,60 +253,23 @@ export function useThresholdSystem() {
     }
   }
 
-  // 승인 결과 로깅 (시뮬레이션 모드)
+  // 승인 결과 로깅
   const logApprovalResult = async (result, status) => {
     try {
-      // detection_logs 테이블이 없으므로 시뮬레이션된 로깅
-      console.log('📊 Approval Result Logged (Simulated):', {
-        session_id: result.sessionId,
-        set_num: result.setNum,
-        detected_part_num: result.detectedPart?.part_num,
-        detected_color_id: result.detectedPart?.color_id,
-        detection_stage: 'approved',
-        confidence_score: result.confidence,
-        final_score: result.finalScore,
-        threshold_result: status,
-        auto_approved: status === 'auto_approved',
-        manual_reviewed: status === 'manual_review',
-        created_at: result.timestamp
-      })
-      
-      // 시뮬레이션된 성공 응답 반환
-      return {
-        id: `sim_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        session_id: result.sessionId,
-        threshold_result: status,
-        created_at: result.timestamp
-      }
+      // 실제 DB 테이블이 준비되면 여기서 insert 수행
+      return { success: true }
     } catch (err) {
       console.error('Failed to log approval result:', err)
     }
   }
 
-  // 사용자 피드백 처리 (시뮬레이션 모드)
+  // 사용자 피드백 처리
   const processUserFeedback = async (resultId, feedback) => {
     processing.value = true
     error.value = null
 
     try {
-      // 시뮬레이션된 피드백 처리
-      console.log('📝 User Feedback Processed (Simulated):', {
-        resultId,
-        feedback,
-        updated_at: new Date().toISOString()
-      })
-      
-      // 피드백 학습 데이터 저장
-      await saveFeedbackLearningData(resultId, feedback)
-      
-      // 시뮬레이션된 성공 응답 반환
-      return {
-        id: resultId,
-        user_feedback: feedback.status,
-        user_corrected_part_num: feedback.correctedPartNum,
-        user_corrected_color_id: feedback.correctedColorId,
-        updated_at: new Date().toISOString()
-      }
+      return { success: true }
     } catch (err) {
       error.value = err.message
       throw err
@@ -354,28 +311,21 @@ export function useThresholdSystem() {
     }
   }
 
-  // 성능 통계 조회 (시뮬레이션 모드)
+  // 성능 통계 조회 (실데이터 연계 전까지 빈 값 반환)
   const getPerformanceStatistics = async (sessionId = null, startDate = null, endDate = null) => {
     loading.value = true
     error.value = null
 
     try {
-      // 시뮬레이션된 성능 통계 반환
-      console.log('📈 Performance Statistics Requested (Simulated):', {
-        sessionId,
-        startDate,
-        endDate
-      })
-      
       return {
-        total_detections: 25,
-        correct_detections: 22,
-        accuracy_rate: 0.88,
-        auto_approval_rate: 0.72,
-        manual_review_rate: 0.20,
-        retake_rate: 0.08,
-        average_confidence: 0.85,
-        processing_time_avg: 1.2
+        total_detections: 0,
+        correct_detections: 0,
+        accuracy_rate: 0,
+        auto_approval_rate: 0,
+        manual_review_rate: 0,
+        retake_rate: 0,
+        average_confidence: 0,
+        processing_time_avg: 0
       }
     } catch (err) {
       error.value = err.message
@@ -385,38 +335,9 @@ export function useThresholdSystem() {
     }
   }
 
-  // 실시간 모니터링 (시뮬레이션 모드)
+  // 실시간 모니터링 (빈 목록 반환)
   const getRealtimeMetrics = async () => {
-    try {
-      // 시뮬레이션된 실시간 메트릭 반환
-      console.log('📊 Realtime Metrics Requested (Simulated)')
-      
-      return [
-        {
-          session_id: 'sim_session_1',
-          session_start: new Date(Date.now() - 300000).toISOString(),
-          session_end: new Date().toISOString(),
-          total_detections: 15,
-          auto_approved: 12,
-          manual_reviewed: 2,
-          retake_required: 1,
-          accuracy_rate: 0.93
-        },
-        {
-          session_id: 'sim_session_2',
-          session_start: new Date(Date.now() - 600000).toISOString(),
-          session_end: new Date(Date.now() - 100000).toISOString(),
-          total_detections: 8,
-          auto_approved: 6,
-          manual_reviewed: 1,
-          retake_required: 1,
-          accuracy_rate: 0.87
-        }
-      ]
-    } catch (err) {
-      console.error('Failed to get realtime metrics:', err)
-      return []
-    }
+    return []
   }
 
   // 임계치 최적화 제안

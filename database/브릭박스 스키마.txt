@@ -1,211 +1,302 @@
-| table_schema | table_name                  | column_name              | data_type                   | is_nullable | column_default                                       |
-| ------------ | --------------------------- | ------------------------ | --------------------------- | ----------- | ---------------------------------------------------- |
-| public       | admin_users                 | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | admin_users                 | email                    | character varying           | NO          | null                                                 |
-| public       | admin_users                 | name                     | character varying           | NO          | null                                                 |
-| public       | admin_users                 | role                     | character varying           | YES         | 'admin'::character varying                           |
-| public       | admin_users                 | is_active                | boolean                     | YES         | true                                                 |
-| public       | admin_users                 | last_login               | timestamp with time zone    | YES         | null                                                 |
-| public       | admin_users                 | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | admin_users                 | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | image_metadata              | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | image_metadata              | original_url             | text                        | NO          | null                                                 |
-| public       | image_metadata              | supabase_url             | text                        | NO          | null                                                 |
-| public       | image_metadata              | file_path                | text                        | NO          | null                                                 |
-| public       | image_metadata              | file_name                | text                        | NO          | null                                                 |
-| public       | image_metadata              | part_num                 | text                        | NO          | null                                                 |
-| public       | image_metadata              | color_id                 | integer                     | NO          | null                                                 |
-| public       | image_metadata              | set_num                  | text                        | YES         | null                                                 |
-| public       | image_metadata              | created_at               | timestamp without time zone | YES         | now()                                                |
-| public       | lego_colors                 | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | lego_colors                 | color_id                 | integer                     | NO          | null                                                 |
-| public       | lego_colors                 | name                     | character varying           | NO          | null                                                 |
-| public       | lego_colors                 | rgb                      | character varying           | YES         | null                                                 |
-| public       | lego_colors                 | is_trans                 | boolean                     | YES         | false                                                |
-| public       | lego_colors                 | external_ids             | jsonb                       | YES         | null                                                 |
-| public       | lego_colors                 | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_colors                 | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_parts                  | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | lego_parts                  | part_num                 | character varying           | NO          | null                                                 |
-| public       | lego_parts                  | name                     | character varying           | NO          | null                                                 |
-| public       | lego_parts                  | part_cat_id              | integer                     | YES         | null                                                 |
-| public       | lego_parts                  | year_from                | integer                     | YES         | null                                                 |
-| public       | lego_parts                  | year_to                  | integer                     | YES         | null                                                 |
-| public       | lego_parts                  | part_url                 | text                        | YES         | null                                                 |
-| public       | lego_parts                  | part_img_url             | text                        | YES         | null                                                 |
-| public       | lego_parts                  | prints                   | ARRAY                       | YES         | null                                                 |
-| public       | lego_parts                  | molds                    | ARRAY                       | YES         | null                                                 |
-| public       | lego_parts                  | alternates               | ARRAY                       | YES         | null                                                 |
-| public       | lego_parts                  | external_ids             | jsonb                       | YES         | null                                                 |
-| public       | lego_parts                  | print_of                 | character varying           | YES         | null                                                 |
-| public       | lego_parts                  | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_parts                  | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_sets                   | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | lego_sets                   | set_num                  | character varying           | NO          | null                                                 |
-| public       | lego_sets                   | name                     | character varying           | NO          | null                                                 |
-| public       | lego_sets                   | year                     | integer                     | YES         | null                                                 |
-| public       | lego_sets                   | theme_id                 | integer                     | YES         | null                                                 |
-| public       | lego_sets                   | num_parts                | integer                     | YES         | null                                                 |
-| public       | lego_sets                   | set_img_url              | text                        | YES         | null                                                 |
-| public       | lego_sets                   | set_url                  | text                        | YES         | null                                                 |
-| public       | lego_sets                   | last_modified_dt         | timestamp without time zone | YES         | null                                                 |
-| public       | lego_sets                   | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_sets                   | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_themes                 | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | lego_themes                 | theme_id                 | integer                     | NO          | null                                                 |
-| public       | lego_themes                 | name                     | character varying           | NO          | null                                                 |
-| public       | lego_themes                 | parent_id                | integer                     | YES         | null                                                 |
-| public       | lego_themes                 | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | lego_themes                 | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | operation_logs              | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | operation_logs              | admin_user_id            | uuid                        | YES         | null                                                 |
-| public       | operation_logs              | operation_type           | character varying           | NO          | null                                                 |
-| public       | operation_logs              | target_type              | character varying           | YES         | null                                                 |
-| public       | operation_logs              | target_id                | uuid                        | YES         | null                                                 |
-| public       | operation_logs              | status                   | character varying           | NO          | null                                                 |
-| public       | operation_logs              | message                  | text                        | YES         | null                                                 |
-| public       | operation_logs              | metadata                 | jsonb                       | YES         | null                                                 |
-| public       | operation_logs              | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | part_images                 | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | part_images                 | part_id                  | character varying           | YES         | null                                                 |
-| public       | part_images                 | color_id                 | integer                     | YES         | null                                                 |
-| public       | part_images                 | original_url             | text                        | NO          | null                                                 |
-| public       | part_images                 | uploaded_url             | text                        | YES         | null                                                 |
-| public       | part_images                 | local_path               | text                        | YES         | null                                                 |
-| public       | part_images                 | filename                 | character varying           | YES         | null                                                 |
-| public       | part_images                 | file_size                | integer                     | YES         | null                                                 |
-| public       | part_images                 | image_width              | integer                     | YES         | null                                                 |
-| public       | part_images                 | image_height             | integer                     | YES         | null                                                 |
-| public       | part_images                 | image_format             | character varying           | YES         | null                                                 |
-| public       | part_images                 | download_status          | character varying           | YES         | 'pending'::character varying                         |
-| public       | part_images                 | upload_status            | character varying           | YES         | 'pending'::character varying                         |
-| public       | part_images                 | error_message            | text                        | YES         | null                                                 |
-| public       | part_images                 | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | part_images                 | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | parts_master_features       | id                       | integer                     | NO          | nextval('parts_master_features_id_seq'::regclass)    |
-| public       | parts_master_features       | part_id                  | character varying           | NO          | null                                                 |
-| public       | parts_master_features       | part_name                | character varying           | YES         | null                                                 |
-| public       | parts_master_features       | part_category            | integer                     | YES         | null                                                 |
-| public       | parts_master_features       | color_id                 | integer                     | YES         | null                                                 |
-| public       | parts_master_features       | feature_json             | jsonb                       | YES         | null                                                 |
-| public       | parts_master_features       | feature_text             | text                        | YES         | null                                                 |
-| public       | parts_master_features       | clip_text_emb            | USER-DEFINED                | YES         | null                                                 |
-| public       | parts_master_features       | recognition_hints        | jsonb                       | YES         | null                                                 |
-| public       | parts_master_features       | similar_parts            | ARRAY                       | YES         | null                                                 |
-| public       | parts_master_features       | distinguishing_features  | ARRAY                       | YES         | null                                                 |
-| public       | parts_master_features       | confidence               | double precision            | YES         | 0.0                                                  |
-| public       | parts_master_features       | usage_frequency          | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | detection_accuracy       | double precision            | YES         | 0.0                                                  |
-| public       | parts_master_features       | created_at               | timestamp without time zone | YES         | now()                                                |
-| public       | parts_master_features       | updated_at               | timestamp without time zone | YES         | now()                                                |
-| public       | parts_master_features       | version                  | integer                     | YES         | 1                                                    |
-| public       | parts_master_features       | tier                     | character varying           | YES         | 'GEOMETRY'::character varying                        |
-| public       | parts_master_features       | orientation_sensitive    | boolean                     | YES         | true                                                 |
-| public       | parts_master_features       | flip_tolerance           | numeric                     | YES         | 0.4                                                  |
-| public       | parts_master_features       | semantic_complexity      | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | complexity_level         | character varying           | YES         | 'low'::character varying                             |
-| public       | parts_master_features       | has_stud                 | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | groove                   | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | center_stud              | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | key_features             | ARRAY                       | YES         | '{}'::text[]                                         |
-| public       | parts_master_features       | flip_score               | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | is_flipped               | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | orientation_locked       | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | normal_similarity        | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | flipped_similarity       | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | semantic_score           | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | method                   | character varying           | YES         | 'geometric'::character varying                       |
-| public       | parts_master_features       | rotation_invariance      | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | angle_step               | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | polar_transform          | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | radial_profile           | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | teeth_count              | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | pitch_periodicity        | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | circular_array           | boolean                     | YES         | false                                                |
-| public       | parts_master_features       | round_shape_score        | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | center_stud_score        | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | groove_score             | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | stud_count_score         | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | tube_pattern_score       | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | hole_count_score         | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | symmetry_score           | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | edge_quality_score       | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | texture_score            | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | color_score              | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | pattern_score            | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | voting_total_score       | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | core_matches             | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | core_bonus               | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | confusion_penalty        | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | applied_penalties        | jsonb                       | YES         | '[]'::jsonb                                          |
-| public       | parts_master_features       | confusion_groups         | ARRAY                       | YES         | '{}'::text[]                                         |
-| public       | parts_master_features       | aliases                  | ARRAY                       | YES         | '{}'::text[]                                         |
-| public       | parts_master_features       | expected_stud_count      | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | expected_hole_count      | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | underside_tube_pattern   | character varying           | YES         | ''::character varying                                |
-| public       | parts_master_features       | primary_signal           | character varying           | YES         | ''::character varying                                |
-| public       | parts_master_features       | precision_score          | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | recall_score             | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | top2_margin              | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | review_ratio             | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | last_updated             | timestamp without time zone | YES         | CURRENT_TIMESTAMP                                    |
-| public       | parts_master_features       | image_quality_mu         | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | image_quality_sigma      | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | image_quality_lv         | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | image_quality_snr        | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | image_quality_resolution | integer                     | YES         | 0                                                    |
-| public       | parts_master_features       | image_quality_q          | numeric                     | YES         | 1.0                                                  |
-| public       | parts_master_features       | tier_weights_geo         | numeric                     | YES         | 0.6                                                  |
-| public       | parts_master_features       | tier_weights_struct      | numeric                     | YES         | 0.2                                                  |
-| public       | parts_master_features       | tier_weights_sem         | numeric                     | YES         | 0.2                                                  |
-| public       | parts_master_features       | score_geo                | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | score_struct             | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | score_sem                | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | score_final              | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | meta_em                  | numeric                     | YES         | 1.0                                                  |
-| public       | parts_master_features       | meta_penalty             | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | meta_m                   | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features       | decision_status          | character varying           | YES         | 'pending'::character varying                         |
-| public       | parts_master_features       | decision_threshold       | numeric                     | YES         | 0.0                                                  |
-| public       | parts_master_features_stats | total_parts              | bigint                      | YES         | null                                                 |
-| public       | parts_master_features_stats | avg_confidence           | double precision            | YES         | null                                                 |
-| public       | parts_master_features_stats | avg_usage_frequency      | numeric                     | YES         | null                                                 |
-| public       | parts_master_features_stats | avg_detection_accuracy   | double precision            | YES         | null                                                 |
-| public       | parts_master_features_stats | embedded_parts           | bigint                      | YES         | null                                                 |
-| public       | parts_master_features_stats | analyzed_parts           | bigint                      | YES         | null                                                 |
-| public       | parts_master_features_stats | high_confidence_parts    | bigint                      | YES         | null                                                 |
-| public       | parts_master_features_stats | low_confidence_parts     | bigint                      | YES         | null                                                 |
-| public       | set_parts                   | id                       | uuid                        | NO          | gen_random_uuid()                                    |
-| public       | set_parts                   | set_id                   | uuid                        | YES         | null                                                 |
-| public       | set_parts                   | part_id                  | character varying           | YES         | null                                                 |
-| public       | set_parts                   | color_id                 | integer                     | YES         | null                                                 |
-| public       | set_parts                   | inv_part_id              | bigint                      | YES         | null                                                 |
-| public       | set_parts                   | quantity                 | integer                     | NO          | 1                                                    |
-| public       | set_parts                   | num_sets                 | integer                     | YES         | 1                                                    |
-| public       | set_parts                   | is_spare                 | boolean                     | YES         | false                                                |
-| public       | set_parts                   | element_id               | character varying           | YES         | null                                                 |
-| public       | set_parts                   | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | synthetic_dataset           | id                       | integer                     | NO          | nextval('synthetic_dataset_id_seq'::regclass)        |
-| public       | synthetic_dataset           | part_id                  | character varying           | NO          | null                                                 |
-| public       | synthetic_dataset           | image_url                | text                        | YES         | null                                                 |
-| public       | synthetic_dataset           | annotation_url           | text                        | YES         | null                                                 |
-| public       | synthetic_dataset           | image_path               | text                        | YES         | null                                                 |
-| public       | synthetic_dataset           | annotation_path          | text                        | YES         | null                                                 |
-| public       | synthetic_dataset           | metadata                 | jsonb                       | YES         | null                                                 |
-| public       | synthetic_dataset           | created_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | synthetic_dataset           | updated_at               | timestamp with time zone    | YES         | now()                                                |
-| public       | synthetic_part_stats        | part_id                  | character varying           | NO          | null                                                 |
-| public       | synthetic_part_stats        | total_images             | integer                     | YES         | 0                                                    |
-| public       | synthetic_part_stats        | total_annotations        | integer                     | YES         | 0                                                    |
-| public       | synthetic_part_stats        | color_distribution       | jsonb                       | YES         | null                                                 |
-| public       | synthetic_part_stats        | angle_distribution       | jsonb                       | YES         | null                                                 |
-| public       | synthetic_part_stats        | background_distribution  | jsonb                       | YES         | null                                                 |
-| public       | synthetic_part_stats        | last_updated             | timestamp with time zone    | YES         | now()                                                |
-| public       | synthetic_render_configs    | id                       | integer                     | NO          | nextval('synthetic_render_configs_id_seq'::regclass) |
-| public       | synthetic_render_configs    | config_name              | character varying           | NO          | null                                                 |
-| public       | synthetic_render_configs    | render_settings          | jsonb                       | NO          | null                                                 |
-| public       | synthetic_render_configs    | material_settings        | jsonb                       | YES         | null                                                 |
-| public       | synthetic_render_configs    | lighting_settings        | jsonb                       | YES         | null                                                 |
-| public       | synthetic_render_configs    | background_settings      | jsonb                       | YES         | null                                                 |
-| public       | synthetic_render_configs    | is_active                | boolean                     | YES         | true                                                 |
-| public       | synthetic_render_configs    | created_at               | timestamp with time zone    | YES         | now()                                                |
+| table_schema | table_name                  | column_name                 | data_type                   | is_nullable | column_default                                       |
+| ------------ | --------------------------- | --------------------------- | --------------------------- | ----------- | ---------------------------------------------------- |
+| public       | active_models               | id                          | integer                     | YES         | null                                                 |
+| public       | active_models               | version                     | character varying           | YES         | null                                                 |
+| public       | active_models               | model_name                  | character varying           | YES         | null                                                 |
+| public       | active_models               | model_url                   | text                        | YES         | null                                                 |
+| public       | active_models               | model_size                  | bigint                      | YES         | null                                                 |
+| public       | active_models               | metrics                     | jsonb                       | YES         | null                                                 |
+| public       | active_models               | created_at                  | timestamp with time zone    | YES         | null                                                 |
+| public       | active_models               | job_name                    | character varying           | YES         | null                                                 |
+| public       | active_models               | completed_at                | timestamp with time zone    | YES         | null                                                 |
+| public       | admin_users                 | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | admin_users                 | email                       | character varying           | NO          | null                                                 |
+| public       | admin_users                 | name                        | character varying           | NO          | null                                                 |
+| public       | admin_users                 | role                        | character varying           | YES         | 'admin'::character varying                           |
+| public       | admin_users                 | is_active                   | boolean                     | YES         | true                                                 |
+| public       | admin_users                 | last_login                  | timestamp with time zone    | YES         | null                                                 |
+| public       | admin_users                 | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | admin_users                 | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | auto_training_logs          | id                          | integer                     | NO          | nextval('auto_training_logs_id_seq'::regclass)       |
+| public       | auto_training_logs          | log_type                    | character varying           | NO          | null                                                 |
+| public       | auto_training_logs          | message                     | text                        | NO          | null                                                 |
+| public       | auto_training_logs          | data                        | jsonb                       | YES         | null                                                 |
+| public       | auto_training_logs          | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | auto_training_stats         | id                          | integer                     | NO          | nextval('auto_training_stats_id_seq'::regclass)      |
+| public       | auto_training_stats         | date                        | date                        | NO          | null                                                 |
+| public       | auto_training_stats         | total_training_runs         | integer                     | YES         | 0                                                    |
+| public       | auto_training_stats         | successful_runs             | integer                     | YES         | 0                                                    |
+| public       | auto_training_stats         | failed_runs                 | integer                     | YES         | 0                                                    |
+| public       | auto_training_stats         | total_data_processed        | integer                     | YES         | 0                                                    |
+| public       | auto_training_stats         | average_performance         | numeric                     | YES         | 0.0                                                  |
+| public       | auto_training_stats         | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | auto_training_stats         | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | automation_config           | id                          | integer                     | NO          | nextval('automation_config_id_seq'::regclass)        |
+| public       | automation_config           | config_key                  | character varying           | NO          | null                                                 |
+| public       | automation_config           | config_value                | jsonb                       | NO          | null                                                 |
+| public       | automation_config           | description                 | text                        | YES         | null                                                 |
+| public       | automation_config           | is_active                   | boolean                     | YES         | true                                                 |
+| public       | automation_config           | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | automation_config           | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | image_metadata              | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | image_metadata              | original_url                | text                        | NO          | null                                                 |
+| public       | image_metadata              | supabase_url                | text                        | NO          | null                                                 |
+| public       | image_metadata              | file_path                   | text                        | NO          | null                                                 |
+| public       | image_metadata              | file_name                   | text                        | NO          | null                                                 |
+| public       | image_metadata              | part_num                    | text                        | NO          | null                                                 |
+| public       | image_metadata              | color_id                    | integer                     | NO          | null                                                 |
+| public       | image_metadata              | set_num                     | text                        | YES         | null                                                 |
+| public       | image_metadata              | created_at                  | timestamp without time zone | YES         | now()                                                |
+| public       | lego_colors                 | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | lego_colors                 | color_id                    | integer                     | NO          | null                                                 |
+| public       | lego_colors                 | name                        | character varying           | NO          | null                                                 |
+| public       | lego_colors                 | rgb                         | character varying           | YES         | null                                                 |
+| public       | lego_colors                 | is_trans                    | boolean                     | YES         | false                                                |
+| public       | lego_colors                 | external_ids                | jsonb                       | YES         | null                                                 |
+| public       | lego_colors                 | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_colors                 | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_parts                  | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | lego_parts                  | part_num                    | character varying           | NO          | null                                                 |
+| public       | lego_parts                  | name                        | character varying           | NO          | null                                                 |
+| public       | lego_parts                  | part_cat_id                 | integer                     | YES         | null                                                 |
+| public       | lego_parts                  | year_from                   | integer                     | YES         | null                                                 |
+| public       | lego_parts                  | year_to                     | integer                     | YES         | null                                                 |
+| public       | lego_parts                  | part_url                    | text                        | YES         | null                                                 |
+| public       | lego_parts                  | part_img_url                | text                        | YES         | null                                                 |
+| public       | lego_parts                  | prints                      | ARRAY                       | YES         | null                                                 |
+| public       | lego_parts                  | molds                       | ARRAY                       | YES         | null                                                 |
+| public       | lego_parts                  | alternates                  | ARRAY                       | YES         | null                                                 |
+| public       | lego_parts                  | external_ids                | jsonb                       | YES         | null                                                 |
+| public       | lego_parts                  | print_of                    | character varying           | YES         | null                                                 |
+| public       | lego_parts                  | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_parts                  | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_sets                   | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | lego_sets                   | set_num                     | character varying           | NO          | null                                                 |
+| public       | lego_sets                   | name                        | character varying           | NO          | null                                                 |
+| public       | lego_sets                   | year                        | integer                     | YES         | null                                                 |
+| public       | lego_sets                   | theme_id                    | integer                     | YES         | null                                                 |
+| public       | lego_sets                   | num_parts                   | integer                     | YES         | null                                                 |
+| public       | lego_sets                   | set_img_url                 | text                        | YES         | null                                                 |
+| public       | lego_sets                   | set_url                     | text                        | YES         | null                                                 |
+| public       | lego_sets                   | last_modified_dt            | timestamp without time zone | YES         | null                                                 |
+| public       | lego_sets                   | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_sets                   | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_themes                 | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | lego_themes                 | theme_id                    | integer                     | NO          | null                                                 |
+| public       | lego_themes                 | name                        | character varying           | NO          | null                                                 |
+| public       | lego_themes                 | parent_id                   | integer                     | YES         | null                                                 |
+| public       | lego_themes                 | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | lego_themes                 | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | model_registry              | id                          | integer                     | NO          | nextval('model_registry_id_seq'::regclass)           |
+| public       | model_registry              | version                     | character varying           | NO          | null                                                 |
+| public       | model_registry              | model_name                  | character varying           | NO          | null                                                 |
+| public       | model_registry              | model_url                   | text                        | NO          | null                                                 |
+| public       | model_registry              | model_size                  | bigint                      | YES         | null                                                 |
+| public       | model_registry              | metrics                     | jsonb                       | YES         | '{}'::jsonb                                          |
+| public       | model_registry              | status                      | character varying           | YES         | 'inactive'::character varying                        |
+| public       | model_registry              | dataset_id                  | integer                     | YES         | null                                                 |
+| public       | model_registry              | training_job_id             | integer                     | YES         | null                                                 |
+| public       | model_registry              | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | model_registry              | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | model_registry              | created_by                  | character varying           | YES         | 'system'::character varying                          |
+| public       | model_registry              | model_type                  | character varying           | YES         | null                                                 |
+| public       | model_registry              | model_path                  | text                        | YES         | null                                                 |
+| public       | model_registry              | pt_model_path               | text                        | YES         | null                                                 |
+| public       | model_registry              | performance_metrics         | jsonb                       | YES         | '{}'::jsonb                                          |
+| public       | model_registry              | is_active                   | boolean                     | YES         | false                                                |
+| public       | model_registry              | model_version               | character varying           | YES         | null                                                 |
+| public       | notification_settings       | id                          | integer                     | NO          | nextval('notification_settings_id_seq'::regclass)    |
+| public       | notification_settings       | user_id                     | uuid                        | YES         | null                                                 |
+| public       | notification_settings       | notification_type           | character varying           | NO          | null                                                 |
+| public       | notification_settings       | is_enabled                  | boolean                     | YES         | true                                                 |
+| public       | notification_settings       | webhook_url                 | text                        | YES         | null                                                 |
+| public       | notification_settings       | email_address               | text                        | YES         | null                                                 |
+| public       | notification_settings       | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | operation_logs              | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | operation_logs              | admin_user_id               | uuid                        | YES         | null                                                 |
+| public       | operation_logs              | operation_type              | character varying           | NO          | null                                                 |
+| public       | operation_logs              | target_type                 | character varying           | YES         | null                                                 |
+| public       | operation_logs              | target_id                   | uuid                        | YES         | null                                                 |
+| public       | operation_logs              | status                      | character varying           | NO          | null                                                 |
+| public       | operation_logs              | message                     | text                        | YES         | null                                                 |
+| public       | operation_logs              | metadata                    | jsonb                       | YES         | null                                                 |
+| public       | operation_logs              | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | part_images                 | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | part_images                 | part_id                     | character varying           | YES         | null                                                 |
+| public       | part_images                 | color_id                    | integer                     | YES         | null                                                 |
+| public       | part_images                 | original_url                | text                        | NO          | null                                                 |
+| public       | part_images                 | uploaded_url                | text                        | YES         | null                                                 |
+| public       | part_images                 | local_path                  | text                        | YES         | null                                                 |
+| public       | part_images                 | filename                    | character varying           | YES         | null                                                 |
+| public       | part_images                 | file_size                   | integer                     | YES         | null                                                 |
+| public       | part_images                 | image_width                 | integer                     | YES         | null                                                 |
+| public       | part_images                 | image_height                | integer                     | YES         | null                                                 |
+| public       | part_images                 | image_format                | character varying           | YES         | null                                                 |
+| public       | part_images                 | download_status             | character varying           | YES         | 'pending'::character varying                         |
+| public       | part_images                 | upload_status               | character varying           | YES         | 'pending'::character varying                         |
+| public       | part_images                 | error_message               | text                        | YES         | null                                                 |
+| public       | part_images                 | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | part_images                 | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | parts_master_features       | id                          | integer                     | NO          | nextval('parts_master_features_id_seq'::regclass)    |
+| public       | parts_master_features       | part_id                     | character varying           | NO          | null                                                 |
+| public       | parts_master_features       | part_name                   | character varying           | YES         | null                                                 |
+| public       | parts_master_features       | part_category               | integer                     | YES         | null                                                 |
+| public       | parts_master_features       | color_id                    | integer                     | YES         | null                                                 |
+| public       | parts_master_features       | feature_json                | jsonb                       | YES         | null                                                 |
+| public       | parts_master_features       | feature_text                | text                        | YES         | null                                                 |
+| public       | parts_master_features       | clip_text_emb               | USER-DEFINED                | YES         | null                                                 |
+| public       | parts_master_features       | recognition_hints           | jsonb                       | YES         | null                                                 |
+| public       | parts_master_features       | similar_parts               | ARRAY                       | YES         | null                                                 |
+| public       | parts_master_features       | distinguishing_features     | ARRAY                       | YES         | null                                                 |
+| public       | parts_master_features       | confidence                  | double precision            | YES         | 0.0                                                  |
+| public       | parts_master_features       | usage_frequency             | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | detection_accuracy          | double precision            | YES         | 0.0                                                  |
+| public       | parts_master_features       | created_at                  | timestamp without time zone | YES         | now()                                                |
+| public       | parts_master_features       | updated_at                  | timestamp without time zone | YES         | now()                                                |
+| public       | parts_master_features       | version                     | integer                     | YES         | 1                                                    |
+| public       | parts_master_features       | tier                        | character varying           | YES         | 'GEOMETRY'::character varying                        |
+| public       | parts_master_features       | orientation_sensitive       | boolean                     | YES         | true                                                 |
+| public       | parts_master_features       | flip_tolerance              | numeric                     | YES         | 0.4                                                  |
+| public       | parts_master_features       | semantic_complexity         | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | complexity_level            | character varying           | YES         | 'low'::character varying                             |
+| public       | parts_master_features       | has_stud                    | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | groove                      | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | center_stud                 | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | key_features                | ARRAY                       | YES         | '{}'::text[]                                         |
+| public       | parts_master_features       | flip_score                  | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | is_flipped                  | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | orientation_locked          | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | normal_similarity           | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | flipped_similarity          | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | semantic_score              | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | method                      | character varying           | YES         | 'geometric'::character varying                       |
+| public       | parts_master_features       | rotation_invariance         | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | angle_step                  | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | polar_transform             | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | radial_profile              | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | teeth_count                 | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | pitch_periodicity           | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | circular_array              | boolean                     | YES         | false                                                |
+| public       | parts_master_features       | round_shape_score           | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | center_stud_score           | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | groove_score                | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | stud_count_score            | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | tube_pattern_score          | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | hole_count_score            | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | symmetry_score              | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | edge_quality_score          | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | texture_score               | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | color_score                 | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | pattern_score               | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | voting_total_score          | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | core_matches                | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | core_bonus                  | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | confusion_penalty           | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | applied_penalties           | jsonb                       | YES         | '[]'::jsonb                                          |
+| public       | parts_master_features       | confusion_groups            | ARRAY                       | YES         | '{}'::text[]                                         |
+| public       | parts_master_features       | aliases                     | ARRAY                       | YES         | '{}'::text[]                                         |
+| public       | parts_master_features       | expected_stud_count         | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | expected_hole_count         | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | underside_tube_pattern      | character varying           | YES         | ''::character varying                                |
+| public       | parts_master_features       | primary_signal              | character varying           | YES         | ''::character varying                                |
+| public       | parts_master_features       | precision_score             | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | recall_score                | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | top2_margin                 | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | review_ratio                | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | last_updated                | timestamp without time zone | YES         | CURRENT_TIMESTAMP                                    |
+| public       | parts_master_features       | image_quality_mu            | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | image_quality_sigma         | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | image_quality_lv            | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | image_quality_snr           | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | image_quality_resolution    | integer                     | YES         | 0                                                    |
+| public       | parts_master_features       | image_quality_q             | numeric                     | YES         | 1.0                                                  |
+| public       | parts_master_features       | tier_weights_geo            | numeric                     | YES         | 0.6                                                  |
+| public       | parts_master_features       | tier_weights_struct         | numeric                     | YES         | 0.2                                                  |
+| public       | parts_master_features       | tier_weights_sem            | numeric                     | YES         | 0.2                                                  |
+| public       | parts_master_features       | score_geo                   | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | score_struct                | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | score_sem                   | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | score_final                 | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | meta_em                     | numeric                     | YES         | 1.0                                                  |
+| public       | parts_master_features       | meta_penalty                | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | meta_m                      | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features       | decision_status             | character varying           | YES         | 'pending'::character varying                         |
+| public       | parts_master_features       | decision_threshold          | numeric                     | YES         | 0.0                                                  |
+| public       | parts_master_features_stats | total_parts                 | bigint                      | YES         | null                                                 |
+| public       | parts_master_features_stats | avg_confidence              | double precision            | YES         | null                                                 |
+| public       | parts_master_features_stats | avg_usage_frequency         | numeric                     | YES         | null                                                 |
+| public       | parts_master_features_stats | avg_detection_accuracy      | double precision            | YES         | null                                                 |
+| public       | parts_master_features_stats | embedded_parts              | bigint                      | YES         | null                                                 |
+| public       | parts_master_features_stats | analyzed_parts              | bigint                      | YES         | null                                                 |
+| public       | parts_master_features_stats | high_confidence_parts       | bigint                      | YES         | null                                                 |
+| public       | parts_master_features_stats | low_confidence_parts        | bigint                      | YES         | null                                                 |
+| public       | set_parts                   | id                          | uuid                        | NO          | gen_random_uuid()                                    |
+| public       | set_parts                   | set_id                      | uuid                        | YES         | null                                                 |
+| public       | set_parts                   | part_id                     | character varying           | YES         | null                                                 |
+| public       | set_parts                   | color_id                    | integer                     | YES         | null                                                 |
+| public       | set_parts                   | inv_part_id                 | bigint                      | YES         | null                                                 |
+| public       | set_parts                   | quantity                    | integer                     | NO          | 1                                                    |
+| public       | set_parts                   | num_sets                    | integer                     | YES         | 1                                                    |
+| public       | set_parts                   | is_spare                    | boolean                     | YES         | false                                                |
+| public       | set_parts                   | element_id                  | character varying           | YES         | null                                                 |
+| public       | set_parts                   | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | set_training_status         | id                          | integer                     | NO          | nextval('set_training_status_id_seq'::regclass)      |
+| public       | set_training_status         | set_num                     | character varying           | NO          | null                                                 |
+| public       | set_training_status         | status                      | character varying           | NO          | 'pending'::character varying                         |
+| public       | set_training_status         | trained_model_id            | integer                     | YES         | null                                                 |
+| public       | set_training_status         | trained_at                  | timestamp with time zone    | YES         | null                                                 |
+| public       | set_training_status         | last_rendered_at            | timestamp with time zone    | YES         | null                                                 |
+| public       | set_training_status         | total_parts_in_set          | integer                     | YES         | null                                                 |
+| public       | set_training_status         | unique_parts_trained        | integer                     | YES         | 0                                                    |
+| public       | set_training_status         | is_available_for_inspection | boolean                     | YES         | false                                                |
+| public       | set_training_status         | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | set_training_status         | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | synthetic_dataset           | id                          | integer                     | NO          | nextval('synthetic_dataset_id_seq'::regclass)        |
+| public       | synthetic_dataset           | part_id                     | character varying           | NO          | null                                                 |
+| public       | synthetic_dataset           | image_url                   | text                        | YES         | null                                                 |
+| public       | synthetic_dataset           | annotation_url              | text                        | YES         | null                                                 |
+| public       | synthetic_dataset           | image_path                  | text                        | YES         | null                                                 |
+| public       | synthetic_dataset           | annotation_path             | text                        | YES         | null                                                 |
+| public       | synthetic_dataset           | metadata                    | jsonb                       | YES         | null                                                 |
+| public       | synthetic_dataset           | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | synthetic_dataset           | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | synthetic_part_stats        | part_id                     | character varying           | NO          | null                                                 |
+| public       | synthetic_part_stats        | total_images                | integer                     | YES         | 0                                                    |
+| public       | synthetic_part_stats        | total_annotations           | integer                     | YES         | 0                                                    |
+| public       | synthetic_part_stats        | color_distribution          | jsonb                       | YES         | null                                                 |
+| public       | synthetic_part_stats        | angle_distribution          | jsonb                       | YES         | null                                                 |
+| public       | synthetic_part_stats        | background_distribution     | jsonb                       | YES         | null                                                 |
+| public       | synthetic_part_stats        | last_updated                | timestamp with time zone    | YES         | now()                                                |
+| public       | synthetic_render_configs    | id                          | integer                     | NO          | nextval('synthetic_render_configs_id_seq'::regclass) |
+| public       | synthetic_render_configs    | config_name                 | character varying           | NO          | null                                                 |
+| public       | synthetic_render_configs    | render_settings             | jsonb                       | NO          | null                                                 |
+| public       | synthetic_render_configs    | material_settings           | jsonb                       | YES         | null                                                 |
+| public       | synthetic_render_configs    | lighting_settings           | jsonb                       | YES         | null                                                 |
+| public       | synthetic_render_configs    | background_settings         | jsonb                       | YES         | null                                                 |
+| public       | synthetic_render_configs    | is_active                   | boolean                     | YES         | true                                                 |
+| public       | synthetic_render_configs    | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | training_job_stats          | id                          | integer                     | YES         | null                                                 |
+| public       | training_job_stats          | job_name                    | character varying           | YES         | null                                                 |
+| public       | training_job_stats          | status                      | character varying           | YES         | null                                                 |
+| public       | training_job_stats          | started_at                  | timestamp with time zone    | YES         | null                                                 |
+| public       | training_job_stats          | completed_at                | timestamp with time zone    | YES         | null                                                 |
+| public       | training_job_stats          | duration_seconds            | numeric                     | YES         | null                                                 |
+| public       | training_job_stats          | model_version               | character varying           | YES         | null                                                 |
+| public       | training_job_stats          | metrics                     | jsonb                       | YES         | null                                                 |
+| public       | training_jobs               | id                          | integer                     | NO          | nextval('training_jobs_id_seq'::regclass)            |
+| public       | training_jobs               | job_name                    | character varying           | NO          | null                                                 |
+| public       | training_jobs               | dataset_id                  | integer                     | YES         | null                                                 |
+| public       | training_jobs               | colab_session_id            | character varying           | YES         | null                                                 |
+| public       | training_jobs               | status                      | character varying           | YES         | 'pending'::character varying                         |
+| public       | training_jobs               | config                      | jsonb                       | YES         | '{}'::jsonb                                          |
+| public       | training_jobs               | progress                    | jsonb                       | YES         | '{}'::jsonb                                          |
+| public       | training_jobs               | error_message               | text                        | YES         | null                                                 |
+| public       | training_jobs               | started_at                  | timestamp with time zone    | YES         | null                                                 |
+| public       | training_jobs               | completed_at                | timestamp with time zone    | YES         | null                                                 |
+| public       | training_jobs               | created_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | training_jobs               | updated_at                  | timestamp with time zone    | YES         | now()                                                |
+| public       | training_metrics            | id                          | integer                     | NO          | nextval('training_metrics_id_seq'::regclass)         |
+| public       | training_metrics            | training_job_id             | integer                     | YES         | null                                                 |
+| public       | training_metrics            | epoch                       | integer                     | NO          | null                                                 |
+| public       | training_metrics            | metrics                     | jsonb                       | NO          | '{}'::jsonb                                          |
+| public       | training_metrics            | created_at                  | timestamp with time zone    | YES         | now()                                                |

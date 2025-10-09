@@ -88,7 +88,7 @@ class StorageCapacityMonitor:
     
     def calculate_capacity_plan(self, parts_count: int, images_per_part: int) -> Dict:
         """용량 계획 계산"""
-        # 이미지 크기 추정 (RGB PNG, 640x640)
+        # 이미지 크기 추정 (RGB WebP Q80, 640x640)
         estimated_image_size_kb = 75  # 50-100KB 중간값
         estimated_annotation_size_kb = 0.1  # YOLO 어노테이션
         
@@ -137,7 +137,7 @@ class StorageCapacityMonitor:
         total_gb = current_gb + planned_gb
         
         if total_gb > 80:  # 80GB 초과 시
-            suggestions.append("📦 이미지 압축 최적화: PNG 압축 레벨 증가")
+            suggestions.append("📦 이미지 압축 최적화: WebP Q80 품질 설정으로 이미 최적화됨")
             suggestions.append("🗂️ 파일 정리: 오래된 테스트 데이터 삭제")
             suggestions.append("📊 선택적 생성: 중요 부품만 우선 생성")
         

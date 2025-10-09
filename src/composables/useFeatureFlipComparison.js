@@ -11,7 +11,7 @@ export function useFeatureFlipComparison() {
       return embedding
     }
     
-    // 벡터의 특정 차원들을 반전시켜 뒤집힌 상태를 시뮬레이션
+  // 시뮬레이션 제거
     const flippedEmbedding = [...embedding]
     
     // 공간적 특징 차원들 (예: 위치, 방향 관련)을 반전
@@ -70,26 +70,26 @@ export function useFeatureFlipComparison() {
   const analyzeBrightnessPattern = async (imageUrl) => {
     // 실제 구현에서는 이미지 처리 라이브러리 사용
     // 여기서는 시뮬레이션
-    return Math.random() * 0.5 + 0.3
+  return 0
   }
 
   // 엣지 방향 분석
   const analyzeEdgeOrientation = async (imageUrl) => {
     // 실제 구현에서는 엣지 감지 알고리즘 사용
-    return Math.random() * 0.5 + 0.3
+  return 0
   }
 
   // 대칭성 점수 계산
   const calculateSymmetryScore = async (imageUrl) => {
     // 실제 구현에서는 대칭성 분석 알고리즘 사용
-    return Math.random() * 0.5 + 0.3
+  return 0
   }
 
   // 튜브/홀 패턴 감지 (새로 추가)
   const detectTubeHolePattern = async (imageUrl) => {
     // 실제 구현에서는 튜브/홀 감지 알고리즘 사용
     // HoughCircles, 원형 감지, 홀 패턴 분석
-    return Math.random() * 0.5 + 0.3
+  return 0
   }
 
   // 스터드 패턴 감지
@@ -158,7 +158,7 @@ export function useFeatureFlipComparison() {
   const generateClipEmbedding = async (imageUrl) => {
     // 기존 useMasterPartsPreprocessing의 generateClipImageEmbedding 함수 사용
     // 여기서는 시뮬레이션
-    return Array.from({ length: 1536 }, () => Math.random() * 2 - 1)
+  return null
   }
 
   // 향상된 유사도 계산 (메타데이터 기반)

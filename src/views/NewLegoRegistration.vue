@@ -1006,7 +1006,7 @@ export default {
                         original_url: partData.part.part_img_url,
                         supabase_url: imageResult.uploadedUrl,
                         file_path: imageResult.path,
-                        file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.jpg`,
+                        file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.webp`,
                         part_num: partData.part.part_num,
                         color_id: partData.color.id,
                         set_num: selectedSet.value?.set_num

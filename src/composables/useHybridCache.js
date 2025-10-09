@@ -1,4 +1,5 @@
 import { ref, reactive } from 'vue'
+import localforage from 'localforage'
 import { useSupabase } from './useSupabase'
 
 /**
@@ -31,6 +32,26 @@ export function useHybridCache() {
     syncStatus: 'idle', // idle, checking, downloading, ready
     db: null
   })
+
+  // localforage 벡터 스토어 (버전 회전)
+  let lfVectorStore = null
+  let lfVersionTag = null
+
+  const ensureVectorStore = async (versionTag) => {
+    const targetTag = versionTag || cacheState.localVersion || cacheState.remoteVersion?.version || 'v-default'
+    if (lfVectorStore && lfVersionTag === targetTag) return lfVectorStore
+    // 이전 인스턴스 드롭 (버전 교체 시 메모리 누수 방지)
+    if (lfVectorStore && lfVersionTag && lfVersionTag !== targetTag) {
+      try {
+        await localforage.dropInstance({ name: 'brickbox-cache', storeName: `vectors_${lfVersionTag}` })
+      } catch (e) {
+        // 드롭 실패는 치명적이지 않음
+      }
+    }
+    lfVectorStore = localforage.createInstance({ name: 'brickbox-cache', storeName: `vectors_${targetTag}` })
+    lfVersionTag = targetTag
+    return lfVectorStore
+  }
 
   // IndexedDB 초기화
   const initIndexedDB = async () => {
@@ -81,6 +102,8 @@ export function useHybridCache() {
   // 로컬 버전 정보 저장
   const saveLocalVersion = async (versionData) => {
     try {
+      // localforage 벡터 스토어 회전 준비
+      await ensureVectorStore(versionData.version)
       const db = await ensureDB()
       const transaction = db.transaction([STORES.VERSIONS], 'readwrite')
       const store = transaction.objectStore(STORES.VERSIONS)
@@ -197,6 +220,15 @@ export function useHybridCache() {
   // 벡터 데이터 로컬 저장
   const saveVectorToLocal = async (partId, colorId, vectorData) => {
     try {
+      // localforage 우선 사용
+      try {
+        const store = await ensureVectorStore()
+        await store.setItem(`${partId}_${colorId}`, vectorData)
+        console.log(`📊 벡터 로컬 저장: ${partId}/${colorId}`)
+        return true
+      } catch (e) {
+        // fallback to IndexedDB 직접 저장
+      }
       const db = await ensureDB()
       const transaction = db.transaction([STORES.VECTORS], 'readwrite')
       const store = transaction.objectStore(STORES.VECTORS)
@@ -229,6 +261,22 @@ export function useHybridCache() {
   // 로컬에서 벡터 조회
   const getVectorFromLocal = async (partId, colorId) => {
     try {
+      // localforage 우선 조회
+      try {
+        const store = await ensureVectorStore()
+        const res = await store.getItem(`${partId}_${colorId}`)
+        if (res) {
+          return {
+            found: true,
+            shape_vector: res.shape_vector,
+            color_lab: res.color_lab,
+            size_stud: res.size_stud,
+            clip_embedding: res.clip_embedding
+          }
+        }
+      } catch (e) {
+        // fallback to IndexedDB
+      }
       const db = await ensureDB()
       const transaction = db.transaction([STORES.VECTORS], 'readonly')
       const store = transaction.objectStore(STORES.VECTORS)
@@ -253,6 +301,60 @@ export function useHybridCache() {
     } catch (err) {
       console.warn(`로컬 벡터 조회 실패: ${partId}/${colorId}`, err)
       return { found: false }
+    }
+  }
+
+  // BOM 파트들의 벡터를 일괄 Prefetch하여 로컬(IndexedDB)에 저장
+  const prefetchVectorsForParts = async (parts) => {
+    try {
+      if (!Array.isArray(parts) || parts.length === 0) return { fetched: 0, saved: 0 }
+      const uniquePairs = new Map()
+      for (const p of parts) {
+        const pid = p.part_id || p.partId || p.partNum || p.part
+        const cid = p.color_id ?? p.colorId ?? null
+        if (!pid || cid === undefined) continue
+        uniquePairs.set(`${pid}_${cid}`, { part_id: pid, color_id: cid })
+      }
+      const pairs = Array.from(uniquePairs.values())
+      const partIdSet = Array.from(new Set(pairs.map(x => x.part_id)))
+
+      // Supabase: part_id in (...) 으로 묶어 가져온 뒤, color_id는 클라이언트에서 필터
+      const chunkSize = 50
+      let fetched = 0
+      let saved = 0
+      for (let i = 0; i < partIdSet.length; i += chunkSize) {
+        const chunk = partIdSet.slice(i, i + chunkSize)
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('part_id, color_id, feature_json, clip_text_emb')
+          .in('part_id', chunk)
+        if (error) continue
+        fetched += data?.length || 0
+        // color_id가 BOM에 포함된 것만 저장
+        const allowed = new Set(pairs.map(x => `${x.part_id}_${x.color_id}`))
+        for (const row of data || []) {
+          const key = `${row.part_id}_${row.color_id}`
+          if (!allowed.has(key)) continue
+          // 유효 벡터만 저장: 셋 중 하나라도 존재해야 함
+          const fj = row.feature_json || {}
+          const shapeVec = fj.shape_vector || fj.shape || null
+          const colorLab = fj.color_lab || fj.color || null
+          const sizeStud = (fj.size_stud !== undefined ? fj.size_stud : fj.size)
+          if (!shapeVec && !colorLab && typeof sizeStud !== 'number') continue
+          const vectorData = {
+            shape_vector: shapeVec || null,
+            color_lab: colorLab || null,
+            size_stud: typeof sizeStud === 'number' ? sizeStud : null,
+            clip_embedding: row.clip_text_emb || null
+          }
+          const ok = await saveVectorToLocal(row.part_id, row.color_id, vectorData)
+          if (ok) saved++
+        }
+      }
+      return { fetched, saved }
+    } catch (err) {
+      console.warn('벡터 Prefetch 실패:', err)
+      return { fetched: 0, saved: 0 }
     }
   }
 
@@ -356,7 +458,7 @@ export function useHybridCache() {
           // 실제 Supabase Storage에서 다운로드 시도
           const { data: fileData, error: downloadError } = await supabase.storage
             .from('lego_parts_images')
-            .download(`${part.part_id}/${part.color_id}.jpg`)
+            .download(`${part.part_id}/${part.color_id}.webp`)
           
           if (downloadError) {
             console.log(`📦 이미지 없음 (정상): ${part.part_id}/${part.color_id} - 아직 렌더링되지 않음`)
@@ -369,8 +471,8 @@ export function useHybridCache() {
             }
           }
           
-          const blob = new Blob([fileData], { type: 'image/jpeg' })
-          console.log(`📦 실제 다운로드: ${part.part_id}/${part.color_id}.jpg (${Math.round(blob.size/1024)}KB)`)
+          const blob = new Blob([fileData], { type: 'image/webp' })
+          console.log(`📦 실제 다운로드: ${part.part_id}/${part.color_id}.webp (${Math.round(blob.size/1024)}KB)`)
           
           // 로컬 IndexedDB에 저장
           const saved = await saveImageToLocal(part.part_id, part.color_id, blob)
@@ -477,10 +579,12 @@ export function useHybridCache() {
         cached: true
         }
       } else {
-        return {
-          found: false,
-          cached: false
+        // 벡터만 존재해도 로컬 캐시로 간주(원격 호출 방지)
+        const vectorResult = await getVectorFromLocal(partId, colorId)
+        if (vectorResult && vectorResult.found) {
+          return { found: true, cached: true }
         }
+        return { found: false, cached: false }
       }
       
     } catch (err) {
@@ -545,29 +649,42 @@ export function useHybridCache() {
   // 로컬 벡터 비교 (실제 로컬 벡터 사용)
   const compareLocalVectors = async (detection, part) => {
     try {
-    console.log(`🔍 로컬 벡터 비교: ${part.part_id}`)
+      // 과도한 로그 억제: 상세 로그는 필요 시 throttle로 대체
       
       // 로컬에서 벡터 데이터 조회
       const vectorResult = await getVectorFromLocal(part.part_id, part.color_id)
       
       if (!vectorResult.found) {
-        console.log(`❌ 로컬 벡터 없음: ${part.part_id}`)
-        return 0.3 // 기본값
+        // 로컬 벡터가 없으면 기본 점수 반환 (매칭 실패 방지)
+        console.log(`🔧 로컬 벡터 없음: ${part.part_id} - 기본점수 0.2 부여`)
+        return 0.2
+      }
+      
+      // 검출 객체에 features가 있는지 확인
+      if (!detection.features) {
+        console.log(`🔧 검출 객체 features 없음: ${part.part_id} - 기본점수 0.2 부여`)
+        return 0.2
       }
       
       // 실제 벡터 유사도 계산
       const similarity = calculateVectorSimilarity(detection.features, {
         shape_vector: vectorResult.shape_vector,
         color_lab: vectorResult.color_lab,
-        size_stud: vectorResult.size_stud
+        size_stud: vectorResult.size_stud,
+        clip_embedding: vectorResult.clip_embedding
       })
       
-      console.log(`📊 로컬 벡터 유사도: ${similarity.toFixed(3)}`)
+      // 유사도가 0이면 기본 점수 부여
+      if (similarity === 0) {
+        console.log(`🔧 로컬 벡터 유사도 0: ${part.part_id} - 기본점수 0.2 부여`)
+        return 0.2
+      }
+      
       return similarity
       
     } catch (err) {
       console.warn(`로컬 벡터 비교 실패: ${part.part_id}`, err)
-      return 0.3
+      return 0.2 // 에러 시에도 기본 점수 부여
     }
   }
 
@@ -583,6 +700,8 @@ export function useHybridCache() {
         .single()
       
       if (vectorError || !vectorData) {
+        // 원격 벡터가 없으면 기본 점수 반환 (매칭 실패 방지)
+        console.log(`🔧 원격 벡터 없음: ${part.part_id} - 기본점수 0.2 부여`)
         return 0.2
       }
       
@@ -590,53 +709,92 @@ export function useHybridCache() {
       const similarity = calculateVectorSimilarity(detection.features, {
         shape_vector: vectorData.feature_json?.shape_vector,
         color_lab: vectorData.feature_json?.color_lab,
-        size_stud: vectorData.feature_json?.size_stud
+        size_stud: vectorData.feature_json?.size_stud,
+        clip_embedding: vectorData.clip_text_emb
       })
+      
+      // 유사도가 0이면 기본 점수 부여
+      if (similarity === 0) {
+        console.log(`🔧 원격 벡터 유사도 0: ${part.part_id} - 기본점수 0.2 부여`)
+        return 0.2
+      }
       
       return similarity
       
     } catch (err) {
       console.warn(`원격 벡터 비교 실패: ${part.part_id}`, err)
-      return 0.2
+      return 0.2 // 에러 시에도 기본 점수 부여
     }
   }
 
   // 벡터 유사도 계산 함수
   const calculateVectorSimilarity = (detectedFeatures, partFeatures) => {
-    if (!detectedFeatures || !partFeatures) return 0.3
-    
+    if (!detectedFeatures || !partFeatures) return 0
+
     try {
-      // 1. Shape 벡터 유사도 (cosine similarity)
-      const shapeSim = calculateCosineSimilarity(
-        detectedFeatures.shape_vector,
-        partFeatures.shape_vector
-      )
-      
-      // 2. 색상 유사도 (Lab ΔE)
-      const colorSim = calculateColorSimilarity(
-        detectedFeatures.color_lab,
-        partFeatures.color_lab
-      )
-      
-      // 3. 크기 유사도
-      const sizeSim = calculateSizeSimilarity(
-        detectedFeatures.size_stud,
-        partFeatures.size_stud
-      )
-      
-      // 4. 가중 평균
-      const weights = { shape: 0.5, color: 0.3, size: 0.2 }
-      const similarity = (
-        shapeSim * weights.shape +
-        colorSim * weights.color +
-        sizeSim * weights.size
-      )
-      
+      const weights = { shape: 0.45, color: 0.25, size: 0.15, clip: 0.15 }
+      let weightedSum = 0
+      let weightTotal = 0
+
+      // 1) Shape (둘 다 존재하는 경우에만 적용)
+      if (Array.isArray(detectedFeatures.shape_vector) && Array.isArray(partFeatures.shape_vector)) {
+        const shapeSim = calculateCosineSimilarity(
+          detectedFeatures.shape_vector,
+          partFeatures.shape_vector
+        )
+        if (Number.isFinite(shapeSim)) {
+          weightedSum += shapeSim * weights.shape
+          weightTotal += weights.shape
+        }
+      }
+
+      // 2) Color (둘 다 존재하는 경우에만 적용)
+      if (detectedFeatures.color_lab && partFeatures.color_lab) {
+        const colorSim = calculateColorSimilarity(
+          detectedFeatures.color_lab,
+          partFeatures.color_lab
+        )
+        if (Number.isFinite(colorSim)) {
+          weightedSum += colorSim * weights.color
+          weightTotal += weights.color
+        }
+      }
+
+      // 3) Size (둘 다 존재하는 경우에만 적용)
+      if (
+        typeof detectedFeatures.size_stud === 'number' &&
+        typeof partFeatures.size_stud === 'number'
+      ) {
+        const sizeSim = calculateSizeSimilarity(
+          detectedFeatures.size_stud,
+          partFeatures.size_stud
+        )
+        if (Number.isFinite(sizeSim)) {
+          weightedSum += sizeSim * weights.size
+          weightTotal += weights.size
+        }
+      }
+
+      // 4) CLIP 텍스트 임베딩 (둘 다 존재하는 경우에만 적용)
+      if (Array.isArray(detectedFeatures.clip_embedding) && Array.isArray(partFeatures.clip_embedding)) {
+        const clipSim = calculateCosineSimilarity(
+          detectedFeatures.clip_embedding,
+          partFeatures.clip_embedding
+        )
+        if (Number.isFinite(clipSim)) {
+          weightedSum += clipSim * weights.clip
+          weightTotal += weights.clip
+        }
+      }
+
+      // 적용 가능한 특징이 하나도 없는 경우 0 반환
+      if (weightTotal === 0) return 0
+
+      const similarity = weightedSum / weightTotal
       return Math.max(0, Math.min(1, similarity))
-      
     } catch (err) {
       console.warn('벡터 유사도 계산 실패:', err)
-      return 0.3
+      return 0
     }
   }
 
@@ -660,7 +818,7 @@ export function useHybridCache() {
 
   // 색상 유사도 계산 (Lab ΔE)
   const calculateColorSimilarity = (lab1, lab2) => {
-    if (!lab1 || !lab2) return 0.5
+    if (!lab1 || !lab2) return 0
     
     const deltaE = Math.sqrt(
       Math.pow(lab1.L - lab2.L, 2) +
@@ -673,7 +831,7 @@ export function useHybridCache() {
 
   // 크기 유사도 계산
   const calculateSizeSimilarity = (size1, size2) => {
-    if (!size1 || !size2) return 0.5
+    if (!size1 || !size2) return 0
     
     const ratio = Math.min(size1, size2) / Math.max(size1, size2)
     return ratio > 0.8 ? 1 : ratio
@@ -734,15 +892,54 @@ export function useHybridCache() {
       if (versionInfo.needsUpdate) {
         console.log('📦 업데이트 필요, 증분 동기화 시작...')
         const result = await syncIncremental(versionInfo.remoteData)
+        // 동기화 완료 시 lastSync 업데이트
+        cacheState.lastSync = new Date().toISOString()
         return result
       } else {
         console.log('✅ 최신 버전, 동기화 불필요')
         cacheState.syncStatus = 'ready'
+        // 최신 버전이어도 lastSync 업데이트 (상태 확인용)
+        cacheState.lastSync = new Date().toISOString()
         return null // 동기화 불필요
       }
       
     } catch (err) {
       console.error('❌ 자동 동기화 실패:', err)
+      cacheState.syncStatus = 'idle'
+      throw err
+    }
+  }
+  
+  // 강제 캐시 동기화 (문제 해결용)
+  const forceSync = async () => {
+    try {
+      console.log('🔄 강제 캐시 동기화 시작...')
+      cacheState.syncStatus = 'checking'
+      
+      // 캐시 상태 초기화
+      cacheState.lastSync = null
+      
+      // 버전 체크
+      const versionInfo = await checkVersion()
+      console.log('📊 버전 정보:', versionInfo)
+      
+      // 강제 동기화 실행
+      if (versionInfo.remoteData) {
+        console.log('📦 강제 증분 동기화 실행...')
+        const result = await syncIncremental(versionInfo.remoteData)
+        cacheState.lastSync = new Date().toISOString()
+        cacheState.syncStatus = 'ready'
+        console.log('✅ 강제 동기화 완료:', result)
+        return result
+      } else {
+        console.log('⚠️ 원격 데이터 없음, 기본 상태 설정')
+        cacheState.lastSync = new Date().toISOString()
+        cacheState.syncStatus = 'ready'
+        return null
+      }
+      
+    } catch (err) {
+      console.error('❌ 강제 동기화 실패:', err)
       cacheState.syncStatus = 'idle'
       throw err
     }
@@ -759,6 +956,8 @@ export function useHybridCache() {
     getCacheStats,
     clearCache,
     autoSync,
+    forceSync,
+    prefetchVectorsForParts,
     // 새로운 로컬 저장/로드 함수들
     saveImageToLocal,
     getImageFromLocal,

@@ -91,12 +91,22 @@ export function useYoloDetector() {
     const W = width
     const numPixels = H * W
     const float32Data = new Float32Array(3 * numPixels)
+    
+    console.log('🔧 이미지 전처리:', { width: W, height: H, numPixels, dataLength: data.length })
+    
     for (let i = 0; i < numPixels; i++) {
       const j = i * 4
       float32Data[i] = data[j] / 255.0            // R
       float32Data[i + numPixels] = data[j + 1] / 255.0 // G
       float32Data[i + 2 * numPixels] = data[j + 2] / 255.0 // B
     }
+    
+    // 정규화 확인
+    const sampleR = float32Data[0]
+    const sampleG = float32Data[numPixels]
+    const sampleB = float32Data[2 * numPixels]
+    console.log('🔧 정규화 샘플:', { R: sampleR, G: sampleG, B: sampleB })
+    
     return new ort.Tensor('float32', float32Data, [1, 3, H, W])
   }
 
@@ -228,7 +238,7 @@ export function useYoloDetector() {
       classes.push(maxCls)
     }
 
-    const keep = nms(boxes, scores, 0.45, 100)
+    const keep = nms(boxes, scores, 0.45, 100) // IoU 임계값 0.45 유지
     return keep.map(i => ({
       box: boxes[i],
       score: scores[i],
@@ -255,47 +265,77 @@ export function useYoloDetector() {
   }
 
   const detect = async (imageDataUrl, options = {}) => {
-    await init(options)
+    console.log('🔍 YOLO 검출 시작:', { imageDataUrl: imageDataUrl?.substring(0, 50) + '...', options })
+    
+    try {
+      await init(options)
+      console.log('✅ YOLO 모델 초기화 완료')
+    } catch (error) {
+      console.error('❌ YOLO 모델 초기화 실패:', error)
+      throw error
+    }
 
     // 원본 이미지를 로드하고 letterbox
-    const img = await new Promise((resolve) => {
+    const img = await new Promise((resolve, reject) => {
       const im = new Image()
-      im.onload = () => resolve(im)
+      im.onload = () => {
+        console.log('📸 이미지 로드 완료:', { width: im.width, height: im.height })
+        resolve(im)
+      }
+      im.onerror = (error) => {
+        console.error('❌ 이미지 로드 실패:', error)
+        reject(error)
+      }
       im.src = imageDataUrl
     })
 
     const { imageData, scale, dx, dy } = letterbox(img)
+    console.log('🔧 Letterbox 완료:', { scale, dx, dy, size: inputSize })
+    
     // 입력 텐서: 항상 NCHW([1,3,H,W])로 생성
     const input = toNchw(imageData)
+    console.log('🔧 입력 텐서 생성:', { shape: input.dims, type: input.type })
 
     // 입력 이름 자동 감지 (첫 번째 입력 또는 images)
     const inputName = Array.isArray(session.inputNames) && session.inputNames.length > 0
       ? session.inputNames[0]
       : 'images'
-    console.log('YOLO input name:', inputName)
+    console.log('🔧 YOLO 입력 이름:', inputName)
     const feeds = { [inputName]: input }
 
     let results
     try {
+      console.log('🚀 YOLO 추론 시작...')
       results = await session.run(feeds)
+      console.log('✅ YOLO 추론 완료')
     } catch (e) {
-      console.error('onnxruntime run failed:', e)
+      console.error('❌ YOLO 추론 실패:', e)
       throw e
     }
 
     // 출력 텐서 선택 (첫 번째 또는 적절한 형식 탐색)
     let outputName = session.outputNames?.[0]
     let output = results[outputName]
+    console.log('🔧 출력 텐서 선택:', { outputName, hasOutput: !!output, outputNames: session.outputNames })
+    
     if (!output || !output.dims) {
       const values = Object.values(results)
+      console.log('🔧 출력 텐서 후보:', values.map(v => ({ dims: v?.dims, type: v?.type })))
       output = values.find(t => t && t.dims && (t.dims.length === 2 || t.dims.length === 3)) || values[0]
     }
+    
     if (!output || !output.dims) {
+      console.error('❌ 유효하지 않은 YOLO 출력 텐서')
       throw new Error('Invalid YOLO output tensor')
     }
+    
+    console.log('🔧 선택된 출력 텐서:', { dims: output.dims, type: output.type, dataLength: output.data.length })
 
     const dets = postprocess(output, img.width, img.height, dx, dy, scale, options.confThreshold || 0.25)
-    console.log('YOLO raw detections:', dets?.length || 0)
+    console.log('🔍 YOLO 원시 검출:', dets?.length || 0)
+    if (dets.length > 0) {
+      console.log('🔍 검출 결과 샘플:', dets.slice(0, 3).map(d => ({ box: d.box, score: d.score, classId: d.classId })))
+    }
 
     // 결과를 BrickBox 형식으로 변환
     const mapped = []

@@ -14,6 +14,7 @@
           <router-link to="/store-manager" class="nav-link">매장 관리</router-link>
           <router-link to="/synthetic-dataset" class="nav-link">합성 데이터셋</router-link>
           <router-link to="/hybrid-detection" class="nav-link">부품 검출</router-link>
+          <router-link to="/automated-training" class="nav-link">🧠 AI 학습</router-link>
         </div>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>

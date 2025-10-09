@@ -296,7 +296,7 @@ export function useRealtimeDetection() {
       '반사광을 피해서 촬영해주세요.'
     ]
     
-    return guidances[Math.floor(Math.random() * guidances.length)]
+    return guidances[0] || ''
   }
 
   // 검출 로그 저장

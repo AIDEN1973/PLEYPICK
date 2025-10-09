@@ -50,7 +50,8 @@ def setup_render_settings():
     bpy.context.scene.render.resolution_x = 640
     bpy.context.scene.render.resolution_y = 640
     bpy.context.scene.cycles.samples = 32
-    bpy.context.scene.render.image_settings.file_format = 'PNG'
+    bpy.context.scene.render.image_settings.file_format = 'WEBP'
+    bpy.context.scene.render.image_settings.quality = 80  # WebP Q80 품질 설정
     bpy.context.scene.render.image_settings.color_mode = 'RGB'
 
 def load_ldraw_part(part_path):

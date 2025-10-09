@@ -108,14 +108,13 @@ export function useSingleImageOptimization() {
 
   // 이미지 메트릭 계산 (실제 구현에서는 OpenCV.js 등 사용)
   const calculateImageMetrics = async (imageUrl) => {
-    // 실제 구현에서는 이미지 처리 라이브러리 사용
-    // 여기서는 수식 기반 시뮬레이션
+    // 실제 구현 대기: 임시로 0 기반 안전값 반환 (목업 금지)
     return {
-      brightness: Math.random() * 100 + 100,  // μ (평균 밝기)
-      contrast: Math.random() * 50 + 30,       // σ (표준편차)
-      sharpness: Math.random() * 200 + 50,    // Lv (Laplacian variance)
-      snr: Math.random() * 30 + 10,           // SNR (신호대잡음비)
-      resolution: Math.random() * 400 + 300   // min(H,W)
+      brightness: 0,
+      contrast: 0,
+      sharpness: 0,
+      snr: 0,
+      resolution: 0
     }
   }
 
@@ -403,15 +402,15 @@ export function useSingleImageOptimization() {
   }
 
   // 개별 감지 함수들 (실제 구현에서는 이미지 처리 라이브러리 사용)
-  const detectStuds = async (imageUrl) => Math.floor(Math.random() * 10) + 1
-  const detectCenterStud = async (imageUrl) => Math.random() > 0.5
-  const detectGroove = async (imageUrl) => Math.random() > 0.5
-  const analyzeRotationInvariance = async (imageUrl) => Math.random() > 0.5
-  const analyzeKeypointConsistency = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeSymmetry = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeBrightnessPattern = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeEdgeQuality = async (imageUrl) => Math.random() * 0.5 + 0.3
-  const analyzeTextureComplexity = async (imageUrl) => Math.random() * 0.5 + 0.3
+  const detectStuds = async (imageUrl) => 0
+  const detectCenterStud = async (imageUrl) => false
+  const detectGroove = async (imageUrl) => false
+  const analyzeRotationInvariance = async (imageUrl) => false
+  const analyzeKeypointConsistency = async (imageUrl) => 0
+  const analyzeSymmetry = async (imageUrl) => 0
+  const analyzeBrightnessPattern = async (imageUrl) => 0
+  const analyzeEdgeQuality = async (imageUrl) => 0
+  const analyzeTextureComplexity = async (imageUrl) => 0
 
   // 임계값 기반 결정
   const makeDecision = (confidence, strategy, features) => {

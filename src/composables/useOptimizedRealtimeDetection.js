@@ -130,7 +130,7 @@ export function useOptimizedRealtimeDetection() {
     const { detect, init } = useYoloDetector()
     try {
       await init({ modelPath: '/models/yolo11n-seg.onnx', inputSize: 640 })
-      const dets = await detect(imageData, { confThreshold: 0.25 })
+      const dets = await detect(imageData, { confThreshold: 0.05 }) // 매우 낮은 임계값으로 "무조건 검출"
       console.log(`YOLO detected ${dets.length} objects`)
 
       // 정규화된 바운딩박스 생성: {boundingBox:{x,y,width,height}}
