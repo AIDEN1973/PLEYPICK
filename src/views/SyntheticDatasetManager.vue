@@ -59,29 +59,33 @@
       <div class="stat-card">
         <div class="stat-icon">📊</div>
         <div class="stat-content">
-          <h3>{{ stats.totalParts }}</h3>
+          <h3>{{ stats.totalParts || 0 }}</h3>
           <p>총 부품 수</p>
+          <small class="stat-subtitle">데이터베이스 기준</small>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon">🎨</div>
         <div class="stat-content">
-          <h3>{{ stats.renderedImages }}</h3>
+          <h3>{{ stats.renderedImages || 0 }}</h3>
           <p>렌더링된 이미지</p>
+          <small class="stat-subtitle">합성 데이터셋</small>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon">☁️</div>
         <div class="stat-content">
-          <h3>{{ stats.storageUsed }}</h3>
+          <h3>{{ stats.storageUsed || '0 GB' }}</h3>
           <p>저장소 사용량</p>
+          <small class="stat-subtitle">Supabase Storage</small>
         </div>
       </div>
       <div class="stat-card">
         <div class="stat-icon">⚡</div>
         <div class="stat-content">
-          <h3>{{ stats.renderingStatus }}</h3>
+          <h3>{{ stats.renderingStatus || '대기 중' }}</h3>
           <p>렌더링 상태</p>
+          <small class="stat-subtitle">실시간 업데이트</small>
         </div>
       </div>
     </div>
@@ -1154,6 +1158,8 @@ export default {
               }
               // 완료 조건
               if (progressJson && progressJson.status === 'completed') {
+                // 렌더링 완료 시 통계 업데이트
+                await refreshStats()
                 clearInterval(pollInterval)
                 isRendering.value = false
                 renderProgress.value = 100
@@ -1618,10 +1624,29 @@ export default {
 
     const refreshStats = async () => {
       try {
+        console.log('🔄 통계 새로고침 시작...')
         const newStats = await getStats()
         stats.value = newStats
+        console.log('✅ 통계 새로고침 완료:', newStats)
+        
+        // 렌더링 상태 업데이트
+        if (isRendering.value) {
+          stats.value.renderingStatus = '렌더링 중'
+        } else if (completedParts.value.length > 0) {
+          stats.value.renderingStatus = '완료'
+        } else {
+          stats.value.renderingStatus = '대기 중'
+        }
+        
       } catch (error) {
-        console.error('통계 새로고침 실패:', error)
+        console.error('❌ 통계 새로고침 실패:', error)
+        // 오류 시 기본값 설정
+        stats.value = {
+          totalParts: 0,
+          renderedImages: 0,
+          storageUsed: '0 GB',
+          renderingStatus: '오류'
+        }
       }
     }
 
@@ -1960,11 +1985,15 @@ export default {
 
     // 생명주기
     onMounted(async () => {
+      console.log('🚀 SyntheticDatasetManager 마운트됨')
       // 세션 복원 → 통계 로드
       loadSession()
       await refreshStats()
       await loadAutoTrainingSetting()
       await loadSetTrainingStats()
+      
+      // 통계 디버깅
+      console.log('📊 현재 통계:', stats.value)
       
       // 배치 작업 초기화
       batchJobs.value = [
@@ -2051,6 +2080,49 @@ export default {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.stat-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  transition: transform 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-5px);
+}
+
+.stat-card .stat-icon {
+  font-size: 2.5rem;
+  margin-bottom: 10px;
+}
+
+.stat-card .stat-content h3 {
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 0 0 5px 0;
+}
+
+.stat-card .stat-content p {
+  font-size: 1rem;
+  margin: 0 0 5px 0;
+  opacity: 0.9;
+}
+
+.stat-card .stat-subtitle {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  display: block;
 }
 
 /* 자동 학습 설정 스타일 */

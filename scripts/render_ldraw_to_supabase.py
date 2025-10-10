@@ -35,10 +35,11 @@ import numpy as np
 from pathlib import Path
 import argparse
 from datetime import datetime
-import yaml
+# YAML 대신 JSON으로 YOLO 설정 파일 생성 (Blender 환경 호환성)
+yaml = None  # yaml 모듈 사용하지 않음
 
 def create_dataset_yaml(output_dir, class_names, part_id):
-    """YOLO 데이터셋용 YAML 파일 생성"""
+    """YOLO 데이터셋용 설정 파일 생성 (JSON 형식)"""
     dataset_config = {
         'path': str(output_dir),
         'train': 'images',
@@ -47,11 +48,23 @@ def create_dataset_yaml(output_dir, class_names, part_id):
         'names': class_names
     }
     
+    # JSON 형식으로 YOLO 설정 파일 생성
+    json_path = output_dir / 'dataset.json'
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(dataset_config, f, ensure_ascii=False, indent=2)
+    
+    # YAML 형식도 간단하게 생성 (수동으로)
     yaml_path = output_dir / 'dataset.yaml'
-    with open(yaml_path, 'w') as f:
-        yaml.dump(dataset_config, f, default_flow_style=False)
+    with open(yaml_path, 'w', encoding='utf-8') as f:
+        f.write(f"# YOLO Dataset Configuration\n")
+        f.write(f"path: {output_dir}\n")
+        f.write(f"train: images\n")
+        f.write(f"val: images\n")
+        f.write(f"nc: {len(class_names)}\n")
+        f.write(f"names: {class_names}\n")
     
     print(f"✅ dataset.yaml 생성: {yaml_path}")
+    print(f"✅ dataset.json 생성: {json_path}")
     return yaml_path
 
 # 환경 선로드: 스크립트 진입 즉시 .env 계열 강제 로드(Blender 인자 전달 실패 대비)
@@ -1463,14 +1476,15 @@ class LDrawRenderer:
         # 투명도 설정
         if is_transparent:
             bsdf.inputs['Alpha'].default_value = color_rgba[3]  # Alpha 값 사용
-            bsdf.inputs['Transmission'].default_value = 0.8  # 투명도 강화
+            if 'Transmission' in bsdf.inputs:
+                bsdf.inputs['Transmission'].default_value = 0.8  # 투명도 강화
             material.blend_method = 'BLEND'  # 블렌딩 모드
-            material.use_transparency = True
+            # Blender 4.5에서는 use_transparency 대신 blend_method 사용
         else:
             bsdf.inputs['Alpha'].default_value = 1.0
-            bsdf.inputs['Transmission'].default_value = 0.0
+            if 'Transmission' in bsdf.inputs:
+                bsdf.inputs['Transmission'].default_value = 0.0
             material.blend_method = 'OPAQUE'
-            material.use_transparency = False
         
         # 밝은 부품 가시성 개선 (Adaptive Bright-Part Rendering)
         if is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9):
@@ -2330,7 +2344,10 @@ def main():
                 ['lego_part'],  # 클래스 이름
                 args.part_id
             )
-            print(f"📋 dataset.yaml 생성 완료: {yaml_path}")
+            if yaml_path:
+                print(f"📋 dataset.yaml 생성 완료: {yaml_path}")
+            else:
+                print("⚠️ 설정 파일 생성 실패")
         except Exception as e:
             print(f"⚠️ YAML 파일 생성 실패: {e}")
     
