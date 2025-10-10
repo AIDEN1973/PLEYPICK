@@ -2109,6 +2109,7 @@ def main():
     parser.add_argument('--part-id', required=True, help='LEGO 부품 ID (예: 3001)')
     parser.add_argument('--count', type=int, default=10, help='생성할 이미지 수')
     parser.add_argument('--quality', default='fast', choices=['fast', 'normal', 'high'], help='렌더링 품질')
+    parser.add_argument('--samples', type=int, help='강제 샘플 수 (적응형 샘플링 무시)')
     parser.add_argument('--ldraw-path', default='C:/LDraw/parts/', help='LDraw 라이브러리 경로')
     parser.add_argument('--output-dir', default='./output', help='출력 디렉토리')
     parser.add_argument('--output-subdir', help='출력 하위 폴더명 (기본: part-id)')
@@ -2261,15 +2262,21 @@ def main():
     if args.target_fill and 0.5 <= args.target_fill <= 0.98:
         renderer.target_fill = float(args.target_fill)
     
-    # 품질에 따른 샘플 수 설정 (폐쇄 세계 최적화)
-    quality_settings = {
-        'fast': 64,
-        'normal': 128,
-        'high': 256,
-        'ultra': 400
-    }
-    samples = quality_settings.get(args.quality, 64)
-    print(f"🎯 렌더링 품질: {args.quality} → {samples} 샘플")
+    # 샘플 수 설정 (서버에서 전달된 값 우선, 없으면 품질 기반)
+    if args.samples:
+        samples = args.samples
+        print(f"🎯 서버에서 전달된 샘플 수: {samples}")
+    else:
+        # 품질에 따른 샘플 수 설정 (폐쇄 세계 최적화)
+        quality_settings = {
+            'fast': 64,
+            'normal': 128,
+            'high': 256,
+            'ultra': 400
+        }
+        samples = quality_settings.get(args.quality, 64)
+        print(f"🎯 렌더링 품질: {args.quality} → {samples} 샘플")
+    
     renderer.current_samples = samples
     
     # 배치 렌더링 (중복 방지)

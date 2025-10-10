@@ -438,7 +438,7 @@ async function startBlenderRendering(job) {
   // 정밀도 모드: 흰 배경일 때 Standard 강제, gray는 Filmic
   const colorManagement = 'standard'
   // 해상도/화면점유율(기본 정밀 값)
-  const resolution = job.config.resolution || '768x768'
+  const resolution = job.config.resolution || '1024x1024'
   const targetFill = typeof job.config.targetFill === 'number' ? job.config.targetFill : 0.92
   let colorId = job.config.colorId
   let effectivePartId = partId
@@ -502,6 +502,7 @@ async function startBlenderRendering(job) {
     '--part-id', effectivePartId,
     '--count', imageCount.toString(),
     '--quality', quality,
+    '--samples', String(samples),
     '--background', background,
     '--ldraw-path', ldrawPath,
     '--output-dir', './output/synthetic',
