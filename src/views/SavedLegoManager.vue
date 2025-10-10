@@ -35,6 +35,7 @@
               {{ year }}년
             </option>
           </select>
+          
         </div>
       </div>
     </div>
@@ -51,8 +52,9 @@
           <p class="stat-number">{{ totalParts }}</p>
         </div>
         <div class="stat-card">
-          <h3>이미지 처리 완료</h3>
+          <h3>WebP 이미지</h3>
           <p class="stat-number">{{ processedImages }}</p>
+          <p class="stat-subtitle">{{ totalSets > 0 ? Math.round((processedImages / totalSets) * 100) : 0 }}% 변환됨</p>
         </div>
       </div>
     </div>
@@ -89,10 +91,14 @@
         >
           <div class="set-image">
             <img 
-              :src="set.set_img_url" 
+              :src="set.display_image_url || set.set_img_url" 
               :alt="set.name"
               @error="handleImageError"
             />
+            <!-- WebP 이미지 표시 배지 -->
+            <div v-if="set.webp_image_url" class="webp-badge">
+              🖼️ WebP
+            </div>
           </div>
           <div class="set-info">
             <h4>{{ set.name }}</h4>
@@ -129,11 +135,15 @@
             <tr v-for="set in savedSets" :key="set.id">
               <td>
                 <img 
-                  :src="set.set_img_url" 
+                  :src="set.display_image_url || set.set_img_url" 
                   :alt="set.name"
                   class="set-thumbnail"
                   @error="handleImageError"
                 />
+                <!-- WebP 이미지 표시 배지 -->
+                <div v-if="set.webp_image_url" class="webp-badge-small">
+                  🖼️
+                </div>
               </td>
               <td>{{ set.set_num }}</td>
               <td>{{ set.name }}</td>
@@ -175,7 +185,15 @@
         <div class="modal-body">
           <div class="set-details">
             <div class="set-main-info">
-              <img :src="selectedSet.set_img_url" :alt="selectedSet.name" class="set-large-image" />
+              <img 
+                :src="selectedSet.display_image_url || selectedSet.set_img_url" 
+                :alt="selectedSet.name" 
+                class="set-large-image" 
+              />
+              <!-- WebP 이미지 표시 배지 -->
+              <div v-if="selectedSet.webp_image_url" class="webp-badge-large">
+                🖼️ WebP 이미지
+              </div>
               <div class="set-details-text">
                 <p><strong>세트 번호:</strong> {{ selectedSet.set_num }}</p>
                 <p><strong>연도:</strong> {{ selectedSet.year }}</p>
@@ -194,7 +212,7 @@
                   :key="`${part.lego_parts.part_num}-${part.lego_colors.color_id}`"
                   class="part-card"
                 >
-                  <div class="part-image" @mouseenter="showMetadata(part)" @mouseleave="hideMetadata">
+                  <div class="part-image" @click="toggleMetadata(part)">
                     <img 
                       :src="part.supabase_image_url || part.lego_parts.part_img_url" 
                       :alt="part.lego_parts.name"
@@ -213,6 +231,7 @@
                          class="metadata-tooltip">
                       <div class="tooltip-content">
                         <h4>🧠 LLM 분석 결과</h4>
+                        <p class="tooltip-hint">💡 클릭하여 닫기</p>
                         <div v-if="part.metadata" class="metadata-details">
                           <p><strong>형태:</strong> {{ part.metadata.shape }}</p>
                           <p><strong>기능:</strong> {{ part.metadata.function }}</p>
@@ -282,6 +301,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useDatabase } from '../composables/useDatabase'
 import { supabase } from '../composables/useSupabase'
+import { useImageManager } from '../composables/useImageManager'
 
 export default {
   name: 'SavedLegoManager',
@@ -292,6 +312,12 @@ export default {
       getLegoSets,
       getSetParts
     } = useDatabase()
+
+    const {
+      processRebrickableImage,
+      uploadImageFromUrl,
+      saveImageMetadata
+    } = useImageManager()
 
     const searchQuery = ref('')
     const savedSets = ref([])
@@ -311,18 +337,73 @@ export default {
       return savedSets.value.reduce((sum, set) => sum + (set.num_parts || 0), 0)
     })
     const processedImages = computed(() => {
-      // TODO: 실제 이미지 처리 완료 수 계산
-      return 0
+      // WebP로 변환된 세트 이미지 수 계산
+      return savedSets.value.filter(set => set.webp_image_url).length
     })
 
     // 저장된 세트 로드
     const loadSavedSets = async () => {
       try {
         const sets = await getLegoSets(1, 1000) // 모든 세트 로드
-        savedSets.value = sets
-        extractThemesAndYears(sets)
+        
+        // 각 세트의 WebP 이미지 URL 확인 및 적용
+        const setsWithWebPImages = await Promise.all(sets.map(async (set) => {
+          try {
+            const webpImageUrl = await getSetWebPImageUrl(set.set_num)
+            if (webpImageUrl) {
+              return {
+                ...set,
+                webp_image_url: webpImageUrl,
+                display_image_url: webpImageUrl // WebP 이미지를 우선 표시
+              }
+            } else {
+              return {
+                ...set,
+                webp_image_url: null,
+                display_image_url: set.set_img_url // 원본 이미지 사용
+              }
+            }
+          } catch (err) {
+            return {
+              ...set,
+              webp_image_url: null,
+              display_image_url: set.set_img_url
+            }
+          }
+        }))
+        
+        savedSets.value = setsWithWebPImages
+        extractThemesAndYears(setsWithWebPImages)
       } catch (err) {
         console.error('Failed to load saved sets:', err)
+      }
+    }
+
+    // 세트의 WebP 이미지 URL 조회
+    const getSetWebPImageUrl = async (setNum) => {
+      try {
+        // 1) lego_sets 테이블에서 WebP 이미지 URL 조회
+        const { data: setImageData, error: setImageError } = await supabase
+          .from('lego_sets')
+          .select('webp_image_url')
+          .eq('set_num', setNum)
+          .not('webp_image_url', 'is', null)
+          .maybeSingle()
+
+        if (!setImageError && setImageData?.webp_image_url) {
+          return setImageData.webp_image_url
+        }
+
+        // 2) Supabase Storage에서 직접 확인 (WebP 파일이 있을 가능성이 높을 때만)
+        // 현재는 WebP 파일이 없으므로 HEAD 요청을 하지 않음
+        // const webpFileName = `${setNum}_set.webp`
+        // const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        // const bucketName = 'lego_parts_images'
+        // const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/lego_sets_images/${webpFileName}`
+
+        return null
+      } catch (err) {
+        return null
       }
     }
 
@@ -501,14 +582,18 @@ export default {
       }
     }
 
-    // 메타데이터 툴팁 표시
-    const showMetadata = (part) => {
-      hoveredPart.value = part
-    }
 
-    // 메타데이터 툴팁 숨기기
-    const hideMetadata = () => {
-      hoveredPart.value = null
+    // 메타데이터 툴팁 토글
+    const toggleMetadata = (part) => {
+      if (hoveredPart.value && 
+          hoveredPart.value.lego_parts.part_num === part.lego_parts.part_num && 
+          hoveredPart.value.lego_colors.color_id === part.lego_colors.color_id) {
+        // 같은 부품을 다시 클릭하면 숨기기
+        hoveredPart.value = null
+      } else {
+        // 다른 부품을 클릭하거나 처음 클릭하면 표시
+        hoveredPart.value = part
+      }
     }
 
     // 세트 상세보기
@@ -551,6 +636,30 @@ export default {
     // 이미지 오류 처리
     const handleImageError = (event) => {
       const img = event.target
+      
+      // 세트 이미지 오류 처리
+      const set = savedSets.value.find(s => 
+        s.display_image_url === img.src || s.set_img_url === img.src
+      )
+      
+      if (set) {
+        if (set.webp_image_url && img.src === set.webp_image_url) {
+          // WebP 이미지 로드 실패 시 원본 이미지로 폴백
+          console.log(`WebP image failed for ${set.set_num}, falling back to original`)
+          img.src = set.set_img_url
+        } else if (set.display_image_url && img.src === set.display_image_url) {
+          // 표시 이미지 로드 실패 시 원본으로 폴백
+          console.log(`Display image failed for ${set.set_num}, falling back to original`)
+          img.src = set.set_img_url
+        } else {
+          // 모든 이미지 로드 실패 시 플레이스홀더
+          console.log(`All images failed for ${set.set_num}, using placeholder`)
+          img.src = '/placeholder-image.png'
+        }
+        return
+      }
+      
+      // 부품 이미지 오류 처리
       const part = setParts.value.find(p => 
         p.supabase_image_url === img.src || p.lego_parts.part_img_url === img.src
       )
@@ -571,6 +680,7 @@ export default {
       const uniqueParts = new Set(setParts.value.map(part => part.lego_parts.part_num))
       return uniqueParts.size
     })
+
 
     onMounted(() => {
       loadSavedSets()
@@ -603,8 +713,7 @@ export default {
       formatDate,
       handleImageError,
       uniquePartsCount,
-      showMetadata,
-      hideMetadata
+      toggleMetadata
     }
   }
 }
@@ -681,7 +790,10 @@ export default {
 .filter-options {
   display: flex;
   gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
+
 
 .filter-select {
   padding: 0.75rem;
@@ -723,6 +835,14 @@ export default {
   color: #333;
   margin: 0;
 }
+
+.stat-subtitle {
+  font-size: 0.8rem;
+  color: #28a745;
+  font-weight: 600;
+  margin: 0.25rem 0 0 0;
+}
+
 
 .saved-sets {
   background: white;
@@ -972,6 +1092,58 @@ export default {
   border-radius: 6px;
   position: relative;
   cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.part-image:hover {
+  transform: scale(1.05);
+}
+
+/* WebP 배지 스타일 */
+.webp-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+  z-index: 10;
+}
+
+.webp-badge-small {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(40, 167, 69, 0.3);
+  z-index: 10;
+}
+
+.webp-badge-large {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+  z-index: 10;
+}
+
+.set-image, .set-thumbnail, .set-large-image {
+  position: relative;
 }
 
 .part-image img {
@@ -1030,6 +1202,7 @@ export default {
   color: white;
 }
 
+
 .btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 4px 15px rgba(0,0,0,0.2);
@@ -1087,6 +1260,17 @@ export default {
   padding-bottom: 0.5rem;
 }
 
+.tooltip-hint {
+  margin: 0 0 0.5rem 0;
+  color: #ccc;
+  font-size: 0.8rem;
+  font-style: italic;
+  text-align: center;
+  background: rgba(255,255,255,0.1);
+  padding: 0.25rem;
+  border-radius: 4px;
+}
+
 .metadata-details p {
   margin: 0.5rem 0;
   color: #f8f9fa;
@@ -1138,6 +1322,7 @@ export default {
   font-size: 0.8rem;
   color: #dee2e6;
 }
+
 
 @media (max-width: 768px) {
   .filter-controls {

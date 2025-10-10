@@ -1,0 +1,235 @@
+LDraw Readme File
+
+Welcome to LDraw
+
+This short readme file explains what files and subdirectories are present in 
+your LDraw installation, described the LDraw library structure and and has links 
+to some sites on the internet where you can find help and further information.
+
+ * LDraw program directory contents
+ * LDraw library structure
+ * Where to find further information
+ * Parts library updates
+
+--------------------------------------------------------------------------------
+* LDraw program directory contents:
+ - Program executables:
+   mklist.exe   -  This is a utility that creates a list of available
+                   parts. This list (parts.lst) is used by LDraw tools
+                   as the available parts list. You should re-run mklist 
+                   after installing new parts updates.
+
+ - Support Files:
+   Parts.lst    -  This is your listing of all usable parts available.
+                   This list is created by running mklist.exe and choosing
+                   to create the list sorted Numerically or by Description.
+                   Most people use Description sorting, but you can
+                   change to whichever way you prefer at any time.
+   mklist1_6.zip - Zip archive of the MKList source code.
+
+ - Informational Files:
+   Readme.txt   -  This file you are currently reading.
+ 
+ - Subdirectories:
+   \MODELS\     -  This directory is where your model .dat files are stored.
+                   There are two sample model .dat files installed for you
+                   to look at - Car.dat and Pyramid.dat.
+   \P\          -  This directory is where parts primitives are located.
+                   Parts primitives are tyically highly reusable components
+                   used by the part files in the LDraw library.
+   \P\48\       -  This directory is where high resolution parts primitives 
+                   are located. These are typically used for large curved
+                   parts where excessive scaling of the regular curved 
+                   primitives would produce an undesriable result.
+   \PARTS\      -  This directory holds all the actual parts that can be used
+                   in creating or rendering your models.  A list of these
+                   parts can be seen by viewing the parts.lst file.
+   \PARTS\S\    -  This directory holds sub-parts that are used by the LDraw
+                   parts to optimise file size and improve parts development
+                   efficiancy. 
+
+--------------------------------------------------------------------------------
+* LDraw library structure:
+
+  The official LDraw library is segmented into four categories:
+
+ - OfficialCA       - The library of officially released parts for which the 
+                      authors have agreed to the Contributor Agreement, allowing
+                      their work to be re-distributed. Full details of this 
+                      agreement can be found in the CAreadme.txt and 
+                      CAlicense.txt files in the same diectory as this file.
+                      This download is restricted to generic colour versions of 
+                      each part and does not contain duplicate copies of part 
+                      files where different numbers have been used for the same 
+                      physical part. This library may be re-distributed, subject 
+                      to the conditions laid out in CAreadme.txt.
+
+ - OfficialCA_a     - The library of officially released part aliases. This 
+                      includes generic colour versions of parts that are 
+                      physically identical to parts in the OfficialCA library,
+                      but have a different part number, either because of
+                      production differences between opaque and transparent 
+                      parts or due to evolution of the part numbering scheme.    
+
+ - OfficialCA_p     - The library of officially released physical colour parts. 
+                      This includes hard-coded colour versions of parts or 
+                      composite parts.
+
+ - OfficialNonCA    - The library of officially released parts for which the 
+                      authors have not agreed to the Contributor Agreement, or
+                      where we have been unable to contact the original author. 
+                      This download is restricted to generic colour versions of 
+                      each part and does not contain duplicate copies of part 
+                      files where different numbers have been used for the same 
+                      physical part.
+                      This library MAY NOT be re-distributed, as detailed in the 
+                      conditions laid out in NonCAreadme.txt file.   
+
+--------------------------------------------------------------------------------
+* Where to find further information
+
+  For more information on LDraw, check out these internet resources:
+
+ - LDraw.org  -  http://www.ldraw.org/
+   Centralized LDraw Resources on the internet.
+   Parts updates, Utility programs for using and enhancing LDraw, and more.
+
+ - LUGNET  -  http://www.lugnet.com/
+   The Lego Users Group NETwork (LUGNET) - A great place for fans of Lego.
+   LUGNET has many topic-specific newsgroups that discuss LDraw and other forms
+   of Lego-type CAD.
+ 
+ - The LDraw Parts Tracker  -  http://www.ldraw.org/library/tracker/
+   The web-based system for managing the development of new LDraw parts. Here
+   you will find unofficial versions of new parts and updates to existing parts.
+   As these are unofficial parts, they may be incomplete, or inaccurate, and it 
+   is possible that when they are officially released they may be changed in 
+   ways that could change any model in which you have used them.   
+
+ - The LDraw Frequently Asked Questions (FAQ):
+      http://www.ldraw.org/faq/
+
+--------------------------------------------------------------------------------
+* Parts library updates:
+
+ - If you have not already done so, you should visit www.ldraw.org and
+   download and install the current complete package of LDraw parts.
+
+ - Periodically, new parts and part fixes are released in small updates,
+   available from www.ldraw.org.  These updates should be downloaded and
+   installed as they become available. Please remember that OLD updates
+   should not be installed over NEW or NEWER updates.  Doing so might
+   overwrite a fixed version of a part with an older version.
+
+LDraw Update 2010-02
+--end of file--   
+ChatGPT의 말:
+
+좋습니다 👍
+이 LDraw Readme.txt는 BrickBox의 데이터셋 구축 파이프라인에서 부품 원본 데이터의 구조와 의미를 정확히 이해하는 데 핵심적인 참고자료입니다.
+아래는 이 문서를 BrickBox 개발 관점에서 요약·분석한 정리본입니다.
+
+🧱 LDraw 라이브러리 구조 요약
+(BrickBox 합성 데이터 생성용 기술 기반 문서 해설)
+📁 1️⃣ LDraw 프로그램 디렉터리 개요
+
+LDraw 설치 폴더는 크게 3가지 구성으로 되어 있습니다:
+
+구분	내용	BrickBox 활용 포인트
+실행 파일	mklist.exe – parts.lst를 자동 생성	parts.lst를 읽어 부품 인덱스 자동화 가능
+지원 파일	parts.lst – 모든 사용 가능한 부품 목록	부품 이름, 번호 매칭 (part_num ↔ 파일명)
+하위 디렉터리	\PARTS, \P, \MODELS 등	합성 데이터 렌더링 대상 폴더
+🧩 2️⃣ 디렉터리별 구조 및 역할
+경로	설명	BrickBox 활용
+\PARTS\	실제 부품 모델 (.dat)	핵심 데이터셋 원본 – Blender에 임포트하여 렌더링
+\PARTS\S\	부품 내부에 쓰이는 Sub-parts	Blender 로드시 자동 참조됨 (별도 수정 불필요)
+\P\	Primitive geometry (기본 기하 요소)	곡면/원통 등 반복 형상 구성 요소
+\P\48\	고해상도 곡면 Primitive	대형 부품이나 곡면 렌더링 품질 향상에 활용
+\MODELS\	예시 모델 (Car.dat, Pyramid.dat)	테스트 렌더링 또는 pipeline 검증용
+
+📌 BrickBox에서는 \PARTS 폴더만 주요 대상입니다.
+→ Blender Import 시 bpy.ops.import_scene.ldraw(filepath="C:/ldraw/parts/3001.dat") 형태로 직접 접근.
+
+📦 3️⃣ LDraw 공식 라이브러리 계층 구조
+구분	설명	배포/활용 권한
+OfficialCA	공식 승인된 부품 (기여자 동의 有)	자유롭게 재배포 가능
+OfficialCA_a	동일 형상, 다른 번호(별칭)	alias 파트 – BrickBox에서는 하나의 class로 통합 가능
+OfficialCA_p	실제 색상 하드코딩된 부품	색상 학습용 샘플에 활용 가능
+OfficialNonCA	저작권 동의되지 않은 부품	공유/재배포 불가 → 내부 실험용 한정
+
+💡 BrickBox의 합성 데이터셋 구축은 대부분 OfficialCA / OfficialCA_a만 사용하면 법적으로 안전합니다.
+
+🌐 4️⃣ 관련 온라인 리소스
+사이트	내용	BrickBox 적용 예시
+www.ldraw.org
+	공식 다운로드 / 구조 문서	parts 라이브러리 최신 버전 관리
+LDraw Parts Tracker	비공식 신형 부품 등록 시스템	신규 LEGO 세트 부품 수집 시 참고
+LUGNET	사용자 포럼	CAD 모델링 관련 노하우 공유
+FAQ 페이지	포맷, 명명 규칙 정리	.dat 포맷 파서 작성 시 참고
+🔄 5️⃣ 업데이트 및 유지관리 방식
+
+LDraw Update는 주기적으로 배포 (Official Update yyyy-mm)
+
+mklist.exe 실행 시 → 최신 parts.lst 자동 생성
+
+BrickBox 자동화 포인트:
+→ parts.lst를 주기적으로 파싱하여 Supabase의 lego_parts 테이블 자동 업데이트 가능
+
+🧰 6️⃣ BrickBox에서의 활용 구조 요약
+📂 LDraw/
+ ├─ parts/           ← 실제 부품 모델 (3001.dat 등)
+ ├─ p/, p/48/        ← primitive geometry
+ ├─ parts.lst        ← 부품 메타데이터 (번호/이름)
+ ├─ mklist.exe       ← parts.lst 생성기
+ └─ models/          ← 샘플 모델
+
+
+→ BrickBox 데이터 생성 파이프라인
+
+LDraw parts/
+   ↓
+Blender Import (Python)
+   ↓
+랜덤 각도 / 조명 / 색상 조합
+   ↓
+합성 이미지 생성 (.png)
+   ↓
+Supabase 업로드 (lego_parts_images/synthetic/)
+
+🧩 7️⃣ BrickBox용 활용 포인트 요약
+목적	방법
+✅ 부품 원본 확보	LDraw.org → complete.zip 다운로드 후 /parts 폴더 사용
+🧾 부품 인덱스 자동화	parts.lst를 Python으로 파싱 → part_num, part_name 추출
+🧠 데이터셋 구축	Blender 스크립트로 자동 렌더링 (YOLO용 합성 데이터 생성)
+☁️ 데이터 저장	Supabase Storage 버킷(lego_parts_images/synthetic/) 업로드
+📊 AI 학습 관리	Supabase 테이블(lego_parts_dataset)에 메타데이터 기록
+🔄 정기 업데이트	mklist.exe + parts update zip 자동 배치
+✅ BrickBox 개발용 요약 구조 (최종 정리)
+구분	구성 요소	역할
+데이터 원본	LDraw parts (OfficialCA)	LEGO 부품의 표준 3D CAD
+렌더 엔진	Blender + Python	합성 이미지 자동 생성
+환경 변수	.env (Supabase URL/Key)	데이터 업로드 및 관리 연결
+저장소	Supabase Storage	이미지 및 라벨 중앙 저장
+메타데이터 관리	Supabase Table (lego_parts, lego_parts_dataset)	부품/이미지 정보 관리
+추후 확장	YOLO 학습, SAM Segmentation, CLIP 텍스트 연결	AI 인식 성능 향상
+💡 BrickBox 추가 제안
+
+다음 기능을 추가하면 파이프라인이 완성형에 가까워집니다:
+
+parts.lst → Supabase 테이블 자동 등록기
+
+part_id, name, description 자동 파싱 및 저장
+
+합성 이미지 렌더링 + 자동 라벨 + 업로드 일괄 처리
+
+현재 스크립트 기반으로 병렬화(GPU 활용)
+
+실제 촬영 이미지 Fine-tuning
+
+합성 데이터 기반 1차 학습 → 실촬영 데이터로 2차 보정
+
+요약하자면,
+
+LDraw는 BrickBox의 "합성 데이터 공장"의 원천이자,
+Blender 스크립트 + Supabase 업로드 자동화를 통해
+**“수작업 없는 AI 학습용 레고 부품 데이터셋 생성”**이 가능해졌습니다.

@@ -309,7 +309,8 @@ export default {
       downloading, 
       processRebrickableImage, 
       processMultipleImages,
-      saveImageMetadata
+      saveImageMetadata,
+      uploadImageFromUrl
     } = useImageManager()
 
     const {
@@ -953,6 +954,20 @@ export default {
             const savedSet = await saveLegoSet(selectedSet.value)
             console.log('Set saved:', savedSet)
 
+            // 1.5. 세트 이미지 WebP 변환 (백그라운드에서 실행)
+            try {
+              console.log(`🖼️ Converting set image to WebP for ${selectedSet.value.set_num}...`)
+              const webpResult = await convertSetImageToWebP(selectedSet.value)
+              if (webpResult) {
+                console.log(`✅ Set image converted to WebP: ${selectedSet.value.set_num}`)
+              } else {
+                console.log(`⚠️ Set image WebP conversion failed: ${selectedSet.value.set_num}`)
+              }
+            } catch (imageError) {
+              console.warn(`⚠️ Set image WebP conversion failed for ${selectedSet.value.set_num}:`, imageError)
+              // 이미지 변환 실패해도 세트 저장은 계속 진행
+            }
+
             // 2. 부품 정보 저장 (각 부품별로 오류 처리)
             if (setParts.value.length > 0) {
               console.log(`🔍 DEBUG: Starting to save ${setParts.value.length} parts from API...`)
@@ -1136,6 +1151,69 @@ export default {
       } else {
         // 일반 부품 이미지 오류 처리
         event.target.src = '/placeholder-image.png'
+      }
+    }
+
+    // 백그라운드 WebP 변환 함수 (UI 없이 자동 실행)
+    const convertSetImageToWebP = async (set) => {
+      try {
+        if (!set.set_img_url) {
+          console.warn(`세트 ${set.set_num}에 이미지 URL이 없습니다.`)
+          return null
+        }
+
+        
+        // WebP 파일명 생성
+        const webpFileName = `${set.set_num}_set.webp`
+        const uploadPath = 'lego_sets_images'
+        
+        // 이미지 다운로드 및 WebP 변환
+        const result = await uploadImageFromUrl(
+          set.set_img_url,
+          webpFileName,
+          uploadPath
+        )
+        
+        if (result && result.url) {
+          // 세트 이미지 메타데이터 저장
+          await saveSetImageMetadata({
+            set_num: set.set_num,
+            original_url: set.set_img_url,
+            supabase_url: result.url,
+            file_path: result.path,
+            file_name: webpFileName,
+            set_id: set.id
+          })
+          
+          return {
+            originalUrl: set.set_img_url,
+            webpUrl: result.url,
+            filename: webpFileName,
+            path: result.path
+          }
+        }
+        
+        return null
+      } catch (err) {
+        return null
+      }
+    }
+
+    // 세트 이미지 메타데이터 저장
+    const saveSetImageMetadata = async (imageData) => {
+      try {
+        const { error } = await supabase
+          .from('set_images')
+          .upsert([imageData], { 
+            onConflict: 'set_num',
+            returning: 'minimal' 
+          })
+
+        if (error) {
+          // 조용히 실패 처리
+        }
+      } catch (err) {
+        // 조용히 실패 처리
       }
     }
 
@@ -1703,6 +1781,7 @@ export default {
   background: #17a2b8;
   color: white;
 }
+
 
 .btn:hover:not(:disabled) {
   transform: translateY(-2px);

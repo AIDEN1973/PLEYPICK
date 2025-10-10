@@ -127,7 +127,7 @@ export function useOptimizedPartMatching() {
               .download(`${partId}/${file.name}`)
             
             if (!downloadError && imageData) {
-              const blob = new Blob([imageData], { type: 'image/jpeg' })
+              const blob = new Blob([imageData], { type: 'image/webp' })
               const url = URL.createObjectURL(blob)
               images.push({
                 filename: file.name,

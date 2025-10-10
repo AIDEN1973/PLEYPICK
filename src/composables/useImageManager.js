@@ -136,7 +136,7 @@ export function useImageManager() {
       console.log(`Checking for existing image: part_num=${partNum}, color_id=${colorId}`)
       
       // Storage 버킷에서 직접 확인 (테이블 대신 실제 파일 존재 여부 확인)
-      const fileName = `${partNum}_${colorId}.jpg`
+      const fileName = `${partNum}_${colorId}.webp`
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
       const bucketName = 'lego_parts_images'
       const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
@@ -290,9 +290,40 @@ export function useImageManager() {
         // 이미지 다운로드 시도
         const blob = await downloadImage(imageUrl)
         
-        // 파일명을 partNum_colorId.jpg 형식으로 통일
+        // WebP로 변환
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        const img = new Image()
+        
+        await new Promise((resolve, reject) => {
+          img.onload = resolve
+          img.onerror = reject
+          img.src = URL.createObjectURL(blob)
+        })
+        
+        // 이미지 크기 최적화 (최대 800px)
+        const maxSize = 800
+        let { width, height } = img
+        if (width > maxSize || height > maxSize) {
+          const ratio = Math.min(maxSize / width, maxSize / height)
+          width = Math.round(width * ratio)
+          height = Math.round(height * ratio)
+        }
+        
+        canvas.width = width
+        canvas.height = height
+        ctx.drawImage(img, 0, 0, width, height)
+        
+        // WebP로 변환 (품질 0.6 - 더 작은 용량)
+        const webpBlob = await new Promise(resolve => {
+          canvas.toBlob(resolve, 'image/webp', 0.6)
+        })
+        
+        URL.revokeObjectURL(img.src)
+        
+        // 파일명을 partNum_colorId.webp 형식으로 통일
         const fileName = `${partNum}_${colorId}.webp`
-        const file = new File([blob], fileName, { type: 'image/webp' })
+        const file = new File([webpBlob], fileName, { type: 'image/webp' })
         
         // 서버에 업로드 (원본 파일명 그대로 사용)
         const result = await uploadImage(file, uploadPath)
@@ -313,7 +344,7 @@ export function useImageManager() {
         
         try {
           // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
-          // 파일명도 일관되게 partNum_colorId.jpg 사용
+          // 파일명도 일관되게 partNum_colorId.webp 사용
           const combinedFilename = `${partNum}_${colorId}.webp`
           const result = await uploadImageFromUrl(imageUrl, combinedFilename, uploadPath)
           
@@ -385,16 +416,59 @@ export function useImageManager() {
         }
         
         const blob = await response.blob()
-        const file = new File([blob], filename, { type: blob.type })
+        
+        // WebP로 강제 변환
+        let webpBlob
+        if (filename.endsWith('.webp')) {
+          // Canvas를 사용하여 WebP로 변환
+          const canvas = document.createElement('canvas')
+          const ctx = canvas.getContext('2d')
+          const img = new Image()
+          
+          await new Promise((resolve, reject) => {
+            img.onload = resolve
+            img.onerror = reject
+            img.src = URL.createObjectURL(blob)
+          })
+          
+          // 이미지 크기 최적화 (최대 800px)
+          const maxSize = 800
+          let { width, height } = img
+          if (width > maxSize || height > maxSize) {
+            const ratio = Math.min(maxSize / width, maxSize / height)
+            width = Math.round(width * ratio)
+            height = Math.round(height * ratio)
+          }
+          
+          canvas.width = width
+          canvas.height = height
+          ctx.drawImage(img, 0, 0, width, height)
+          
+          // WebP로 변환 (품질 0.6 - 더 작은 용량)
+          webpBlob = await new Promise(resolve => {
+            canvas.toBlob(resolve, 'image/webp', 0.6)
+          })
+          
+          URL.revokeObjectURL(img.src)
+        } else {
+          webpBlob = blob
+        }
+        
+        const file = new File([webpBlob], filename, { type: 'image/webp' })
         
         // 원본 파일명 그대로 사용
         const fileName = filename
-        const filePath = uploadPath ? `${uploadPath}/${fileName}` : `images/${fileName}`
+        
+        // 모든 이미지를 lego_parts_images 버킷에 저장
+        const bucketName = 'lego_parts_images'
+        
+        // 세트 이미지는 lego_sets_images 폴더에, 부품 이미지는 images 폴더에 저장
+        const filePath = uploadPath === 'lego_sets_images' ? `lego_sets_images/${fileName}` : `images/${fileName}`
         
         // 중복 파일 처리: 덮어쓰기 옵션 사용
-        console.log(`📤 Supabase Storage 업로드 시도: ${filePath}`)
+        console.log(`📤 Supabase Storage 업로드 시도: ${filePath} (bucket: ${bucketName})`)
         const { data, error: uploadError } = await supabase.storage
-          .from('lego_parts_images')
+          .from(bucketName)
           .upload(filePath, file, {
             upsert: true // 파일이 이미 존재하면 덮어쓰기
           })
@@ -408,13 +482,13 @@ export function useImageManager() {
 
         // 공개 URL 생성
         const { data: urlData } = supabase.storage
-          .from('lego_parts_images')
+          .from(bucketName)
           .getPublicUrl(filePath)
 
         return {
           url: urlData.publicUrl,
           path: filePath,
-          bucket: 'lego_parts_images'
+          bucket: bucketName
         }
       } else {
         // 외부 서버 사용 (기존 방식)
