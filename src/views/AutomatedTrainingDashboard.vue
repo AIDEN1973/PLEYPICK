@@ -142,25 +142,99 @@
 
       <!-- 실시간 학습 진행 상황 -->
       <div v-if="trainingJobs.length > 0" class="training-progress">
+        <div class="progress-header">
         <h3>📈 실시간 학습 진행 상황</h3>
+          <button 
+            @click="refreshTrainingJobs" 
+            :disabled="isLoading"
+            class="btn-refresh"
+            title="수동 새로고침"
+          >
+            🔄 새로고침
+          </button>
+        </div>
         <div v-for="job in trainingJobs" :key="job.id" class="job-item">
           <div class="job-header">
             <h4>{{ job.job_name }}</h4>
             <span class="job-status" :class="job.status">{{ job.status }}</span>
           </div>
           
-          <div v-if="job.status === 'running'" class="progress-info">
+          <!-- 학습 진행 중 상태 -->
+          <div v-if="job.status === 'running'" class="progress-info" :class="{ 'stuck-warning': job.status_info?.is_stuck }">
             <p>🔄 학습 진행 중... (실시간 업데이트)</p>
+            <div v-if="job.status_info?.duration" class="duration-info">
+              <small>실행 시간: {{ job.status_info.duration }}</small>
+            </div>
+            <div v-if="job.status_info?.is_stuck" class="stuck-warning">
+              <p>⚠️ 학습이 2시간 이상 실행 중입니다. 문제가 있을 수 있습니다.</p>
+            </div>
             <div v-if="job.progress && job.progress.final_epoch" class="progress-bar">
               <div class="progress-fill" :style="{ width: '100%' }"></div>
             </div>
+            <div v-if="job.progress && job.progress.current_epoch" class="epoch-info">
+              <small>현재 에폭: {{ job.progress.current_epoch }} / {{ job.progress.final_epoch || '?' }}</small>
+            </div>
+            <div v-if="job.latest_metrics" class="latest-metrics">
+              <small>최신 메트릭 (에폭 {{ job.latest_metrics.epoch }}): mAP50={{ (job.latest_metrics.metrics?.mAP50_B || 0).toFixed(3) }}</small>
+            </div>
+            <div v-else class="no-metrics">
+              <small>메트릭 데이터 로딩 중...</small>
+            </div>
           </div>
           
+          <!-- 학습 완료 상태 -->
           <div v-if="job.status === 'completed'" class="completion-info">
             <p>✅ 학습 완료!</p>
             <div v-if="job.progress && job.progress.final_metrics" class="final-metrics">
-              <span>mAP50: {{ (job.progress.final_metrics.mAP50 || 0).toFixed(3) }}</span>
-              <span>Precision: {{ (job.progress.final_metrics.precision || 0).toFixed(3) }}</span>
+              <div class="metric-item">
+                <span class="metric-label">mAP50(Box):</span>
+                <span class="metric-value">{{ (job.progress.final_metrics.mAP50_B || 0).toFixed(3) }}</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">mAP50-95(Box):</span>
+                <span class="metric-value">{{ (job.progress.final_metrics.mAP50_95_B || 0).toFixed(3) }}</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">mAP50(Mask):</span>
+                <span class="metric-value">{{ (job.progress.final_metrics.mAP50_M || 0).toFixed(3) }}</span>
+              </div>
+              <div class="metric-item">
+                <span class="metric-label">mAP50-95(Mask):</span>
+                <span class="metric-value">{{ (job.progress.final_metrics.mAP50_95_M || 0).toFixed(3) }}</span>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 학습 실패 상태 -->
+          <div v-if="job.status === 'failed'" class="failure-info">
+            <p>❌ 학습 실패</p>
+            <div v-if="job.error_message" class="error-message">
+              <small>오류: {{ job.error_message }}</small>
+            </div>
+            <div v-if="job.status_info?.should_retry" class="retry-actions">
+              <button 
+                @click="retryTrainingJob(job.id)" 
+                :disabled="isLoading"
+                class="btn-retry"
+              >
+                🔄 재시도
+              </button>
+            </div>
+          </div>
+          
+          <!-- 학습 중단 상태 -->
+          <div v-if="job.status === 'cancelled'" class="cancelled-info">
+            <p>⏹️ 학습 중단됨</p>
+            <div v-if="job.cancelled_at" class="cancelled-time">
+              <small>중단 시간: {{ formatDate(job.cancelled_at) }}</small>
+            </div>
+          </div>
+          
+          <!-- 대기 중 상태 -->
+          <div v-if="job.status === 'pending'" class="pending-info">
+            <p>⏳ 학습 대기 중...</p>
+            <div v-if="job.created_at" class="pending-time">
+              <small>생성 시간: {{ formatDate(job.created_at) }}</small>
             </div>
           </div>
           
@@ -247,7 +321,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAutomatedModelRegistry } from '@/composables/useAutomatedModelRegistry.js'
 import { createClient } from '@supabase/supabase-js'
 
@@ -282,16 +356,177 @@ const setInfo = ref(null)
 // 학습 작업 목록 조회
 const fetchTrainingJobs = async () => {
   try {
-    const { data, error } = await supabase
+    console.log('📊 학습 작업 목록 조회 시작...')
+    
+    // 간단한 쿼리로 training_jobs만 조회
+    const { data: jobsData, error: jobsError } = await supabase
       .from('training_jobs')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(10)
     
-    if (error) throw error
-    trainingJobs.value = data || []
+    if (jobsError) {
+      console.error('❌ training_jobs 조회 실패:', jobsError)
+      throw jobsError
+    }
+    
+    console.log('📊 조회된 작업 수:', jobsData?.length || 0)
+    
+    // 기본 데이터 처리
+    trainingJobs.value = (jobsData || []).map(job => ({
+      ...job,
+      latest_metrics: null, // 메트릭은 별도 조회하지 않음
+      status_info: getStatusInfo(job)
+    }))
+    
+    console.log('✅ 학습 작업 목록 조회 완료:', trainingJobs.value.length, '개')
+    console.log('📊 작업 상태별 분포:', getStatusDistribution(trainingJobs.value))
+    
+    // 메트릭이 필요한 경우 별도로 조회 (오류 방지를 위해 선택적)
+    if (trainingJobs.value.length > 0) {
+      // 메트릭 조회는 백그라운드에서 실행 (오류가 있어도 메인 기능에 영향 없음)
+      fetchLatestMetrics().catch(error => {
+        console.warn('⚠️ 메트릭 조회 실패 (무시됨):', error)
+      })
+    }
+    
   } catch (err) {
-    console.error('학습 작업 조회 실패:', err)
+    console.error('❌ 학습 작업 조회 실패:', err)
+    trainingJobs.value = []
+  }
+}
+
+// 최신 메트릭 조회 (별도 함수)
+const fetchLatestMetrics = async () => {
+  try {
+    console.log('📊 최신 메트릭 조회 시작...')
+    
+    for (const job of trainingJobs.value) {
+      if (job.status === 'running' || job.status === 'completed') {
+        try {
+          // 먼저 training_metrics 테이블이 존재하는지 확인
+          const { data: metricsData, error: metricsError } = await supabase
+            .from('training_metrics')
+            .select('*')
+            .eq('training_job_id', job.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+          
+          if (metricsError) {
+            console.warn(`⚠️ 작업 ${job.id} 메트릭 조회 실패:`, metricsError.message)
+            // 테이블이 없거나 권한 문제인 경우 기본값 설정
+            job.latest_metrics = null
+            continue
+          }
+          
+          if (metricsData && metricsData.length > 0) {
+            const metric = metricsData[0]
+            job.latest_metrics = {
+              epoch: metric.epoch || 0,
+              metrics: {
+                mAP50_B: metric.mAP50 || 0,
+                mAP50_95_B: metric.mAP50_95 || 0,
+                precision_B: metric.precision || 0,
+                recall_B: metric.recall || 0
+              },
+              created_at: metric.created_at || metric.timestamp
+            }
+            console.log(`✅ 작업 ${job.id} 메트릭 로드: 에폭 ${metric.epoch}, mAP50=${metric.mAP50}`)
+          } else {
+            job.latest_metrics = null
+            console.log(`ℹ️ 작업 ${job.id} 메트릭 데이터 없음`)
+          }
+        } catch (error) {
+          console.warn(`⚠️ 작업 ${job.id} 메트릭 조회 실패:`, error)
+          job.latest_metrics = null
+        }
+      }
+    }
+    
+    console.log('✅ 최신 메트릭 조회 완료')
+  } catch (error) {
+    console.error('❌ 최신 메트릭 조회 실패:', error)
+  }
+}
+
+// 상태별 정보 생성
+const getStatusInfo = (job) => {
+  const now = new Date()
+  const created = new Date(job.created_at)
+  const started = job.started_at ? new Date(job.started_at) : null
+  const completed = job.completed_at ? new Date(job.completed_at) : null
+  
+  const info = {
+    duration: null,
+    is_stuck: false,
+    should_retry: false
+  }
+  
+  if (job.status === 'running' && started) {
+    const runningTime = (now - started) / 1000 / 60 // 분 단위
+    info.duration = `${Math.round(runningTime)}분`
+    
+    // 2시간 이상 실행 중이면 stuck으로 간주
+    if (runningTime > 120) {
+      info.is_stuck = true
+    }
+  }
+  
+  if (job.status === 'failed') {
+    // 실패한 작업은 재시도 가능
+    info.should_retry = true
+  }
+  
+  return info
+}
+
+// 상태별 분포 계산
+const getStatusDistribution = (jobs) => {
+  const distribution = {}
+  jobs.forEach(job => {
+    distribution[job.status] = (distribution[job.status] || 0) + 1
+  })
+  return distribution
+}
+
+// 수동 새로고침 함수
+const refreshTrainingJobs = async () => {
+  try {
+    console.log('🔄 학습 작업 수동 새로고침 시작...')
+    isLoading.value = true
+    await fetchTrainingJobs()
+    console.log('✅ 학습 작업 수동 새로고침 완료')
+  } catch (error) {
+    console.error('❌ 학습 작업 수동 새로고침 실패:', error)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// 학습 작업 재시도
+const retryTrainingJob = async (jobId) => {
+  try {
+    console.log(`🔄 학습 작업 ${jobId} 재시도 시작...`)
+    isLoading.value = true
+    
+    // 실패한 작업을 pending으로 변경
+    const { error } = await supabase
+      .from('training_jobs')
+      .update({
+        status: 'pending',
+        error_message: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', jobId)
+    
+    if (error) throw error
+    
+    console.log('✅ 학습 작업 재시도 설정 완료')
+    await fetchTrainingJobs() // 목록 새로고침
+  } catch (error) {
+    console.error('❌ 학습 작업 재시도 실패:', error)
+  } finally {
+    isLoading.value = false
   }
 }
 
@@ -560,17 +795,23 @@ const formatDate = (dateString) => {
 
 // 실시간 구독 설정
 const setupRealtimeSubscription = () => {
+  console.log('🔄 실시간 구독 설정 시작...')
+  
   // training_jobs 테이블 실시간 구독
   const trainingJobsChannel = supabase
     .channel('training_jobs_changes')
     .on('postgres_changes', 
       { event: '*', schema: 'public', table: 'training_jobs' },
       async (payload) => {
-        console.log('🔄 학습 작업 상태 변경:', payload)
+        console.log('🔄 학습 작업 상태 변경 감지:', payload)
+        console.log('📊 변경된 데이터:', payload.new)
         await fetchTrainingJobs() // 학습 작업만 새로고침
+        console.log('✅ 학습 작업 목록 새로고침 완료')
       }
     )
-    .subscribe()
+    .subscribe((status) => {
+      console.log('📡 training_jobs 채널 구독 상태:', status)
+    })
 
   // training_metrics 테이블 실시간 구독
   const trainingMetricsChannel = supabase
@@ -578,11 +819,13 @@ const setupRealtimeSubscription = () => {
     .on('postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'training_metrics' },
       async (payload) => {
-        console.log('📊 새로운 메트릭 데이터:', payload)
+        console.log('📊 새로운 메트릭 데이터 감지:', payload)
         await fetchTrainingJobs() // 학습 작업 새로고침
       }
     )
-    .subscribe()
+    .subscribe((status) => {
+      console.log('📡 training_metrics 채널 구독 상태:', status)
+    })
 
   // model_registry 테이블 실시간 구독
   const modelRegistryChannel = supabase
@@ -590,19 +833,52 @@ const setupRealtimeSubscription = () => {
     .on('postgres_changes',
       { event: '*', schema: 'public', table: 'model_registry' },
       async (payload) => {
-        console.log('🏆 모델 레지스트리 변경:', payload)
+        console.log('🏆 모델 레지스트리 변경 감지:', payload)
         await refreshData() // 전체 데이터 새로고침
       }
     )
-    .subscribe()
+    .subscribe((status) => {
+      console.log('📡 model_registry 채널 구독 상태:', status)
+    })
 
   return { trainingJobsChannel, trainingMetricsChannel, modelRegistryChannel }
+}
+
+// 자동 새로고침 설정
+let autoRefreshInterval = null
+
+const startAutoRefresh = () => {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval)
+  }
+  
+  // 30초마다 자동 새로고침
+  autoRefreshInterval = setInterval(async () => {
+    console.log('⏰ 자동 새로고침 실행...')
+    await fetchTrainingJobs()
+  }, 30000)
+  
+  console.log('🔄 자동 새로고침 시작 (30초 간격)')
+}
+
+const stopAutoRefresh = () => {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval)
+    autoRefreshInterval = null
+    console.log('⏹️ 자동 새로고침 중지')
+  }
 }
 
 // 초기화
 onMounted(async () => {
   await refreshData()
   setupRealtimeSubscription()
+  startAutoRefresh() // 자동 새로고침 시작
+})
+
+// 컴포넌트 언마운트 시 정리
+onUnmounted(() => {
+  stopAutoRefresh()
 })
 </script>
 
@@ -1105,5 +1381,217 @@ onMounted(async () => {
   .set-training-actions {
     flex-direction: column;
   }
+}
+
+/* 새로고침 버튼 스타일 */
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.btn-refresh {
+  background: #3498db;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s ease;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.btn-refresh:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+/* 학습 상태별 스타일 */
+.progress-info {
+  background: #e8f4fd;
+  border: 1px solid #3498db;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.completion-info {
+  background: #e8f5e8;
+  border: 1px solid #27ae60;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.failure-info {
+  background: #fdeaea;
+  border: 1px solid #e74c3c;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.cancelled-info {
+  background: #f4f4f4;
+  border: 1px solid #95a5a6;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.pending-info {
+  background: #fff3cd;
+  border: 1px solid #f39c12;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 10px 0;
+}
+
+.final-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.metric-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid #ecf0f1;
+}
+
+.metric-label {
+  font-weight: 500;
+  color: #2c3e50;
+  font-size: 14px;
+}
+
+.metric-value {
+  font-weight: 600;
+  color: #27ae60;
+  font-size: 14px;
+}
+
+.epoch-info {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(52, 152, 219, 0.1);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.error-message {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(231, 76, 60, 0.1);
+  border-radius: 4px;
+  color: #e74c3c;
+}
+
+.cancelled-time, .pending-time {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(149, 165, 166, 0.1);
+  border-radius: 4px;
+  text-align: center;
+}
+
+.job-status {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.job-status.running {
+  background: #3498db;
+  color: white;
+}
+
+.job-status.completed {
+  background: #27ae60;
+  color: white;
+}
+
+.job-status.failed {
+  background: #e74c3c;
+  color: white;
+}
+
+.job-status.cancelled {
+  background: #95a5a6;
+  color: white;
+}
+
+.job-status.pending {
+  background: #f39c12;
+  color: white;
+}
+
+/* 추가 상태 스타일 */
+.stuck-warning {
+  border-color: #e67e22 !important;
+  background: #fef9e7 !important;
+}
+
+.duration-info {
+  margin-top: 8px;
+  padding: 6px;
+  background: rgba(52, 152, 219, 0.1);
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.latest-metrics {
+  margin-top: 8px;
+  padding: 6px;
+  background: rgba(39, 174, 96, 0.1);
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 500;
+}
+
+.no-metrics {
+  margin-top: 8px;
+  padding: 6px;
+  background: rgba(149, 165, 166, 0.1);
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 500;
+  color: #7f8c8d;
+}
+
+.retry-actions {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.btn-retry {
+  background: #e74c3c;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.3s ease;
+}
+
+.btn-retry:hover:not(:disabled) {
+  background: #c0392b;
+}
+
+.btn-retry:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
 }
 </style>

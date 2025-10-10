@@ -13,6 +13,7 @@ import StoreManager from './views/StoreManager.vue'
 import SyntheticDatasetManager from './views/SyntheticDatasetManager.vue'
 import HybridDetection from './views/HybridDetection.vue'
 import AutomatedTrainingDashboard from './views/AutomatedTrainingDashboard.vue'
+import StoreManagementDashboard from './views/StoreManagementDashboard.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -26,7 +27,8 @@ const routes = [
   { path: '/store-manager', name: 'StoreManager', component: StoreManager },
   { path: '/synthetic-dataset', name: 'SyntheticDatasetManager', component: SyntheticDatasetManager },
   { path: '/hybrid-detection', name: 'HybridDetection', component: HybridDetection },
-  { path: '/automated-training', name: 'AutomatedTrainingDashboard', component: AutomatedTrainingDashboard }
+  { path: '/automated-training', name: 'AutomatedTrainingDashboard', component: AutomatedTrainingDashboard },
+  { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard }
 ]
 
 const router = createRouter({

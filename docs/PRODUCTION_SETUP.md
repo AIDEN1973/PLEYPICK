@@ -367,10 +367,43 @@ npm run dev
 npm run server
 ```
 
-## 🎯 **요약**
+## 🏪 **매장별 배포 시스템**
 
-다른 PC에서 합성 데이터셋을 생성하려면:
+### **📋 중앙 서버 설정**
+```bash
+# 1. 중앙 모델 관리 서버 시작
+cd server
+node central-model-manager.js
 
+# 2. 서버 상태 확인
+curl http://localhost:3002/api/health
+```
+
+### **🏪 매장 등록**
+```bash
+# 새 매장 등록
+scripts/register-store.bat store_004 "신촌점" "서울시 서대문구" "010-4567-8901"
+
+# 매장 클라이언트 시작
+start-store-client.bat
+```
+
+### **📦 모델 배포**
+```bash
+# 전체 매장에 모델 배포 (단계적)
+scripts/deploy-to-stores.bat v1.3.0 gradual all
+
+# 특정 매장에 모델 배포
+scripts/deploy-to-stores.bat v1.3.0 immediate store_001,store_002
+```
+
+### **📊 매장 관리 대시보드**
+- URL: `http://localhost:3001/store-management`
+- 기능: 모델 업데이트, 성능 모니터링, 긴급 조치
+
+## 🎯 **최종 체크리스트**
+
+### **✅ 개발 환경 확인사항**
 1. ✅ **Blender 4.5+ 설치**
 2. ✅ **LDraw Parts Library 설치**  
 3. ✅ **Node.js 18+ 설치**
@@ -382,6 +415,15 @@ npm run server
 9. ✅ **포트 충돌 방지**
 10. ✅ **Windows Defender 예외 추가**
 11. ✅ **시스템 요구사항 확인**
+
+### **✅ 프로덕션 배포 확인사항**
+12. ✅ **중앙 모델 관리 서버 실행**
+13. ✅ **매장별 클라이언트 등록**
+14. ✅ **모델 배포 파이프라인 테스트**
+15. ✅ **매장 관리 대시보드 접속**
+16. ✅ **자동 업데이트 시스템 테스트**
+17. ✅ **성능 모니터링 확인**
+18. ✅ **긴급 조치 기능 테스트**
 
 ## 🚨 **중요 주의사항**
 
