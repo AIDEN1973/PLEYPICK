@@ -17,7 +17,7 @@ WHERE model_name LIKE 'brickbox_model_%'
    OR created_by = 'example_user'
    OR created_by = 'simulation_user';
 
--- 2. 하드코딩된 메트릭이 있는 모델들 삭제
+-- 2. 하드코딩된 메트릭이 있는 모델들 삭제함
 DELETE FROM model_registry 
 WHERE metrics::text LIKE '%"mAP50": 0.95%'
    OR metrics::text LIKE '%"precision": 0.92%'
