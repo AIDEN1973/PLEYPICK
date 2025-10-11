@@ -1,8 +1,13 @@
 {
-  "buildCommand": "npm run build:vercel",
+  "buildCommand": "chmod +x node_modules/.bin/vite && npm run build:vercel",
   "outputDirectory": "dist",
-  "installCommand": "npm install",
+  "installCommand": "npm install --force",
   "framework": "vite",
+  "functions": {
+    "app/api/**/*.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",
