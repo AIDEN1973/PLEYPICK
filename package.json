@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "chmod +x node_modules/.bin/vite && vite build",
-    "build:vercel": "npx vite build",
+    "build": "npx vite build",
     "preview": "vite preview",
     "server": "node server/synthetic-api.js",
     "dev:full": "concurrently \"npm run dev\" \"npm run server\""
