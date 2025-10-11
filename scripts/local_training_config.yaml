@@ -1,0 +1,45 @@
+# 로컬 학습 설정
+training:
+  default_epochs: 100
+  default_batch_size: 16
+  default_img_size: 640
+  default_device: auto
+  
+  # GPU 설정
+  gpu:
+    enabled: true
+    device_count: 1
+    memory_fraction: 0.8
+    
+  # 데이터셋 설정
+  dataset:
+    path: "data/synthetic"
+    train_split: 0.8
+    val_split: 0.1
+    test_split: 0.1
+    
+  # 모델 설정
+  model:
+    architecture: "yolo11n-seg"
+    pretrained: true
+    freeze_backbone: false
+    
+  # 최적화 설정
+  optimization:
+    learning_rate: 0.01
+    weight_decay: 0.0005
+    momentum: 0.937
+    scheduler: "cosine"
+    
+  # 증강 설정
+  augmentation:
+    mosaic: 1.0
+    mixup: 0.0
+    copy_paste: 0.0
+    degrees: 0.0
+    translate: 0.1
+    scale: 0.5
+    shear: 0.0
+    perspective: 0.0
+    flipud: 0.0
+    fliplr: 0.5

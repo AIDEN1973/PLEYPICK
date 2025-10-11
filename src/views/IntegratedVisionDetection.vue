@@ -38,8 +38,7 @@
             이미지 전처리 활성화
           </label>
           <label class="checkbox-label">
-            <input type="checkbox" v-model="simulationMode" />
-            시뮬레이션 모드 (카메라 없이 테스트)
+            <!-- 시뮬레이션 모드 제거됨 -->
           </label>
         </div>
         <button 
@@ -96,9 +95,9 @@
         </div>
         <div class="camera-controls">
           <button @click="captureFrame" :disabled="processing" class="capture-btn">
-            {{ simulationMode ? '시뮬레이션 인식' : '부품 인식' }}
+            부품 인식
           </button>
-          <button @click="toggleCamera" class="camera-toggle-btn" v-if="!simulationMode">
+          <button @click="toggleCamera" class="camera-toggle-btn">
             {{ cameraActive ? '카메라 중지' : '카메라 시작' }}
           </button>
           <input 
@@ -278,7 +277,7 @@ const { getAvailableSets } = useMasterPartsMatching()
 const setNumber = ref('')
 const enableLLM = ref(false)
 const enablePreprocessing = ref(true)
-const simulationMode = ref(false)
+// 시뮬레이션 모드 제거됨 - 실제 카메라만 사용
 const cameraVideo = ref(null)
 const cameraActive = ref(false)
 const lastImageQuality = ref(null)
@@ -401,16 +400,11 @@ const startSession = async () => {
     // 환경 변수는 빌드 시점에 설정되므로 여기서는 로그만 출력
     console.log('LLM reranking enabled:', enableLLM.value)
     console.log('Image preprocessing enabled:', enablePreprocessing.value)
-    console.log('Simulation mode enabled:', simulationMode.value)
+    // 시뮬레이션 모드 제거됨 - 실제 카메라만 사용
 
     await startRecognitionSession(setNumber.value)
     
-    if (simulationMode.value) {
-      console.log('Starting in simulation mode - camera not required')
-      cameraActive.value = true // 시뮬레이션 모드에서는 카메라 활성화 상태로 설정
-    } else {
-      await startCamera()
-    }
+    await startCamera()
   } catch (err) {
     console.error('Failed to start session:', err)
   }
@@ -497,24 +491,18 @@ const captureFrame = async () => {
   try {
     let imageData
     
-    if (simulationMode.value) {
-      // 시뮬레이션 모드: 테스트 이미지 생성
-      console.log('Using simulation image for testing')
-      imageData = await generateTestImage()
-    } else {
-      // 실제 카메라 모드
-      if (!cameraVideo.value) return
+    // 실제 카메라 모드만 사용
+    if (!cameraVideo.value) return
       
-      // 캔버스에 프레임 그리기
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-      canvas.width = cameraVideo.value.videoWidth
-      canvas.height = cameraVideo.value.videoHeight
-      ctx.drawImage(cameraVideo.value, 0, 0)
-      
-      // 이미지 데이터 추출
-      imageData = canvas.toDataURL('image/jpeg')
-    }
+    // 캔버스에 프레임 그리기
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    canvas.width = cameraVideo.value.videoWidth
+    canvas.height = cameraVideo.value.videoHeight
+    ctx.drawImage(cameraVideo.value, 0, 0)
+    
+    // 이미지 데이터 추출
+    imageData = canvas.toDataURL('image/jpeg')
     
     // 통합 인식 처리 (옵션 전달)
     const recognitionResult = await processRealtimeRecognition(imageData, {
@@ -541,34 +529,7 @@ const captureFrame = async () => {
   }
 }
 
-// 테스트 이미지 생성 (시뮬레이션용)
-const generateTestImage = async () => {
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  canvas.width = 640
-  canvas.height = 480
-  
-  // 간단한 테스트 이미지 생성
-  ctx.fillStyle = '#f0f0f0'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  
-  // 테스트 부품 모양 그리기
-  ctx.fillStyle = '#ff0000'
-  ctx.fillRect(100, 100, 50, 50)
-  
-  ctx.fillStyle = '#00ff00'
-  ctx.fillRect(200, 150, 40, 40)
-  
-  ctx.fillStyle = '#0000ff'
-  ctx.fillRect(300, 120, 60, 30)
-  
-  // 텍스트 추가
-  ctx.fillStyle = '#333'
-  ctx.font = '16px Arial'
-  ctx.fillText('Test Image - Simulation Mode', 50, 50)
-  
-  return canvas.toDataURL('image/jpeg')
-}
+// 시뮬레이션 함수 제거됨 - 실제 카메라만 사용
 
 // 이미지 업로드 트리거
 const triggerImageUpload = () => {
@@ -633,11 +594,11 @@ const assessImageQuality = async (imageData) => {
       img.onload = () => {
         const quality = {
           resolution: Math.min(Math.sqrt(img.width * img.height) / Math.sqrt(1920 * 1080), 1),
-          brightness: 0.7, // 시뮬레이션
-          contrast: 0.8,   // 시뮬레이션
-          sharpness: 0.75, // 시뮬레이션
-          noise: 0.2,      // 시뮬레이션
-          overall: 0.75    // 시뮬레이션
+          brightness: 0.0, // 실제 측정 필요
+          contrast: 0.0,   // 실제 측정 필요
+          sharpness: 0.0, // 실제 측정 필요
+          noise: 0.0,      // 실제 측정 필요
+          overall: 0.0    // 실제 측정 필요
         }
         resolve(quality)
       }
@@ -684,7 +645,7 @@ const selectCandidate = async (part, candidate) => {
   }
 }
 
-// 사용자 피드백 처리 (시뮬레이션)
+// 사용자 피드백 처리
 const processUserFeedback = async (partId, feedback) => {
   console.log('User feedback processed:', { partId, feedback })
 }

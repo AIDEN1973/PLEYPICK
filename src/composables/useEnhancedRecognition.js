@@ -80,6 +80,13 @@ export function useEnhancedRecognition() {
         semantic: 0.2,   // 의미적 분석
         metadata: 0.1    // 메타데이터 보정
       }
+      
+      // 기술문서 권장: Adaptive Fusion 가중치 (w_img=0.65, w_meta=0.25, w_txt=0.15)
+      const adaptiveWeights = {
+        img: 0.65,      // 이미지 유사도
+        meta: 0.25,     // 메타데이터 유사도
+        txt: 0.15       // 텍스트 유사도
+      }
 
       // 각 방법별 점수 계산
       const flipScore = flipComparison.confidence

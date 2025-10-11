@@ -183,7 +183,7 @@ def main():
         print("사용법: python check_duplicates.py <local_folder> [remote_folder] [--save-report]")
         print("옵션:")
         print("  --save-report: 결과를 JSON 파일로 저장")
-        print("\n예시:")
+        print("\n사용법:")
         print("  python check_duplicates.py output/renders/3001")
         print("  python check_duplicates.py output/renders/3001 synthetic --save-report")
         sys.exit(1)

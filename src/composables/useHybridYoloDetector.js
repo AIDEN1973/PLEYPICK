@@ -100,8 +100,8 @@ export function useHybridYoloDetector() {
         throw new Error('1차 모델 정보가 없습니다.')
       }
       
-      // 모델 파일 경로
-      const modelPath = stage1ModelInfo.model_path || '/models/yolo11n-seg.onnx'
+      // 모델 파일 경로 (Supabase Storage)
+      const modelPath = stage1ModelInfo.model_path || import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx'
       
       // ONNX 세션 생성
       stage1Session = await ort.InferenceSession.create(modelPath, {
@@ -131,8 +131,8 @@ export function useHybridYoloDetector() {
         throw new Error('2차 모델 정보가 없습니다.')
       }
       
-      // 모델 파일 경로
-      const modelPath = stage2ModelInfo.model_path || '/models/yolo11s-seg.onnx'
+      // 모델 파일 경로 (Supabase Storage)
+      const modelPath = stage2ModelInfo.model_path || import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx'
       
       // ONNX 세션 생성
       stage2Session = await ort.InferenceSession.create(modelPath, {

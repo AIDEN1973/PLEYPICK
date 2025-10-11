@@ -290,12 +290,12 @@ export function useImageProcessing() {
   }
 
   const reduceNoise = (ctx, width, height) => {
-    // 간단한 가우시안 블러 시뮬레이션
+    // 실제 가우시안 블러 적용 필요
     ctx.filter = 'blur(1px)'
   }
 
   const sharpenImage = (ctx, width, height) => {
-    // 언샤프 마스크 시뮬레이션
+    // 실제 언샤프 마스크 적용 필요
     ctx.filter = 'contrast(1.2) brightness(1.1)'
   }
 

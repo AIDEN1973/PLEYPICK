@@ -39,7 +39,10 @@ const CLIP_CONFIG = {
 }
 
 // 개별 함수들을 export하기 위해 함수들을 밖으로 이동
-export async function analyzePartWithLLM(part) {
+// 재시도 횟수 추적을 위한 전역 변수
+let analysisRetryCount = new Map()
+
+export async function analyzePartWithLLM(part, retryCount = 0) {
   try {
     // API 키 검증
     if (!LLM_CONFIG.apiKey || LLM_CONFIG.apiKey === 'undefined') {
@@ -49,6 +52,20 @@ export async function analyzePartWithLLM(part) {
         allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
       })
       return null // LLM 분석 스킵
+    }
+    
+    // 최대 재시도 횟수 (이미지 분석 강제)
+    const MAX_RETRIES = 3
+    const partKey = `${part.part_num || part.part?.part_num}_${part.color?.id || part.color_id}`
+    
+    if (retryCount >= MAX_RETRIES) {
+      console.error(`❌ 최대 재시도 횟수 초과 (${MAX_RETRIES}회): ${partKey}`)
+      console.log(`🔄 이미지 분석 실패, 텍스트 분석으로 대체합니다.`)
+      return createTextOnlyAnalysis(part, part.part?.name || part.name, part.part_num || part.part?.part_num)
+    }
+    
+    if (retryCount > 0) {
+      console.log(`🔄 이미지 분석 재시도 ${retryCount}/${MAX_RETRIES}: ${partKey}`)
     }
     
     if (import.meta.env.DEV) {
@@ -77,28 +94,52 @@ export async function analyzePartWithLLM(part) {
       return createTextOnlyAnalysis(part, partName, partNum)
     }
     
-    const prompt = `Analyze LEGO part ${partName} (${partNum}) and return JSON:
+    // 이미지 URL 검증 및 우선순위 설정
+    let finalImageUrl = partImgUrl
+    
+    // Supabase Storage 이미지가 있는지 확인 (우선순위 1)
+    if (part.supabase_image_url) {
+      finalImageUrl = part.supabase_image_url
+      console.log(`✅ Supabase Storage 이미지 사용: ${finalImageUrl}`)
+    } else if (partImgUrl.includes('cdn.rebrickable.com')) {
+      console.warn(`⚠️ Rebrickable CDN 이미지 사용: ${partImgUrl}`)
+      console.warn(`이미지 분석을 강제로 시도합니다.`)
+      // CDN 이미지도 분석 시도
+    } else {
+      console.log(`📷 다른 소스 이미지 사용: ${partImgUrl}`)
+    }
+    
+    const prompt = `Analyze this LEGO part image carefully. Part: ${partName} (${partNum}). 
+
+Focus on visual characteristics:
+- Shape and geometry
+- Stud pattern and connection points
+- Unique visual features
+- Size category (Duplo/System/Minifig/Technic)
+- Color and surface details
+
+Return JSON with detailed analysis:
 
 {
-  "shape": "basic shape",
+  "shape": "detailed shape description",
   "center_stud": true/false,
   "groove": true/false,
   "connection": "connection type",
   "function": "main function",
-  "feature_text": "brief description",
+  "feature_text": "comprehensive visual description",
   "recognition_hints": {
-    "top_view": "top view description",
-    "side_view": "side view description",
-    "unique_features": ["key features"]
+    "top_view": "detailed top view description",
+    "side_view": "detailed side view description", 
+    "unique_features": ["specific visual features"]
   },
   "similar_parts": ["similar part numbers"],
-  "distinguishing_features": ["distinguishing features"],
+  "distinguishing_features": ["distinguishing visual features"],
   "stud_count_top": 0,
   "tube_count_bottom": 0,
   "size_category": "duplo|system|minifig|technic",
-  "keypoints": ["important shape points"],
-  "confusions": ["confusing similar parts"],
-  "color_expectation": "observed color summary",
+  "keypoints": ["important visual shape points"],
+  "confusions": ["visually confusing similar parts"],
+  "color_expectation": "observed color and surface details",
   "confidence": 0.95
 }`
 
@@ -149,6 +190,19 @@ export async function analyzePartWithLLM(part) {
       const errorText = await response.text()
       console.error('API 오류 응답:', errorText)
       
+      // 이미지 다운로드 타임아웃 문제 해결
+      if (errorText.includes('Timeout while downloading') || errorText.includes('invalid_image_url')) {
+        console.warn(`⚠️ 이미지 다운로드 타임아웃: ${finalImageUrl}`)
+        console.warn(`🔄 이미지 URL을 다시 시도합니다...`)
+        
+        // 잠시 대기 후 재시도
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        
+        // 재시도 시도
+        console.log(`🔄 이미지 다운로드 재시도 중...`)
+        return await analyzePartWithLLM(part, retryCount + 1) // 재귀 호출로 재시도
+      }
+      
       // Rate limit 대응 (개선된 버전)
       if (response.status === 429) {
         const errorData = JSON.parse(errorText)
@@ -162,6 +216,10 @@ export async function analyzePartWithLLM(part) {
         const waitTime = Math.min(Math.max(retryAfter, 60), 300)
         console.warn(`⏳ Rate limit exceeded. Waiting ${waitTime} seconds...`)
         await new Promise(resolve => setTimeout(resolve, waitTime * 1000))
+        
+        // 재시도 시도
+        console.log(`🔄 Rate limit 대기 후 재시도 중...`)
+        return await analyzePartWithLLM(part, retryCount + 1) // 재귀 호출로 재시도
         
         // 재시도
         const retryResponse = await fetch(`${LLM_CONFIG.baseUrl}/chat/completions`, {
@@ -182,7 +240,8 @@ export async function analyzePartWithLLM(part) {
         const retryData = await retryResponse.json()
         if (!retryData.choices || !retryData.choices[0] || !retryData.choices[0].message) {
           console.error('재시도 응답 구조 오류:', retryData)
-          return null
+          console.log('🔄 재시도 실패, 텍스트 분석으로 대체합니다.')
+          return createTextOnlyAnalysis(part, partName, partNum)
         }
         
         let retryParsed
@@ -202,7 +261,8 @@ export async function analyzePartWithLLM(part) {
             retryParsed = JSON.parse(retryJsonText)
           } catch (err) {
             console.error('재시도 JSON 파싱 실패:', err)
-            return null
+            console.log('🔄 JSON 파싱 실패, 텍스트 분석으로 대체합니다.')
+            return createTextOnlyAnalysis(part, partName, partNum)
           }
         }
         
@@ -343,7 +403,8 @@ export async function analyzePartWithLLM(part) {
     
     } catch (error) {
       console.error('LLM 분석 실패:', error)
-      return null // LLM 분석 실패 시 null 반환
+      console.log('🔄 이미지 분석 실패, 텍스트 분석으로 대체합니다.')
+      return createTextOnlyAnalysis(part, partName, partNum)
     }
 }
 
@@ -1168,23 +1229,36 @@ export function useMasterPartsPreprocessing() {
 
   // 텍스트만으로 분석 (이미지 URL이 없을 때)
   const createTextOnlyAnalysis = (part, partName, partNum) => {
-    return {
+    console.log(`📝 텍스트 전용 분석 수행: ${partName} (${partNum})`)
+    console.log(`🔍 DEBUG: part object:`, part)
+    console.log(`🔍 DEBUG: partNum value:`, partNum, typeof partNum)
+    
+    // 부품명에서 기본 정보 추출
+    const isDuplo = partName.toLowerCase().includes('duplo')
+    const isAnimal = partName.toLowerCase().includes('animal') || partName.toLowerCase().includes('lion') || partName.toLowerCase().includes('penguin')
+    const isBrick = partName.toLowerCase().includes('brick')
+    const hasPrint = partName.toLowerCase().includes('print')
+    
+    const result = {
       part_num: partNum,
-      shape: `텍스트 분석: ${partName}`,
-      center_stud: false,
+      shape: isBrick ? 'rectangular_brick' : (isAnimal ? 'animal_figure' : 'unknown'),
+      center_stud: isBrick,
       groove: false,
-      connection: 'unknown',
-      function: 'unknown',
-      feature_text: `텍스트 분석: ${partName}`,
+      connection: isBrick ? 'stud_connection' : 'unknown',
+      function: isAnimal ? 'animal_figure' : (isBrick ? 'building_block' : 'unknown'),
+      feature_text: `텍스트 분석: ${partName}${isDuplo ? ' (Duplo)' : ''}${hasPrint ? ' (인쇄 포함)' : ''}`,
       recognition_hints: {
-        top_view: '이미지 없음',
-        side_view: '이미지 없음',
-        unique_features: []
+        top_view: isBrick ? '2x2 브릭 형태' : (isAnimal ? '동물 모양' : '미확인'),
+        side_view: isBrick ? '스터드 연결부' : (isAnimal ? '동물 특징' : '미확인'),
+        unique_features: hasPrint ? ['인쇄된 디테일'] : []
       },
       similar_parts: [],
-      distinguishing_features: [],
-      confidence: 0.3
+      distinguishing_features: isDuplo ? ['Duplo 크기'] : [],
+      confidence: 0.4 // 텍스트 분석이므로 낮은 신뢰도
     }
+    
+    console.log(`🔍 DEBUG: 텍스트 분석 결과:`, result)
+    return result
   }
 
   // CLIP 텍스트 임베딩 생성 (하이브리드 전략용)

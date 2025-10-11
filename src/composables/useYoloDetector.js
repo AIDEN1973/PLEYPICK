@@ -4,7 +4,7 @@ import * as ort from 'onnxruntime-web'
 export function useYoloDetector() {
   let session = null
   let inputSize = 640
-  let modelPath = '/models/yolo11n-seg.onnx'
+  let modelPath = import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx'
   let executionProviders = ['wasm']
 
   const isWebGPUAvailable = () => {
@@ -29,7 +29,14 @@ export function useYoloDetector() {
 
     // 모델 바이트를 직접 로드 (SPA 리다이렉트/MIME 문제 회피)
     const loadModelBytes = async () => {
-      const candidates = [modelPath, '/models/yolo11n-seg.onnx', '/models/yolo11n.onnx', '/models/yolov8n.onnx']
+      const candidates = [
+        modelPath, 
+        import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx',
+        '/models/default_model.onnx',
+        '/models/yolo11n-seg.onnx', 
+        '/models/yolo11n.onnx', 
+        '/models/yolov8n.onnx'
+      ]
       let lastErr = null
       for (const p of candidates) {
         try {
@@ -265,7 +272,7 @@ export function useYoloDetector() {
   }
 
   const detect = async (imageDataUrl, options = {}) => {
-    console.log('🔍 YOLO 검출 시작:', { imageDataUrl: imageDataUrl?.substring(0, 50) + '...', options })
+    console.log('🔍 YOLO 검출 시작 (기술문서 권장 설정):', { imageDataUrl: imageDataUrl?.substring(0, 50) + '...', options })
     
     try {
       await init(options)
@@ -331,7 +338,7 @@ export function useYoloDetector() {
     
     console.log('🔧 선택된 출력 텐서:', { dims: output.dims, type: output.type, dataLength: output.data.length })
 
-    const dets = postprocess(output, img.width, img.height, dx, dy, scale, options.confThreshold || 0.25)
+    const dets = postprocess(output, img.width, img.height, dx, dy, scale, options.confThreshold || 0.15)
     console.log('🔍 YOLO 원시 검출:', dets?.length || 0)
     if (dets.length > 0) {
       console.log('🔍 검출 결과 샘플:', dets.slice(0, 3).map(d => ({ box: d.box, score: d.score, classId: d.classId })))

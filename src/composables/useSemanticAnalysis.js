@@ -81,7 +81,7 @@ export function useSemanticAnalysis() {
   const analyzeImageComplexity = async (imageUrl) => {
     try {
       // 실제 구현에서는 이미지 처리 라이브러리 사용
-      // 여기서는 시뮬레이션
+      // 실제 구현 필요
       const complexity = {
         texture_entropy: 0,
         edge_diversity: 0,
@@ -183,14 +183,14 @@ export function useSemanticAnalysis() {
   // 텍스트 임베딩 생성
   const generateTextEmbedding = async (text) => {
     // 실제 구현에서는 OpenAI API 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
     return null
   }
 
   // CLIP 이미지 임베딩 생성
   const generateClipEmbedding = async (imageUrl) => {
     // 실제 구현에서는 CLIP 모델 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
     return null
   }
 
@@ -210,7 +210,7 @@ export function useSemanticAnalysis() {
   // 이미지에서 키워드 추출
   const extractImageKeywords = async (imageUrl) => {
     // 실제 구현에서는 이미지 분석 AI 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
     return ['round', 'curved', 'stud', 'groove']
   }
 

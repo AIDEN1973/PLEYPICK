@@ -6,12 +6,12 @@ export function useThresholdSystem() {
   const error = ref(null)
   const processing = ref(false)
 
-  // 임계치 설정 (더 현실적인 값으로 조정)
-  const thresholdConfig = reactive({
-    // 자동 승인 임계치
+  // 임계치 설정 (기술문서 권장값 적용)
+const thresholdConfig = reactive({
+    // 자동 승인 임계치 (기술문서: 확정 ≥ 0.80)
     autoApprove: {
-      minScore: 0.85,  // 0.95에서 0.85로 낮춤
-      minConfidence: 0.80,  // 0.90에서 0.80으로 낮춤
+      minScore: 0.80,  // 기술문서 권장값
+      minConfidence: 0.80,  // 기술문서 권장값
       requiredChecks: ['vision', 'llm', 'color']
     },
     

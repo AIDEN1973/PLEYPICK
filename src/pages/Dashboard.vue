@@ -87,7 +87,7 @@ export default {
       window.addEventListener('online', () => isOnline.value = true)
       window.addEventListener('offline', () => isOnline.value = false)
       
-      // 시뮬레이션 제거: 실제 데이터 연동 전까지 0
+      // 실제 데이터 연동 필요
       userCount.value = 0
     })
 

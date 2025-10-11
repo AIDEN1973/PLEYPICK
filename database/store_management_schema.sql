@@ -207,27 +207,8 @@ CREATE TRIGGER trigger_log_store_config_changes
     FOR EACH ROW
     EXECUTE FUNCTION log_store_config_changes();
 
--- 샘플 데이터 삽입
-INSERT INTO stores (id, name, location, contact, config) VALUES
-('store_001', '강남점', '서울시 강남구 테헤란로 123', '010-1234-5678', '{"selected_set": "76917", "auto_update": true, "detection_sensitivity": 0.5}'),
-('store_002', '홍대점', '서울시 마포구 홍익로 456', '010-2345-6789', '{"selected_set": "76917", "auto_update": true, "detection_sensitivity": 0.6}'),
-('store_003', '명동점', '서울시 중구 명동길 789', '010-3456-7890', '{"selected_set": "76917", "auto_update": false, "detection_sensitivity": 0.7}')
-ON CONFLICT (id) DO NOTHING;
+-- 프로덕션 환경 - 샘플 데이터 제거됨
 
--- 성능 데이터 샘플
-INSERT INTO store_performance (store_id, accuracy, fps, memory_usage, detection_count, error_count) VALUES
-('store_001', 92.5, 25.3, 450, 1250, 3),
-('store_002', 89.2, 23.1, 380, 980, 7),
-('store_003', 94.8, 27.6, 520, 1450, 2)
-ON CONFLICT DO NOTHING;
-
--- 시스템 로그 샘플
-INSERT INTO store_system_logs (store_id, level, message, component) VALUES
-('store_001', 'info', '시스템 시작', 'system'),
-('store_001', 'success', '모델 로드 완료', 'model'),
-('store_001', 'info', '검출 시작', 'detection'),
-('store_002', 'warning', '메모리 사용량 높음', 'performance'),
-('store_003', 'error', '모델 로드 실패', 'model')
-ON CONFLICT DO NOTHING;
+-- 프로덕션 환경 - 시스템 로그 샘플 제거됨
 
 SELECT '✅ BrickBox 매장 관리 시스템 스키마 생성 완료!' as status;

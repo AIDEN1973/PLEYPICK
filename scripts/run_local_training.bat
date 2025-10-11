@@ -1,32 +1,53 @@
 @echo off
-echo 🚀 BrickBox 로컬 PC 학습 실행 (RTX 2070 SUPER 최적화)
-echo ========================================================
-
+echo 🧱 BrickBox 로컬 YOLO 학습 시작
 echo.
-echo 📋 1단계: 환경 설정 확인
-python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"N/A\"}'); print(f'GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB' if torch.cuda.is_available() else 'N/A')"
 
-echo.
-echo 📦 2단계: 데이터셋 확인
-if not exist "data\brickbox_dataset\dataset.yaml" (
-    echo ❌ 데이터셋 파일이 없습니다. 먼저 노트북을 실행하여 데이터를 준비하세요.
-    pause
-    exit /b 1
+REM 환경 변수 설정
+set PYTHONPATH=%CD%
+set CUDA_VISIBLE_DEVICES=0
+
+REM Python 가상환경 활성화 (있는 경우)
+if exist "venv\Scripts\activate.bat" (
+    echo 📦 가상환경 활성화 중...
+    call venv\Scripts\activate.bat
 )
 
-echo ✅ 데이터셋 파일 확인됨: data\brickbox_dataset\dataset.yaml
+REM 필수 패키지 설치 확인
+echo 🔍 필수 패키지 확인 중...
+python -c "import ultralytics, torch, supabase" 2>nul
+if errorlevel 1 (
+    echo ⚠️ 필수 패키지가 설치되지 않았습니다. 설치를 시작합니다...
+    pip install ultralytics torch torchvision supabase pyyaml
+    if errorlevel 1 (
+        echo ❌ 패키지 설치 실패!
+        pause
+        exit /b 1
+    )
+)
 
-echo.
-echo 🚀 3단계: 로컬 PC 학습 시작 (RTX 2070 SUPER 최적화)
-echo    - 모델: YOLO11n (가장 가벼움)
-echo    - 배치 크기: 16 (8GB VRAM 최적화)
-echo    - 이미지 크기: 640x640
-echo    - 에포크: 100
+REM 환경 변수 로드
+if exist ".env" (
+    echo 📋 환경 변수 로드 중...
+    for /f "usebackq tokens=1,2 delims==" %%a in (".env") do (
+        set %%a=%%b
+    )
+)
 
-python scripts/local_gpu_trainer.py data/brickbox_dataset/dataset.yaml n
+REM 학습 실행
+echo 🚀 로컬 YOLO 학습 시작...
+python scripts\local_yolo_training.py ^
+    --set_num %1 ^
+    --epochs %2 ^
+    --batch_size %3 ^
+    --imgsz %4 ^
+    --device auto
 
-echo.
-echo ✅ 로컬 PC 학습 완료!
-echo 📊 결과 확인: output/local_training/
-echo.
+if errorlevel 1 (
+    echo ❌ 학습 실패!
+    pause
+    exit /b 1
+) else (
+    echo ✅ 학습 완료!
+)
+
 pause

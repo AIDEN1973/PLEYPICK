@@ -314,9 +314,9 @@ export function useImageManager() {
         canvas.height = height
         ctx.drawImage(img, 0, 0, width, height)
         
-        // WebP로 변환 (품질 0.6 - 더 작은 용량)
+        // WebP로 변환 (기술문서 권장: q=90)
         const webpBlob = await new Promise(resolve => {
-          canvas.toBlob(resolve, 'image/webp', 0.6)
+          canvas.toBlob(resolve, 'image/webp', 0.90)
         })
         
         URL.revokeObjectURL(img.src)

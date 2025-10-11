@@ -164,7 +164,7 @@ class CentralModelManager {
       const stores = await this.getAllStores()
       
       if (deploymentStrategy === 'gradual') {
-        // 단계적 배포 (A/B 테스트)
+        // 단계적 배포
         const pilotStores = this.selectPilotStores(stores, 10) // 10개 매장 먼저
         const remainingStores = stores.filter(s => !pilotStores.includes(s))
         

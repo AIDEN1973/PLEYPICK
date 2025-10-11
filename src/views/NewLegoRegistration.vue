@@ -88,8 +88,8 @@
             <p><strong>부품 수:</strong> {{ selectedSet.num_parts }}개</p>
             <p><strong>테마:</strong> {{ selectedSet.theme_id }}</p>
             <div class="action-buttons">
-              <button @click="saveSetToDatabase" :disabled="saving" class="btn btn-secondary">
-                {{ saving ? '저장 중...' : '데이터베이스에 저장' }}
+              <button @click="saveSetBatch" :disabled="saving" class="btn btn-secondary">
+                {{ saving ? '배치 저장 중...' : '⚡ 빠른 배치 저장' }}
               </button>
               <button @click="forceResaveSet" :disabled="saving" class="btn btn-warning">
                 {{ saving ? '재저장 중...' : '강제 재저장 (기존 데이터 삭제 후 저장)' }}
@@ -253,6 +253,19 @@
       {{ successMessage }}
     </div>
 
+    <!-- 배치 처리 진행률 -->
+    <div v-if="getProcessingStatus().processing" class="batch-processing-progress">
+      <h4>⚡ 배치 처리 중...</h4>
+      <div class="progress">
+        <div class="progress-bar" :style="{ width: getProcessingStatus().progress + '%' }"></div>
+        <span>{{ getProcessingStatus().progress }}%</span>
+      </div>
+      <small>{{ getProcessingStatus().currentStep }}</small>
+      <div v-if="getProcessingStatus().errors.length > 0" class="processing-errors">
+        <small>오류: {{ getProcessingStatus().errors.length }}개</small>
+      </div>
+    </div>
+
     <!-- 마스터 데이터 구축 진행률 -->
     <div v-if="!buildMasterData && masterDataProgress > 0" class="master-data-progress">
       <h4>🤖 마스터 데이터 구축 중...</h4>
@@ -276,6 +289,26 @@
         </div>
       </div>
     </div>
+
+    <!-- 백그라운드 LLM 분석 상태 -->
+    <div v-if="llmRunningTasks.length > 0" class="llm-background-tasks">
+      <h4>🤖 LLM 분석 진행 중</h4>
+      <div class="queue-status">
+        <span>대기: {{ queueStatus.pending }} | 실행: {{ queueStatus.running }} | 완료: {{ queueStatus.completed }} | 실패: {{ queueStatus.failed }}</span>
+      </div>
+      <div v-for="task in llmRunningTasks" :key="task.id" class="llm-task-item">
+        <div class="task-info">
+          <span class="task-name">{{ task.setName }} ({{ task.setNum }})</span>
+          <span class="task-progress">{{ task.processedParts }}/{{ task.totalParts }} ({{ task.progress }}%)</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" :style="{ width: task.progress + '%' }"></div>
+        </div>
+        <div v-if="task.errors.length > 0" class="task-errors">
+          <small>오류: {{ task.errors.length }}개</small>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -292,6 +325,8 @@ import {
   saveToMasterPartsDB,
   checkExistingAnalysis 
 } from '../composables/useMasterPartsPreprocessing'
+import { useBackgroundLLMAnalysis } from '../composables/useBackgroundLLMAnalysis'
+import { useBatchProcessing } from '../composables/useBatchProcessing'
 
 export default {
   name: 'LegoSetManager',
@@ -323,7 +358,8 @@ export default {
       getLegoSets,
       getSetParts,
       checkSetExists,
-      checkMultipleSetsExist
+      checkMultipleSetsExist,
+      deleteSetAndParts
     } = useDatabase()
 
     const {
@@ -333,6 +369,20 @@ export default {
       failTask,
       getRunningTasks
     } = useBackgroundTasks()
+
+    const {
+      startBackgroundAnalysis,
+      getRunningTasks: getLLMRunningTasks,
+      getTaskStatus,
+      getQueueStatus,
+      isProcessing: isLLMProcessing
+    } = useBackgroundLLMAnalysis()
+
+    const {
+      batchProcessSet,
+      getProcessingStatus,
+      resetProcessing
+    } = useBatchProcessing()
 
     const searchQuery = ref('')
     const searchResults = ref([])
@@ -815,48 +865,107 @@ export default {
     const forceResaveSet = async () => {
       if (!selectedSet.value) return
       
-      if (!confirm(`"${selectedSet.value.set_num}" 세트의 기존 데이터를 삭제하고 새로 저장하시겠습니까?`)) return
+      // 중복 세트 확인
+      const existingSet = await checkSetExists(selectedSet.value.set_num)
+      if (!existingSet) {
+        successMessage.value = '기존 세트가 없습니다. 일반 저장을 사용하세요.'
+        return
+      }
+      
+      const shouldReplace = confirm(
+        `⚠️ 강제 재저장을 시작합니다!\n\n` +
+        `📦 기존 세트 정보:\n` +
+        `   • 이름: ${existingSet.name}\n` +
+        `   • 세트 번호: ${existingSet.set_num}\n` +
+        `   • 등록일: ${new Date(existingSet.created_at).toLocaleDateString('ko-KR')}\n` +
+        `   • 부품 수: ${existingSet.num_parts}개\n\n` +
+        `🆕 새로운 세트 정보:\n` +
+        `   • 이름: ${selectedSet.value.name}\n` +
+        `   • 세트 번호: ${selectedSet.value.set_num}\n` +
+        `   • 부품 수: ${selectedSet.value.num_parts}개\n\n` +
+        `⚠️ 주의: 기존 데이터를 완전히 삭제하고 새로 저장하시겠습니까?\n` +
+        `(이 작업은 되돌릴 수 없습니다)`
+      )
+      
+      if (!shouldReplace) {
+        console.log('User cancelled force resave')
+        return
+      }
+      
+      // LLM 분석 재생성 여부 확인
+      const shouldRegenerateLLM = confirm(
+        `🤖 LLM 분석 재생성 옵션\n\n` +
+        `기존 세트의 부품들에 대한 LLM 분석 데이터가 있습니다.\n\n` +
+        `• "확인" 클릭: 기존 LLM 분석 데이터를 삭제하고 새로 생성\n` +
+        `• "취소" 클릭: 기존 LLM 분석 데이터를 유지\n\n` +
+        `새로운 LLM 분석을 생성하시겠습니까?`
+      )
       
       try {
-        // 1. 기존 세트 데이터 삭제 (set_num으로 검색)
-        console.log('Deleting existing set data...')
+        saving.value = true
+        successMessage.value = '기존 세트 데이터를 삭제하는 중...'
         
-        // 먼저 해당 세트의 ID를 찾기
-        const { data: existingSet, error: findError } = await supabase
-          .from('lego_sets')
-          .select('id')
-          .eq('set_num', selectedSet.value.set_num)
-          .maybeSingle()
-        
-        if (findError && findError.code !== 'PGRST116') {
-          console.log('No existing set found, proceeding with save...')
-        } else if (existingSet) {
-          // 부품 관계 삭제
-          const { error: deletePartsError } = await supabase
-            .from('set_parts')
-            .delete()
-            .eq('set_id', existingSet.id)
-          
-          if (deletePartsError) throw deletePartsError
-          
-          // 세트 정보 삭제
-          const { error: deleteSetError } = await supabase
-            .from('lego_sets')
-            .delete()
-            .eq('id', existingSet.id)
-          
-          if (deleteSetError) throw deleteSetError
-          
-          console.log('Existing data deleted successfully')
+        // 기존 세트 삭제 (LLM 분석 데이터 삭제 옵션 포함)
+        console.log('Deleting existing set and all related data...')
+        const deleteSuccess = await deleteSetAndParts(existingSet.id, existingSet.set_num, shouldRegenerateLLM)
+        if (!deleteSuccess) {
+          throw new Error('기존 세트 삭제에 실패했습니다.')
         }
         
-        // 2. 새로 저장
-        await saveSetToDatabase()
+        // LLM 분석 재생성 플래그 설정
+        if (shouldRegenerateLLM) {
+          console.log('🔄 LLM 분석 재생성 모드 활성화')
+          buildMasterData.value = false // LLM 분석 활성화
+        } else {
+          console.log('⏭️ 기존 LLM 분석 데이터 유지')
+          buildMasterData.value = true // LLM 분석 건너뛰기
+        }
         
-        successMessage.value = `세트 ${selectedSet.value.set_num}이 강제 재저장되었습니다.`
+        successMessage.value = '기존 데이터 삭제 완료. 새 데이터를 저장하는 중...'
+        
+        // 배치 처리 실행
+        const result = await batchProcessSet(selectedSet.value, setParts.value, {
+          forceUpload: false
+        })
+
+        console.log(`Force resave completed:`, result)
+
+        // 백그라운드 LLM 분석 시작
+        if (!buildMasterData.value && result.savedParts > 0) {
+          console.log(`🤖 Starting background LLM analysis for ${result.savedParts} parts...`)
+          const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
+          console.log(`📋 Background task started: ${taskId}`)
+          successMessage.value = `세트 강제 재저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
+        } else if (buildMasterData.value) {
+          console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+          successMessage.value = `세트 강제 재저장 완료! (빠른 저장 모드)`
+        }
+
+        // 작업 로그 저장
+        await saveOperationLog({
+          operation_type: 'set_force_resave',
+          target_type: 'set',
+          target_id: result.set.id,
+          status: result.failedParts === 0 ? 'success' : 'partial_success',
+          message: `세트 ${selectedSet.value.set_num} 강제 재저장 완료. 성공: ${result.savedParts}개, 실패: ${result.failedParts}개`,
+          metadata: {
+            set_num: selectedSet.value.set_num,
+            total_parts: setParts.value.length,
+            saved_parts: result.savedParts,
+            failed_parts: result.failedParts,
+            processed_images: result.processedImages,
+            failed_images: result.failedImages,
+            set_image: result.setImage
+          }
+        })
+
+        console.log(`Force resave completed: ${result.savedParts} parts, ${result.processedImages} images`)
+        
       } catch (err) {
         console.error('Force resave failed:', err)
-        error.value = `강제 재저장 중 오류가 발생했습니다: ${err.message}`
+        error.value = `강제 재저장 실패: ${err.message}`
+      } finally {
+        saving.value = false
       }
     }
 
@@ -1052,12 +1161,15 @@ export default {
               console.log(`🔍 DEBUG: Save completed - Success: ${savedParts.length}, Failed: ${failedParts.length}`)
               console.log(`🔍 DEBUG: Failed parts:`, failedParts)
               
-              // 마스터 데이터 구축 (기본적으로 실행, 체크 시 건너뛰기)
+              // 마스터 데이터 구축 (백그라운드 처리)
               if (!buildMasterData.value && savedParts.length > 0) {
-                console.log(`🤖 Starting automatic master data build for ${savedParts.length} parts...`)
-                await buildMasterDataForSet(setParts.value, selectedSet.value)
+                console.log(`🤖 Starting background LLM analysis for ${savedParts.length} parts...`)
+                const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
+                console.log(`📋 Background task started: ${taskId}`)
+                successMessage.value = `세트 저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
               } else if (buildMasterData.value) {
                 console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+                successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
               }
             }
 
@@ -1217,93 +1329,134 @@ export default {
       }
     }
 
-    // 마스터 데이터 구축 함수
-    const buildMasterDataForSet = async (parts, set) => {
+    // 배치 처리 함수 (새로운 빠른 저장)
+    const saveSetBatch = async () => {
+      if (!selectedSet.value || !setParts.value.length) {
+        console.error('No set or parts selected')
+        return
+      }
+
       try {
-        console.log(`🤖 Starting master data build for set ${set.set_num}...`)
-        processing.value = true
-        masterDataProgress.value = 0
-        
-        // 1단계: LLM 분석
-        console.log(`🧠 Step 1: LLM analysis for ${parts.length} parts...`)
-        const analysisResults = []
-        const batchSize = 3 // 병렬 처리 배치 크기
-        
-        for (let i = 0; i < parts.length; i += batchSize) {
-          const batch = parts.slice(i, i + batchSize)
-          const batchPromises = batch.map(async (part, index) => {
-            try {
-              // 기존 분석 확인
-              const existing = await checkExistingAnalysis(part.part.part_num, part.color.id)
-              if (existing) {
-                console.log(`⏭️ Skipping existing analysis for ${part.part.part_num} (color: ${part.color.id}) - already analyzed`)
-                // 메타 정보 보강 (DB 저장 시 color_id 누락 방지)
-                return { ...existing, part: part.part, color: part.color }
-              }
-              
-              console.log(`🧠 Analyzing part ${i + index + 1}/${parts.length}: ${part.part.part_num}`)
-              const analysis = await analyzePartWithLLM(part)
-              // 메타 정보 포함하여 반환 (DB 저장에 color_id 반영)
-              return { ...analysis, part: part.part, color: part.color }
-            } catch (error) {
-              console.error(`❌ LLM analysis failed for ${part.part.part_num}:`, error)
-              return null
-            }
-          })
+        saving.value = true
+        successMessage.value = ''
+        resetProcessing()
+
+        console.log(`Starting batch save process for set ${selectedSet.value.set_num}...`)
+        console.log(`Parts to save: ${setParts.value.length}`)
+
+        // 중복 세트 체크
+        const existingSet = await checkSetExists(selectedSet.value.set_num)
+        if (existingSet) {
+          const shouldReplace = confirm(
+            `⚠️ 중복된 레고 세트가 발견되었습니다!\n\n` +
+            `📦 기존 세트 정보:\n` +
+            `   • 이름: ${existingSet.name}\n` +
+            `   • 세트 번호: ${existingSet.set_num}\n` +
+            `   • 등록일: ${new Date(existingSet.created_at).toLocaleDateString('ko-KR')}\n` +
+            `   • 부품 수: ${existingSet.num_parts}개\n\n` +
+            `🆕 새로운 세트 정보:\n` +
+            `   • 이름: ${selectedSet.value.name}\n` +
+            `   • 세트 번호: ${selectedSet.value.set_num}\n` +
+            `   • 부품 수: ${selectedSet.value.num_parts}개\n\n` +
+            `⚠️ 주의: 기존 데이터를 삭제하고 새로 저장하시겠습니까?\n` +
+            `(기존 데이터는 완전히 삭제되며 되돌릴 수 없습니다)`
+          )
           
-          const batchResults = await Promise.all(batchPromises)
-          analysisResults.push(...batchResults.filter(result => result !== null))
-          
-          // 진행률 업데이트
-          masterDataProgress.value = Math.round(((i + batchSize) / parts.length) * 50)
-          
-          // API 레이트 리밋 방지
-          if (i + batchSize < parts.length) {
-            await new Promise(resolve => setTimeout(resolve, 1000))
+          if (!shouldReplace) {
+            console.log('User cancelled duplicate set replacement')
+            successMessage.value = '중복 세트 등록이 취소되었습니다.'
+            return
           }
+          
+          // LLM 분석 재생성 여부 확인
+          const shouldRegenerateLLM = confirm(
+            `🤖 LLM 분석 재생성 옵션\n\n` +
+            `기존 세트의 부품들에 대한 LLM 분석 데이터가 있습니다.\n\n` +
+            `• "확인" 클릭: 기존 LLM 분석 데이터를 삭제하고 새로 생성\n` +
+            `• "취소" 클릭: 기존 LLM 분석 데이터를 유지\n\n` +
+            `새로운 LLM 분석을 생성하시겠습니까?`
+          )
+          
+          // 기존 세트 삭제 (LLM 분석 데이터 삭제 옵션 포함)
+          console.log('Deleting existing set and all related data...')
+          const deleteSuccess = await deleteSetAndParts(existingSet.id, existingSet.set_num, shouldRegenerateLLM)
+          if (!deleteSuccess) {
+            throw new Error('기존 세트 삭제에 실패했습니다.')
+          }
+          
+          // LLM 분석 재생성 플래그 설정
+          if (shouldRegenerateLLM) {
+            console.log('🔄 LLM 분석 재생성 모드 활성화')
+            buildMasterData.value = false // LLM 분석 활성화
+          } else {
+            console.log('⏭️ 기존 LLM 분석 데이터 유지')
+            buildMasterData.value = true // LLM 분석 건너뛰기
+          }
+          
+          successMessage.value = '기존 세트 데이터를 삭제했습니다. 새 데이터를 저장합니다...'
         }
-        
-        console.log(`✅ LLM analysis completed: ${analysisResults.length} parts analyzed`)
-        
-        // 2단계: 임베딩 생성 (기존 임베딩이 없는 경우만)
-        console.log(`🔢 Step 2: Generating embeddings...`)
-        const needsEmbedding = analysisResults.filter(result => !result.embedding)
-        console.log(`📊 Parts needing embedding: ${needsEmbedding.length}/${analysisResults.length}`)
-        
-        const embeddingResults = await generateTextEmbeddingsBatch(needsEmbedding)
-        console.log(`✅ Embeddings generated: ${embeddingResults.length} parts`)
-        
-        // 3단계: 데이터베이스 저장
-        console.log(`💾 Step 3: Saving to database...`)
-        
-        // 임베딩 결과를 올바른 부품에 매핑
-        let embeddingIndex = 0
-        const combinedResults = analysisResults.map(analysis => {
-          if (!analysis.embedding && embeddingIndex < embeddingResults.length) {
-            return {
-              ...analysis,
-              embedding: embeddingResults[embeddingIndex++]
-            }
-          }
-          return analysis
+
+        // 배치 처리 실행
+        const result = await batchProcessSet(selectedSet.value, setParts.value, {
+          forceUpload: false
         })
+
+        console.log(`Batch processing completed:`, result)
+
+        // 백그라운드 LLM 분석 시작
+        console.log(`🔍 DEBUG: buildMasterData.value = ${buildMasterData.value}`)
+        console.log(`🔍 DEBUG: result.savedParts = ${result.savedParts}`)
         
-        await saveToMasterPartsDB(combinedResults)
-        console.log(`✅ Master data saved to database`)
+        if (!buildMasterData.value && result.savedParts > 0) {
+          console.log(`🤖 Starting background LLM analysis for ${result.savedParts} parts...`)
+          console.log(`🔍 DEBUG: Calling startBackgroundAnalysis with set:`, selectedSet.value.set_num)
+          console.log(`🔍 DEBUG: Parts count:`, setParts.value.length)
+          
+          const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
+          console.log(`📋 Background task started: ${taskId}`)
+          successMessage.value = `세트 저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
+        } else if (buildMasterData.value) {
+          console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+          successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
+        } else {
+          console.log(`⚠️ No parts saved, skipping LLM analysis`)
+          successMessage.value = `세트 저장 완료! (부품이 저장되지 않아 LLM 분석을 건너뜀)`
+        }
+
+        // 작업 로그 저장
+        await saveOperationLog({
+          operation_type: 'set_import',
+          target_type: 'set',
+          target_id: result.set.id,
+          status: result.failedParts === 0 ? 'success' : 'partial_success',
+          message: `세트 ${selectedSet.value.set_num} 배치 저장 완료. 성공: ${result.savedParts}개, 실패: ${result.failedParts}개`,
+          metadata: {
+            set_num: selectedSet.value.set_num,
+            total_parts: setParts.value.length,
+            saved_parts: result.savedParts,
+            failed_parts: result.failedParts,
+            processed_images: result.processedImages,
+            failed_images: result.failedImages,
+            set_image: result.setImage
+          }
+        })
+
+        console.log(`Batch save completed: ${result.savedParts} parts, ${result.processedImages} images`)
         
-        masterDataProgress.value = 100
-        console.log(`🎉 Master data build completed for set ${set.set_num}!`)
-        
-      } catch (error) {
-        console.error(`❌ Master data build failed:`, error)
-        masterDataProgress.value = 0
+      } catch (err) {
+        console.error('Batch save failed:', err)
+        error.value = `저장 실패: ${err.message}`
       } finally {
-        processing.value = false
+        saving.value = false
       }
     }
 
+    // 기존 buildMasterDataForSet 함수는 백그라운드 작업으로 대체됨
+
     // 백그라운드 작업 상태
     const runningTasks = computed(() => getRunningTasks())
+    const llmRunningTasks = computed(() => getLLMRunningTasks())
+    const queueStatus = computed(() => getQueueStatus())
 
     return {
       searchQuery,
@@ -1329,10 +1482,14 @@ export default {
       downloadPartImage,
       downloadAllPartImages,
       saveSetToDatabase,
+      saveSetBatch,
       forceResaveSet,
       exportPartsData,
       handleImageError,
+      getProcessingStatus,
       runningTasks,
+      llmRunningTasks,
+      queueStatus,
       isSingleSetNumber,
       formatSetNumber,
       calculatePartsTotal,
@@ -1927,6 +2084,119 @@ export default {
   height: 100%;
   background: linear-gradient(90deg, #28a745, #20c997);
   transition: width 0.3s ease;
+}
+
+/* 배치 처리 진행률 스타일 */
+.batch-processing-progress {
+  margin-top: 20px;
+  padding: 15px;
+  background: linear-gradient(135deg, #e8f5e8, #f0f8f0);
+  border-radius: 8px;
+  border: 1px solid #c8e6c9;
+}
+
+.batch-processing-progress h4 {
+  margin: 0 0 15px 0;
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.batch-processing-progress .progress {
+  position: relative;
+  background: #f5f5f5;
+  border-radius: 4px;
+  height: 24px;
+  margin: 0.5rem 0;
+}
+
+.batch-processing-progress .progress-bar {
+  background: linear-gradient(90deg, #4caf50, #2e7d32);
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.batch-processing-progress .progress span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-weight: bold;
+  font-size: 0.875rem;
+}
+
+.processing-errors {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #ffebee;
+  border-radius: 4px;
+  border-left: 3px solid #f44336;
+}
+
+.processing-errors small {
+  color: #d32f2f;
+  font-weight: 500;
+}
+
+/* LLM 백그라운드 작업 스타일 */
+.llm-background-tasks {
+  margin-top: 20px;
+  padding: 15px;
+  background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+  border-radius: 8px;
+  border: 1px solid #bbdefb;
+}
+
+.llm-background-tasks h4 {
+  margin: 0 0 15px 0;
+  color: #3f51b5;
+  font-weight: 600;
+}
+
+.queue-status {
+  margin-bottom: 15px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 6px;
+  font-size: 0.9em;
+  color: #424242;
+  text-align: center;
+}
+
+.llm-task-item {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #c5cae9;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.llm-task-item .task-name {
+  color: #3f51b5;
+  font-weight: 600;
+}
+
+.llm-task-item .task-progress {
+  color: #5c6bc0;
+}
+
+.llm-task-item .progress-fill {
+  background: linear-gradient(90deg, #3f51b5, #1a237e);
+}
+
+.task-errors {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #ffebee;
+  border-radius: 4px;
+  border-left: 3px solid #f44336;
+}
+
+.task-errors small {
+  color: #d32f2f;
+  font-weight: 500;
 }
 
 @media (max-width: 768px) {

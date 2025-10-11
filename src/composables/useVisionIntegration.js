@@ -72,8 +72,8 @@ export function useVisionIntegration() {
         // 모델 초기화
         await yolo.init({ modelPath: '/models/yolo11n-seg.onnx', inputSize: 640 })
         
-        // YOLO 검출 실행
-        detections = await yolo.detect(processedImage, { confThreshold: 0.25 })
+        // YOLO 검출 실행 (기술문서 권장: conf=0.15)
+        detections = await yolo.detect(processedImage, { confThreshold: 0.15 })
         console.log(`YOLO detections: ${detections.length}`)
 
         // 매칭 부하를 줄이기 위해 상위 N개만 사용 (강제 제한)
@@ -411,7 +411,7 @@ export function useVisionIntegration() {
     
     if (total === 0) return 0
     
-    // 시뮬레이션된 정확도 계산 (더 현실적인 값)
+    // 실제 정확도 계산 필요
     const autoApprovedWeight = approvalResults.autoApproved.length * 1.0    // 100% 정확도
     const manualReviewWeight = approvalResults.manualReview.length * 0.85  // 85% 정확도
     const retakeWeight = approvalResults.retakeRequired.length * 0.3       // 30% 정확도 (재촬영 필요)

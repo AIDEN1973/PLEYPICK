@@ -60,13 +60,13 @@ class UploadDiagnostic:
     def check_supabase_connection(self) -> dict:
         """Supabase 연결 상태 확인"""
         try:
-            # 간단한 쿼리로 연결 테스트
+            # 간단한 쿼리로 연결 확인
             result = self.supabase.table('synthetic_dataset').select('*').limit(1).execute()
             
             return {
                 'connected': True,
                 'message': 'Supabase 연결 성공',
-                'test_query': 'OK'
+                'query': 'OK'
             }
         except Exception as e:
             return {
@@ -119,7 +119,7 @@ class UploadDiagnostic:
                     'success': True,
                     'recent_uploads': len(result.data),
                     'latest_upload': result.data[0].get('created_at'),
-                    'sample_files': [item.get('part_id') for item in result.data[:5]]
+                    'files': [item.get('part_id') for item in result.data[:5]]
                 }
             else:
                 return {
@@ -312,7 +312,7 @@ def main():
     """메인 실행 함수"""
     if len(sys.argv) < 2:
         print("사용법: python diagnose_upload_issue.py <output_dir>")
-        print("예시: python diagnose_upload_issue.py output/renders")
+        print("사용법: python diagnose_upload_issue.py output/renders")
         sys.exit(1)
     
     output_dir = sys.argv[1]

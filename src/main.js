@@ -14,6 +14,8 @@ import SyntheticDatasetManager from './views/SyntheticDatasetManager.vue'
 import HybridDetection from './views/HybridDetection.vue'
 import AutomatedTrainingDashboard from './views/AutomatedTrainingDashboard.vue'
 import StoreManagementDashboard from './views/StoreManagementDashboard.vue'
+import MonitoringDashboard from './views/MonitoringDashboard.vue'
+import ModelMonitoringDashboard from './views/ModelMonitoringDashboard.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -28,7 +30,9 @@ const routes = [
   { path: '/synthetic-dataset', name: 'SyntheticDatasetManager', component: SyntheticDatasetManager },
   { path: '/hybrid-detection', name: 'HybridDetection', component: HybridDetection },
   { path: '/automated-training', name: 'AutomatedTrainingDashboard', component: AutomatedTrainingDashboard },
-  { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard }
+  { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard },
+  { path: '/monitoring', name: 'MonitoringDashboard', component: MonitoringDashboard },
+  { path: '/model-monitoring', name: 'ModelMonitoringDashboard', component: ModelMonitoringDashboard }
 ]
 
 const router = createRouter({

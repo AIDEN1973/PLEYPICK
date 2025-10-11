@@ -49,8 +49,8 @@ export function usePartCharacteristics() {
     try {
       // 실제 구현에서는 CLIP 모델을 사용
       // 여기서는 더미 벡터 반환
-      const dummyEmbedding = Array.from({ length: 768 }, () => Math.random())
-      return dummyEmbedding
+      // 실제 임베딩 생성 필요
+      throw new Error('Part embedding generation not implemented')
     } catch (err) {
       console.error('CLIP embedding generation failed:', err)
       throw err

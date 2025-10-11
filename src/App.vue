@@ -16,6 +16,8 @@
           <router-link to="/synthetic-dataset" class="nav-link">합성 데이터셋</router-link>
           <router-link to="/hybrid-detection" class="nav-link">부품 검출</router-link>
           <router-link to="/automated-training" class="nav-link">🧠 AI 학습</router-link>
+          <router-link to="/monitoring" class="nav-link">📊 모니터링</router-link>
+          <router-link to="/model-monitoring" class="nav-link">🤖 모델 모니터링</router-link>
         </div>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>

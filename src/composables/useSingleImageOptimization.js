@@ -74,7 +74,7 @@ export function useSingleImageOptimization() {
   const assessImageQuality = async (imageUrl) => {
     try {
       // 실제 구현에서는 이미지 분석 라이브러리 사용
-      // 여기서는 수식 기반 시뮬레이션
+      // 실제 수식 기반 계산 필요
       const imageMetrics = await calculateImageMetrics(imageUrl)
       
       // 기준값 (실제 구현에서는 데이터셋 기반 설정)
@@ -339,7 +339,7 @@ export function useSingleImageOptimization() {
   // 혼동군 페널티 계산
   const calculateConfusionPenalty = (partNum, partName) => {
     // 실제 구현에서는 혼동군 매트릭스 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
     const confusionMatrix = {
       '3023': 0.1, // 2x2 Plate
       '2412b': 0.1, // 2x2 Tile

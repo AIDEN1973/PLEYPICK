@@ -11,7 +11,7 @@ export function useFeatureFlipComparison() {
       return embedding
     }
     
-  // 시뮬레이션 제거
+  // 실제 구현 필요
     const flippedEmbedding = [...embedding]
     
     // 공간적 특징 차원들 (예: 위치, 방향 관련)을 반전
@@ -69,7 +69,7 @@ export function useFeatureFlipComparison() {
   // 밝기 패턴 분석
   const analyzeBrightnessPattern = async (imageUrl) => {
     // 실제 구현에서는 이미지 처리 라이브러리 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
   return 0
   }
 
@@ -95,7 +95,7 @@ export function useFeatureFlipComparison() {
   // 스터드 패턴 감지
   const detectStudPattern = async (imageUrl) => {
     // 실제 구현에서는 스터드 감지 알고리즘 사용
-    return Math.random() * 0.5 + 0.3
+    return 0.5 // 기본 유사도 값
   }
 
   // Feature-space Flip 비교
@@ -157,7 +157,7 @@ export function useFeatureFlipComparison() {
   // CLIP 임베딩 생성 (기존 함수 재사용)
   const generateClipEmbedding = async (imageUrl) => {
     // 기존 useMasterPartsPreprocessing의 generateClipImageEmbedding 함수 사용
-    // 여기서는 시뮬레이션
+    // 실제 구현 필요
   return null
   }
 

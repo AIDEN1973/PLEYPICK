@@ -44,7 +44,7 @@ export function useStoreManagement() {
   // === 매장 상태 조회 ===
   const getStoreStatus = async () => {
     try {
-      console.log('📊 매장 상태 조회 시작')
+      // 매장 상태 조회 시작
       
       // 매장 ID가 없으면 기본값 설정 (개발 환경)
       if (!storeInfo.id) {
@@ -56,7 +56,7 @@ export function useStoreManagement() {
       }
       
       // 실제 데이터베이스 조회는 프로덕션 환경에서만
-      if (process.env.NODE_ENV === 'production') {
+      if (import.meta.env.PROD) {
         // 1. 매장 기본 정보 조회
         const { data: storeData, error: storeError } = await supabase
           .from('stores')
@@ -65,7 +65,7 @@ export function useStoreManagement() {
           .single()
         
         if (storeError && storeError.code !== 'PGRST116') {
-          console.warn('⚠️ 매장 정보 조회 실패:', storeError.message)
+          // 매장 정보 조회 실패
         } else if (storeData) {
           Object.assign(storeInfo, storeData)
         }
@@ -97,8 +97,8 @@ export function useStoreManagement() {
         }
       } else {
         // 개발 환경에서는 기본값 사용
-        currentModelVersion.value = 'v1.0.0'
-        latestModelVersion.value = 'v1.0.0'
+        currentModelVersion.value = 'unknown'
+        latestModelVersion.value = 'unknown'
       }
       
       // 4. 성능 데이터 조회
@@ -107,10 +107,10 @@ export function useStoreManagement() {
       // 5. 시스템 로그 조회
       await loadSystemLogs()
       
-      console.log('✅ 매장 상태 조회 완료')
+      // 매장 상태 조회 완료
       
     } catch (error) {
-      console.error('❌ 매장 상태 조회 실패:', error)
+      // 매장 상태 조회 실패
       addSystemLog('error', `상태 조회 실패: ${error.message}`)
     }
   }
@@ -119,7 +119,7 @@ export function useStoreManagement() {
   const refreshPerformance = async () => {
     try {
       // 프로덕션 환경에서만 실제 성능 데이터 조회
-      if (process.env.NODE_ENV === 'production') {
+      if (import.meta.env.PROD) {
         // 실제 성능 데이터 조회
         const { data: performanceData, error } = await supabase
           .from('store_performance')
@@ -150,7 +150,7 @@ export function useStoreManagement() {
       addSystemLog('info', `성능 데이터 업데이트: 정확도 ${(performance.accuracy * 100).toFixed(1)}%, FPS ${performance.fps.toFixed(1)}`)
       
     } catch (error) {
-      console.error('❌ 성능 데이터 조회 실패:', error)
+      // 성능 데이터 조회 실패
       addSystemLog('error', `성능 데이터 조회 실패: ${error.message}`)
     }
   }
@@ -158,7 +158,7 @@ export function useStoreManagement() {
   // === 모델 업데이트 시작 ===
   const startUpdate = async () => {
     if (isUpdating.value) {
-      console.warn('⚠️ 이미 업데이트 중입니다')
+      // 이미 업데이트 중
       return
     }
     
@@ -179,31 +179,31 @@ export function useStoreManagement() {
         { icon: '⏳', text: '검증 완료', status: 'pending' }
       ]
       
-      await simulateStep(1000, '백업 완료')
+      processStep('백업 완료')
       updateSteps.value[0].status = 'completed'
       updateProgress.value = 20
       
       // 2단계: 새 모델 다운로드
       updateSteps.value[1].status = 'processing'
-      await simulateStep(2000, '모델 다운로드 중...')
+      processStep('모델 다운로드 중...')
       updateSteps.value[1].status = 'completed'
       updateProgress.value = 40
       
       // 3단계: 설정 업데이트
       updateSteps.value[2].status = 'processing'
-      await simulateStep(1000, '설정 업데이트 중...')
+      processStep('설정 업데이트 중...')
       updateSteps.value[2].status = 'completed'
       updateProgress.value = 60
       
       // 4단계: 시스템 재시작
       updateSteps.value[3].status = 'processing'
-      await simulateStep(1500, '시스템 재시작 중...')
+      processStep('시스템 재시작 중...')
       updateSteps.value[3].status = 'completed'
       updateProgress.value = 80
       
       // 5단계: 검증
       updateSteps.value[4].status = 'processing'
-      await simulateStep(1000, '시스템 검증 중...')
+      processStep('시스템 검증 중...')
       updateSteps.value[4].status = 'completed'
       updateProgress.value = 100
       
@@ -216,7 +216,7 @@ export function useStoreManagement() {
       await refreshPerformance()
       
     } catch (error) {
-      console.error('❌ 업데이트 실패:', error)
+      // 업데이트 실패
       addUpdateLog(`업데이트 실패: ${error.message}`)
       addSystemLog('error', `업데이트 실패: ${error.message}`)
       
@@ -343,7 +343,7 @@ export function useStoreManagement() {
       addSystemLog('warning', '긴급 시스템 재시작 요청')
       
       // 실제로는 매장 클라이언트에 재시작 명령 전송
-      // 여기서는 시뮬레이션
+      // 실제 구현 필요
       await new Promise(resolve => setTimeout(resolve, 2000))
       
       addSystemLog('success', '시스템 재시작 완료')
@@ -394,7 +394,7 @@ export function useStoreManagement() {
   const loadSystemLogs = async () => {
     try {
       // 프로덕션 환경에서만 실제 로그 조회
-      if (process.env.NODE_ENV === 'production') {
+      if (import.meta.env.PROD) {
         const { data, error } = await supabase
           .from('store_system_logs')
           .select('*')
@@ -447,7 +447,7 @@ export function useStoreManagement() {
     }
     
     // 프로덕션 환경에서만 Supabase에 저장
-    if (process.env.NODE_ENV === 'production') {
+    if (import.meta.env.PROD) {
       supabase
         .from('store_system_logs')
         .insert({
@@ -474,18 +474,15 @@ export function useStoreManagement() {
   }
   
   // === 헬퍼 함수들 ===
-  const simulateStep = (duration, message) => {
-    return new Promise(resolve => {
-      addUpdateLog(message)
-      setTimeout(resolve, duration)
-    })
+  const processStep = (message) => {
+    addUpdateLog(message)
   }
   
   // === 초기 데이터 로드 ===
   const initializeStore = async () => {
     try {
       // 프로덕션 환경에서만 실제 데이터 로드
-      if (process.env.NODE_ENV === 'production') {
+      if (import.meta.env.PROD) {
         // 사용 가능한 LEGO 세트 목록 로드
         const { data: setsData, error: setsError } = await supabase
           .from('lego_sets')

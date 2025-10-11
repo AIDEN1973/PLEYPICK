@@ -310,7 +310,7 @@ export function useRealtimeDetection() {
           detected_part_id: detection.id,
           detection_stage: 'detected',
           confidence_score: detection.confidence,
-          processing_time_ms: 100, // 시뮬레이션
+          processing_time_ms: 0, // 실제 측정 필요
           original_image_url: detection.image,
           bounding_box: detection.boundingBox,
           created_at: detection.timestamp

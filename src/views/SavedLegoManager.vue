@@ -56,6 +56,16 @@
           <p class="stat-number">{{ processedImages }}</p>
           <p class="stat-subtitle">{{ totalSets > 0 ? Math.round((processedImages / totalSets) * 100) : 0 }}% 변환됨</p>
         </div>
+        <div class="stat-card">
+          <h3>📦 Supabase</h3>
+          <p class="stat-number">{{ imageSourceStats.supabase }}</p>
+          <p class="stat-subtitle">로컬 저장소</p>
+        </div>
+        <div class="stat-card">
+          <h3>🌐 CDN</h3>
+          <p class="stat-number">{{ imageSourceStats.cdn }}</p>
+          <p class="stat-subtitle">외부 링크</p>
+        </div>
       </div>
     </div>
 
@@ -203,9 +213,32 @@
               </div>
             </div>
 
+            <!-- 배치 로딩 진행률 -->
+            <div v-if="getLoadingStatus().loading" class="batch-loading-progress">
+              <h4>⚡ 부품 데이터 로딩 중...</h4>
+              <div class="progress">
+                <div class="progress-bar" :style="{ width: getLoadingStatus().progress + '%' }"></div>
+                <span>{{ getLoadingStatus().progress }}%</span>
+              </div>
+              <small>{{ getLoadingStatus().currentStep }}</small>
+              <div v-if="getLoadingStatus().errors.length > 0" class="loading-errors">
+                <small>오류: {{ getLoadingStatus().errors.length }}개</small>
+              </div>
+            </div>
+
+            <!-- 자동 마이그레이션 진행률 -->
+            <div v-if="migrating" class="migration-progress">
+              <h4>🔄 이미지 자동 마이그레이션 중...</h4>
+              <div class="progress">
+                <div class="progress-bar" :style="{ width: (migrationStats.completed / migrationStats.total * 100) + '%' }"></div>
+                <span>{{ Math.round(migrationStats.completed / migrationStats.total * 100) }}%</span>
+              </div>
+              <small>완료: {{ migrationStats.completed }}개 | 실패: {{ migrationStats.failed }}개 | 건너뜀: {{ migrationStats.skipped }}개</small>
+            </div>
+
             <!-- 부품 목록 -->
             <div v-if="setParts.length > 0" class="parts-section">
-              <h3>부품 목록 ({{ uniquePartsCount }}개 고유 부품, 총 {{ setParts.length }}개 항목) - DB에서 로드됨</h3>
+              <h3>부품 목록 ({{ uniquePartsCount }}개 고유 부품, 총 {{ setParts.length }}개 항목) - 배치 로딩됨</h3>
               <div class="parts-grid">
                 <div 
                   v-for="part in setParts" 
@@ -219,11 +252,11 @@
                       @error="handleImageError"
                       :title="part.supabase_image_url ? 'Supabase Storage에서 로드됨' : 'Rebrickable CDN에서 로드됨'"
                     />
-                    <div v-if="part.supabase_image_url" class="image-source-badge">
-                      📦 Supabase
+                    <div v-if="part.supabase_image_url" class="image-source-badge supabase-badge">
+                      📦 Supabase Storage
                     </div>
-                    <div v-else class="image-source-badge">
-                      🌐 CDN
+                    <div v-else class="image-source-badge cdn-badge">
+                      🌐 Rebrickable CDN
                     </div>
                     
                     <!-- 메타데이터 툴팁 -->
@@ -233,12 +266,17 @@
                         <h4>🧠 LLM 분석 결과</h4>
                         <p class="tooltip-hint">💡 클릭하여 닫기</p>
                         <div v-if="part.metadata" class="metadata-details">
-                          <p><strong>형태:</strong> {{ part.metadata.shape }}</p>
-                          <p><strong>기능:</strong> {{ part.metadata.function }}</p>
-                          <p><strong>연결방식:</strong> {{ part.metadata.connection }}</p>
+                          <p><strong>형태:</strong> {{ part.metadata.shape || '정보 없음' }}</p>
+                          <p><strong>기능:</strong> {{ part.metadata.function || '정보 없음' }}</p>
+                          <p><strong>연결방식:</strong> {{ part.metadata.connection || '정보 없음' }}</p>
                           <p><strong>중심 스터드:</strong> {{ part.metadata.center_stud ? '있음' : '없음' }}</p>
                           <p><strong>홈:</strong> {{ part.metadata.groove ? '있음' : '없음' }}</p>
-                          <p><strong>신뢰도:</strong> {{ Math.round(part.metadata.confidence * 100) }}%</p>
+                          <p><strong>신뢰도:</strong> {{ Math.round((part.metadata.confidence || 0) * 100) }}%</p>
+                          <!-- 디버깅용: 실제 메타데이터 구조 확인 -->
+                          <details style="margin-top: 10px; font-size: 0.8rem; color: #ccc;">
+                            <summary>🔍 디버깅 정보</summary>
+                            <pre style="white-space: pre-wrap; word-break: break-all;">{{ JSON.stringify(part.metadata, null, 2) }}</pre>
+                          </details>
                           <div v-if="part.metadata.recognition_hints" class="recognition-hints">
                             <p><strong>인식 힌트:</strong></p>
                             <ul>
@@ -302,6 +340,8 @@ import { ref, onMounted, computed } from 'vue'
 import { useDatabase } from '../composables/useDatabase'
 import { supabase } from '../composables/useSupabase'
 import { useImageManager } from '../composables/useImageManager'
+import { useBatchPartLoading } from '../composables/useBatchPartLoading'
+import { useAutoImageMigration } from '../composables/useAutoImageMigration'
 
 export default {
   name: 'SavedLegoManager',
@@ -318,6 +358,19 @@ export default {
       uploadImageFromUrl,
       saveImageMetadata
     } = useImageManager()
+
+    const {
+      batchLoadParts,
+      getLoadingStatus,
+      resetLoading
+    } = useBatchPartLoading()
+
+    const { 
+      migrating, 
+      migrationStats, 
+      batchMigrateImages, 
+      resetMigrationStats 
+    } = useAutoImageMigration()
 
     const searchQuery = ref('')
     const savedSets = ref([])
@@ -339,6 +392,16 @@ export default {
     const processedImages = computed(() => {
       // WebP로 변환된 세트 이미지 수 계산
       return savedSets.value.filter(set => set.webp_image_url).length
+    })
+    
+    // 이미지 소스별 통계
+    const imageSourceStats = computed(() => {
+      if (!setParts.value.length) return { supabase: 0, cdn: 0 }
+      
+      const supabaseCount = setParts.value.filter(part => part.supabase_image_url).length
+      const cdnCount = setParts.value.length - supabaseCount
+      
+      return { supabase: supabaseCount, cdn: cdnCount }
     })
 
     // 저장된 세트 로드
@@ -462,72 +525,54 @@ export default {
       savedSets.value = savedSets.value.filter(set => set.year == selectedYear.value)
     }
 
-    // 세트 선택
+    // 세트 선택 (배치 로딩)
     const selectSet = async (set) => {
       try {
         selectedSet.value = set
-        console.log(`🔍 DEBUG: Loading parts for set ${set.set_num} (ID: ${set.id})`)
-        const parts = await getSetParts(set.id)
-        console.log(`🔍 DEBUG: Loaded ${parts.length} parts from database`)
-        console.log(`🔍 DEBUG: First few parts:`, parts.slice(0, 3).map(p => ({
-          part_num: p.lego_parts.part_num,
-          color: p.lego_colors.name,
-          quantity: p.quantity
-        })))
+        resetLoading()
         
-        // 각 부품의 Supabase Storage 이미지 URL 조회
-        console.log(`🔍 DEBUG: Checking Supabase Storage images for ${parts.length} parts...`)
-        // (part_num, color_id) 기준으로 중복 제거 (최초 항목만 유지)
-        const seenKeys = new Set()
-        const deduped = []
-        for (const p of parts) {
-          const key = `${p.lego_parts.part_num}__${p.lego_colors.color_id}`
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key)
-            deduped.push(p)
-          }
+        console.log(`🚀 Starting batch load for set ${set.set_num} (ID: ${set.id})`)
+        
+        // 배치 로딩 실행 (초고속 최적화)
+        const result = await batchLoadParts(set.id, {
+          batchSize: 100 // 100개씩 배치 처리 (초고속)
+        })
+        
+        console.log(`✅ Batch load completed: ${result.parts.length} parts loaded`)
+        console.log(`📊 Loading stats:`, result.loadingState)
+        
+        if (result.errors.length > 0) {
+          console.warn(`⚠️ ${result.errors.length} errors during batch load:`, result.errors)
         }
-
-        const partsWithImages = await Promise.all(deduped.map(async (part) => {
-          try {
-            const imageUrl = await getSupabaseImageUrl(part.lego_parts.part_num, part.lego_colors.color_id)
-            if (imageUrl) {
-              console.log(`✅ Found Supabase image for ${part.lego_parts.part_num}: ${imageUrl}`)
-            } else {
-              console.log(`❌ No Supabase image for ${part.lego_parts.part_num}, using CDN`)
-            }
-            
-            // LLM 분석 메타데이터 로드
-            const metadata = await getPartMetadata(part.lego_parts.part_num, part.lego_colors.color_id)
-            
-            return {
-              ...part,
-              supabase_image_url: imageUrl,
-              metadata: metadata
-            }
-          } catch (err) {
-            console.warn(`Failed to get Supabase image for ${part.lego_parts.part_num}:`, err)
-            return {
-              ...part,
-              supabase_image_url: null,
-              metadata: null
-            }
-          }
-        }))
         
-        const supabaseImageCount = partsWithImages.filter(p => p.supabase_image_url).length
-        console.log(`🔍 DEBUG: ${supabaseImageCount}/${parts.length} parts have Supabase Storage images`)
+        setParts.value = result.parts
         
-        setParts.value = partsWithImages
+        // CDN 링크를 사용하는 부품들을 자동으로 Supabase Storage로 마이그레이션
+        const cdnParts = result.parts.filter(part => 
+          !part.supabase_image_url && part.lego_parts.part_img_url
+        )
+        
+        if (cdnParts.length > 0) {
+          console.log(`🔄 자동 마이그레이션 시작: ${cdnParts.length}개 부품`)
+          resetMigrationStats()
+          
+          // 백그라운드에서 마이그레이션 실행
+          batchMigrateImages(cdnParts).then(() => {
+            console.log('✅ 자동 마이그레이션 완료')
+            // 마이그레이션 완료 후 부품 목록 다시 로드
+            selectSet(set)
+          })
+        }
+        
       } catch (err) {
-        console.error('Failed to load set parts:', err)
+        console.error('Failed to batch load set parts:', err)
       }
     }
 
     // Supabase Storage에서 이미지 URL 조회 (part_images 우선, 다음 image_metadata)
     const getSupabaseImageUrl = async (partNum, colorId) => {
       try {
-        // 1) part_images에서 직접 조회 (앱 업서트 소스)
+        // 1) part_images에서 직접 조회 (올바른 컬럼명 사용)
         const { data: pi, error: piErr } = await supabase
           .from('part_images')
           .select('uploaded_url')
@@ -559,7 +604,7 @@ export default {
       try {
         const { data, error } = await supabase
           .from('parts_master_features')
-          .select('feature_json, feature_text, confidence')
+          .select('*')
           .eq('part_id', partNum)
           .eq('color_id', colorId)
           .maybeSingle()
@@ -571,11 +616,53 @@ export default {
 
         if (!data) return null
 
-        return {
-          ...data.feature_json,
-          feature_text: data.feature_text,
-          confidence: data.confidence
+        // feature_json 파싱하여 메타데이터 구성
+        let processedMeta = null
+        if (data.feature_json) {
+          try {
+            const featureData = typeof data.feature_json === 'string' 
+              ? JSON.parse(data.feature_json) 
+              : data.feature_json
+            
+            processedMeta = {
+              ...featureData,
+              feature_text: data.feature_text,
+              confidence: data.confidence,
+              recognition_hints: data.recognition_hints,
+              similar_parts: data.similar_parts,
+              distinguishing_features: data.distinguishing_features,
+              has_stud: data.has_stud,
+              groove: data.groove,
+              center_stud: data.center_stud
+            }
+          } catch (parseError) {
+            console.warn(`Failed to parse feature_json for ${partNum}:`, parseError)
+            processedMeta = {
+              feature_text: data.feature_text,
+              confidence: data.confidence,
+              recognition_hints: data.recognition_hints,
+              similar_parts: data.similar_parts,
+              distinguishing_features: data.distinguishing_features,
+              has_stud: data.has_stud,
+              groove: data.groove,
+              center_stud: data.center_stud
+            }
+          }
+        } else {
+          // feature_json이 없으면 기본 메타데이터만 사용
+          processedMeta = {
+            feature_text: data.feature_text,
+            confidence: data.confidence,
+            recognition_hints: data.recognition_hints,
+            similar_parts: data.similar_parts,
+            distinguishing_features: data.distinguishing_features,
+            has_stud: data.has_stud,
+            groove: data.groove,
+            center_stud: data.center_stud
+          }
         }
+
+        return processedMeta
       } catch (err) {
         console.error('Error fetching part metadata:', err)
         return null
@@ -703,6 +790,7 @@ export default {
       totalSets,
       totalParts,
       processedImages,
+      imageSourceStats,
       searchSavedSets,
       filterByTheme,
       filterByYear,
@@ -713,7 +801,10 @@ export default {
       formatDate,
       handleImageError,
       uniquePartsCount,
-      toggleMetadata
+      toggleMetadata,
+      getLoadingStatus,
+      migrating,
+      migrationStats
     }
   }
 }
@@ -993,6 +1084,108 @@ export default {
   margin-bottom: 2rem;
 }
 
+/* 배치 로딩 진행률 스타일 */
+.batch-loading-progress {
+  margin: 20px 0;
+  padding: 15px;
+  background: linear-gradient(135deg, #e8f5e8, #f0f8f0);
+  border-radius: 8px;
+  border: 1px solid #c8e6c9;
+}
+
+.batch-loading-progress h4 {
+  margin: 0 0 15px 0;
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.batch-loading-progress .progress {
+  position: relative;
+  background: #f5f5f5;
+  border-radius: 4px;
+  height: 24px;
+  margin: 0.5rem 0;
+}
+
+.batch-loading-progress .progress-bar {
+  background: linear-gradient(90deg, #4caf50, #2e7d32);
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.batch-loading-progress .progress span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-weight: bold;
+  font-size: 0.875rem;
+}
+
+.loading-errors {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #ffebee;
+  border-radius: 4px;
+  border-left: 3px solid #f44336;
+}
+
+.loading-errors small {
+  color: #d32f2f;
+  font-weight: 500;
+}
+
+.migration-progress {
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+  padding: 1rem;
+  border-radius: 8px;
+  margin: 1rem 0;
+  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
+}
+
+.migration-progress h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.migration-progress .progress {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  height: 20px;
+  margin: 0.5rem 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.migration-progress .progress-bar {
+  background: linear-gradient(90deg, #4caf50, #8bc34a);
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.migration-progress .progress span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: white;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+.migration-progress small {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -1156,12 +1349,22 @@ export default {
   position: absolute;
   top: 4px;
   right: 4px;
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 10px;
   font-weight: bold;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.supabase-badge {
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  color: white;
+}
+
+.cdn-badge {
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
 }
 
 .part-info h4 {

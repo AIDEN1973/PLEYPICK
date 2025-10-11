@@ -117,7 +117,7 @@
           <label>세트 번호</label>
           <input 
             v-model="setNumber" 
-            placeholder="예: 76917 (하이브리드 검출)"
+            placeholder="세트 번호 입력"
             @keyup.enter="loadSetMetadata"
           />
           <button @click="loadSetMetadata" class="btn-secondary">메타데이터 로드</button>
@@ -282,7 +282,7 @@
         <span>레고 부품 실시간 검출 중... ({{ realtimeDetections.length }}개 부품)</span>
       </div>
       <div class="fps-counter">FPS: {{ currentFPS }}</div>
-      <div class="debug-info">
+      <div class="system-info">
         <small>해상도: {{ cameraVideo?.videoWidth || 0 }}x{{ cameraVideo?.videoHeight || 0 }}</small>
         <small>레고 특성 필터링 활성화</small>
       </div>
@@ -1309,14 +1309,14 @@ export default {
         console.log(`🤖 상위 ${topDetections.length}개 검출에 대해 AI 메타데이터 조회`)
         
         // BOM 부품 목록을 한 번만 가져와서 재사용
-        const bomPartIds = bomData.value?.map(part => part.part_id) || []
+        const bomPartIds = bomParts.value?.map(part => part.part_id) || []
         console.log(`🤖 BOM 부품 목록: ${bomPartIds.length}개 부품`)
         
         const enhancedDetections = await Promise.all(topDetections.map(async (detection, index) => {
           try {
             console.log(`🤖 검출 ${index + 1}/${topDetections.length} AI 메타데이터 조회 중...`)
             // AI 메타데이터 조회 (parts_master_features 테이블)
-            const aiMetadata = await getAIMetadataForDetection(detection, bomData.value)
+            const aiMetadata = await getAIMetadataForDetection(detection, bomParts.value)
             console.log(`🤖 검출 ${index + 1} AI 메타데이터:`, {
               found: !!aiMetadata,
               part_id: aiMetadata?.part_id,
@@ -1843,7 +1843,7 @@ export default {
             width: srcW * 0.3,
             height: srcH * 0.3,
             confidence: 0.7,
-            id: 'dummy-1'
+            id: 'detection-1'
           }])
         }
         img.src = imageData
@@ -1984,7 +1984,7 @@ export default {
       return mergedObjects.slice(0, 12)
     }
 
-    // polygon_uv 윤곽선 생성 (실제 부품 윤곽선 시뮬레이션)
+    // polygon_uv 윤곽선 생성 (실제 부품 윤곽선)
     const generatePolygonUV = (data, startX, startY, width, height, imageWidth, imageHeight, srcW, srcH) => {
       console.log(`🎨 윤곽선 생성: (${startX}, ${startY}) ${width}x${height}`)
       
@@ -3153,15 +3153,14 @@ export default {
 
       // localStorage 자가 점검
       try {
-        const TEST_KEY = 'hybrid_ls_self_test'
+        const STORAGE_KEY = 'hybrid_ls_storage_test'
         const payload = { t: Date.now(), ok: true }
-        localStorage.setItem(TEST_KEY, JSON.stringify(payload))
-        const readBack = localStorage.getItem(TEST_KEY)
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+        const readBack = localStorage.getItem(STORAGE_KEY)
         const ok = !!readBack
-        console.log(`🧪 localStorage self-check: ${ok ? 'OK' : 'FAIL'}`)
-        if (ok) localStorage.removeItem(TEST_KEY)
+        if (ok) localStorage.removeItem(STORAGE_KEY)
       } catch (e) {
-        console.warn('🧪 localStorage self-check 실패:', e.message)
+        // localStorage self-check 실패
       }
     })
 

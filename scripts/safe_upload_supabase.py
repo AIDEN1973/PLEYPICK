@@ -203,7 +203,7 @@ def main():
         print("  --no-backup: 백업 생성 안함")
         print("  --no-check: 중복 확인 안함")
         print("  --restore <backup_folder>: 백업에서 복원")
-        print("\n예시:")
+        print("\n사용법:")
         print("  python safe_upload_supabase.py output/renders/3001")
         print("  python safe_upload_supabase.py output/renders/3001 --no-backup")
         print("  python safe_upload_supabase.py --restore synthetic_backup/backup_20250107_143022")

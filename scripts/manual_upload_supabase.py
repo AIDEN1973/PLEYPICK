@@ -211,7 +211,7 @@ def main():
         print("옵션:")
         print("  --sync-db: 데이터베이스에 동기화")
         print("  --part-id ID: Part ID 설정")
-        print("\n예시:")
+        print("\n사용법:")
         print("  python manual_upload_supabase.py output/renders/3001")
         print("  python manual_upload_supabase.py output/renders/3001 3001_renders --sync-db --part-id 3001")
         sys.exit(1)

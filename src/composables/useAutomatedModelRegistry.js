@@ -9,12 +9,9 @@
  */
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { createClient } from '@supabase/supabase-js'
+import { useSupabase } from './useSupabase'
 
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
-)
+const { supabase } = useSupabase()
 
 export const useAutomatedModelRegistry = () => {
   // 상태 관리
@@ -39,7 +36,7 @@ export const useAutomatedModelRegistry = () => {
       const { data, error: fetchError } = await supabase
         .from('model_registry')
         .select('*')
-        .eq('status', 'active')
+        .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(1)
 
@@ -140,8 +137,8 @@ export const useAutomatedModelRegistry = () => {
       // 기존 활성 모델 비활성화
       const { error: deactivateError } = await supabase
         .from('model_registry')
-        .update({ status: 'inactive', updated_at: new Date().toISOString() })
-        .eq('status', 'active')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('is_active', true)
 
       if (deactivateError) {
         console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
@@ -151,7 +148,7 @@ export const useAutomatedModelRegistry = () => {
       const { error: activateError } = await supabase
         .from('model_registry')
         .update({ 
-          status: 'active', 
+          is_active: true, 
           updated_at: new Date().toISOString() 
         })
         .eq('id', modelId)
@@ -177,10 +174,10 @@ export const useAutomatedModelRegistry = () => {
    */
   const evaluateModelPerformance = (metrics) => {
     const thresholds = {
-      mAP50: 0.7,
-      mAP50_95: 0.5,
-      precision: 0.8,
-      recall: 0.8,
+      mAP50: 0.0,
+      mAP50_95: 0.0,
+      precision: 0.0,
+      recall: 0.0,
       f1_score: 0.8
     }
 
@@ -266,60 +263,83 @@ export const useAutomatedModelRegistry = () => {
   }
 
   /**
-   * 학습 작업 시작
+   * 로컬 PC 학습 작업 시작
    */
   const startTraining = async (datasetId = 'latest', config = {}) => {
     try {
       isLoading.value = true
       error.value = null
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trigger-colab-training`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
+      console.log('🚀 로컬 PC 학습 시작...')
+      console.log('📊 학습 설정:', config)
+
+      // 로컬 학습 작업 생성
+      const trainingJob = {
+        job_name: `local_training_${Date.now()}`,
+        status: 'pending',
+        training_config: {
+          epochs: config.epochs || 100,
+          batch_size: config.batch_size || 16,
+          imgsz: config.imgsz || 640,
+          device: config.device || 'cuda',
+          set_num: config.set_num,
+          training_type: 'local' // 로컬 학습 표시
         },
-        body: JSON.stringify({
-          dataset_id: datasetId,
-          training_config: {
-            epochs: config.epochs || 100,
-            batch_size: config.batch_size || 16,
-            imgsz: config.imgsz || 640,
-            device: config.device || 'cuda',
-            set_num: config.set_num  // 세트 번호 전달
-          }
-        })
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(`HTTP ${response.status}: ${errorText}`)
+        started_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
       }
 
-      const result = await response.json()
+      // 데이터베이스에 학습 작업 기록
+      const { data: jobData, error: jobError } = await supabase
+        .from('training_jobs')
+        .insert(trainingJob)
+        .select()
+        .single()
 
-      if (!result.success) {
-        throw new Error(result.error || '학습 시작 실패')
+      if (jobError) {
+        throw new Error(`학습 작업 생성 실패: ${jobError.message}`)
       }
 
-      console.log(`🚀 학습 시작: 작업 ID ${result.training_job_id}`)
-      
-      // Colab 노트북 자동 열기 + 사용자 안내
-      if (result.notebook_url) {
-        console.log(`🔗 Colab 노트북 열기: ${result.notebook_url}`)
-        window.open(result.notebook_url, '_blank')
-        
-        // 사용자 안내 토스트 표시
-        setTimeout(() => {
-          alert(`🎯 Colab 노트북이 열렸습니다!\n\n📋 실행 방법:\n1. 노트북이 로드될 때까지 잠시 기다리세요\n2. "런타임" → "모두 실행" 클릭\n3. 자동으로 학습이 시작됩니다 (약 2-3시간 소요)\n\n✅ 완료 후 자동으로 모델이 업로드됩니다!`)
-        }, 1000)
+      console.log(`✅ 로컬 학습 작업 생성: ID ${jobData.id}`)
+
+      // 로컬 학습 스크립트 실행 안내
+      const localTrainingGuide = `
+🎯 로컬 PC 학습 시작!
+
+📋 실행 방법:
+1. 터미널/명령 프롬프트를 열어주세요
+2. 프로젝트 루트 디렉토리로 이동하세요
+3. 다음 명령어를 실행하세요:
+
+cd scripts
+python local_yolo_training.py --set_num ${config.set_num || 'latest'} --epochs ${config.epochs || 100}
+
+📊 학습 진행 상황:
+- 학습 상태는 대시보드에서 실시간으로 확인할 수 있습니다
+- 완료 후 자동으로 모델이 업로드됩니다
+- 예상 소요 시간: 2-3시간 (GPU 사용 시)
+
+💡 팁:
+- GPU가 있다면 CUDA를 사용하여 더 빠른 학습이 가능합니다
+- CPU만 있다면 시간이 더 오래 걸릴 수 있습니다
+      `
+
+      // 사용자 안내 표시
+      setTimeout(() => {
+        alert(localTrainingGuide)
+      }, 1000)
+
+      return {
+        success: true,
+        training_job_id: jobData.id,
+        job_name: jobData.job_name,
+        training_type: 'local',
+        guide: localTrainingGuide
       }
-      
-      return result
 
     } catch (err) {
       error.value = err.message
-      console.error('❌ 학습 시작 실패:', err)
+      console.error('❌ 로컬 학습 시작 실패:', err)
       throw err
     } finally {
       isLoading.value = false

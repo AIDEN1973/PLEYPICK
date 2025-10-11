@@ -20,7 +20,7 @@
             <input 
               id="setNum"
               v-model="selectedSetNum" 
-              placeholder="예: 76917"
+              placeholder="세트 번호 입력"
               class="set-input"
             />
             <button 
@@ -356,7 +356,7 @@ const setInfo = ref(null)
 // 학습 작업 목록 조회
 const fetchTrainingJobs = async () => {
   try {
-    console.log('📊 학습 작업 목록 조회 시작...')
+    // 학습 작업 목록 조회 시작
     
     // 간단한 쿼리로 training_jobs만 조회
     const { data: jobsData, error: jobsError } = await supabase
@@ -366,11 +366,11 @@ const fetchTrainingJobs = async () => {
       .limit(10)
     
     if (jobsError) {
-      console.error('❌ training_jobs 조회 실패:', jobsError)
+      // training_jobs 조회 실패
       throw jobsError
     }
     
-    console.log('📊 조회된 작업 수:', jobsData?.length || 0)
+    // 조회된 작업 수 확인
     
     // 기본 데이터 처리
     trainingJobs.value = (jobsData || []).map(job => ({
@@ -379,8 +379,8 @@ const fetchTrainingJobs = async () => {
       status_info: getStatusInfo(job)
     }))
     
-    console.log('✅ 학습 작업 목록 조회 완료:', trainingJobs.value.length, '개')
-    console.log('📊 작업 상태별 분포:', getStatusDistribution(trainingJobs.value))
+    // 학습 작업 목록 조회 완료
+    // 작업 상태별 분포 확인
     
     // 메트릭이 필요한 경우 별도로 조회 (오류 방지를 위해 선택적)
     if (trainingJobs.value.length > 0) {
@@ -623,7 +623,7 @@ const loadSetInfo = async () => {
     
     const totalParts = setParts?.length || 0
     
-    // 2. 세트 학습 상태 조회 (76917 / 76917-1 모두 처리, 안전 조회)
+    // 2. 세트 학습 상태 조회 (세트 번호 변형 처리, 안전 조회)
     let trainingStatus = null
     try {
       const baseSetNum = selectedSetNum.value.split('-')[0]
@@ -729,20 +729,50 @@ const startSetTraining = async () => {
       console.warn('세트 학습 상태 업데이트 실패:', updateError)
     }
     
-    // 2. 일반 학습 시작 (세트별 데이터 필터링은 Colab에서 처리)
+    // 2. 로컬 PC 학습 시작
     await startTrainingJob('latest', {
       epochs: 100,
       batch_size: 16,
       imgsz: 640,
       device: 'cuda',
-      set_num: selectedSetNum.value // 세트 번호 전달
+      set_num: selectedSetNum.value, // 세트 번호 전달
+      training_type: 'local' // 로컬 학습 표시
     })
     
     // 3. 세트 정보 새로고침
     await loadSetInfo()
     await refreshData()
     
-    console.log(`✅ 세트 ${selectedSetNum.value} 학습이 시작되었습니다!`)
+    console.log(`✅ 세트 ${selectedSetNum.value} 로컬 학습이 시작되었습니다!`)
+    
+    // 로컬 학습 안내 표시
+    const localTrainingInfo = `
+🎯 로컬 PC 학습이 시작되었습니다!
+
+📋 실행 방법:
+1. 터미널/명령 프롬프트를 열어주세요
+2. 프로젝트 루트 디렉토리로 이동하세요
+3. 다음 명령어를 실행하세요:
+
+cd scripts
+python local_yolo_training.py --set_num ${selectedSetNum.value} --epochs 100
+
+또는 배치 파일을 사용하세요:
+run_local_training.bat ${selectedSetNum.value} 100 16 640
+
+📊 학습 진행 상황:
+- 학습 상태는 대시보드에서 실시간으로 확인할 수 있습니다
+- 완료 후 자동으로 모델이 업로드됩니다
+- 예상 소요 시간: 2-3시간 (GPU 사용 시)
+
+💡 팁:
+- GPU가 있다면 CUDA를 사용하여 더 빠른 학습이 가능합니다
+- CPU만 있다면 시간이 더 오래 걸릴 수 있습니다
+    `
+    
+    setTimeout(() => {
+      alert(localTrainingInfo)
+    }, 1000)
   } catch (err) {
     console.error('세트 학습 시작 실패:', err)
   }
@@ -794,8 +824,18 @@ const formatDate = (dateString) => {
 }
 
 // 실시간 구독 설정
+let subscriptionChannels = null
+let reconnectAttempts = 0
+const maxReconnectAttempts = 5
+const reconnectDelay = 5000 // 5초
+
 const setupRealtimeSubscription = () => {
   console.log('🔄 실시간 구독 설정 시작...')
+  
+  // 기존 구독이 있으면 먼저 해제
+  if (subscriptionChannels) {
+    unsubscribeFromRealtime()
+  }
   
   // training_jobs 테이블 실시간 구독
   const trainingJobsChannel = supabase
@@ -811,6 +851,7 @@ const setupRealtimeSubscription = () => {
     )
     .subscribe((status) => {
       console.log('📡 training_jobs 채널 구독 상태:', status)
+      handleSubscriptionStatus('training_jobs', status)
     })
 
   // training_metrics 테이블 실시간 구독
@@ -825,6 +866,7 @@ const setupRealtimeSubscription = () => {
     )
     .subscribe((status) => {
       console.log('📡 training_metrics 채널 구독 상태:', status)
+      handleSubscriptionStatus('training_metrics', status)
     })
 
   // model_registry 테이블 실시간 구독
@@ -839,9 +881,65 @@ const setupRealtimeSubscription = () => {
     )
     .subscribe((status) => {
       console.log('📡 model_registry 채널 구독 상태:', status)
+      handleSubscriptionStatus('model_registry', status)
     })
 
-  return { trainingJobsChannel, trainingMetricsChannel, modelRegistryChannel }
+  subscriptionChannels = { trainingJobsChannel, trainingMetricsChannel, modelRegistryChannel }
+  return subscriptionChannels
+}
+
+// 구독 상태 처리 및 재연결 로직
+const handleSubscriptionStatus = (channelName, status) => {
+  if (status === 'CHANNEL_ERROR') {
+    console.error(`❌ ${channelName} 채널 오류 발생`)
+    reconnectAttempts++
+    
+    if (reconnectAttempts <= maxReconnectAttempts) {
+      console.log(`🔄 ${reconnectAttempts}/${maxReconnectAttempts} 재연결 시도 중... (${reconnectDelay/1000}초 후)`)
+      setTimeout(() => {
+        console.log(`🔄 ${channelName} 채널 재연결 시도...`)
+        setupRealtimeSubscription()
+      }, reconnectDelay)
+    } else {
+      console.error(`❌ ${channelName} 채널 최대 재연결 시도 횟수 초과. 실시간 구독을 비활성화합니다.`)
+      // 실시간 구독 실패 시 자동 새로고침 간격을 더 짧게 설정
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval)
+        autoRefreshInterval = setInterval(async () => {
+          console.log('⏰ 실시간 구독 실패로 인한 자동 새로고침 실행...')
+          await fetchTrainingJobs()
+        }, 10000) // 10초로 단축
+        console.log('🔄 자동 새로고침 간격을 10초로 단축했습니다.')
+      }
+    }
+  } else if (status === 'SUBSCRIBED') {
+    console.log(`✅ ${channelName} 채널 구독 성공`)
+    reconnectAttempts = 0 // 성공 시 재연결 시도 횟수 리셋
+  } else if (status === 'CLOSED') {
+    console.log(`🔌 ${channelName} 채널 연결 종료`)
+  } else if (status === 'TIMED_OUT') {
+    console.log(`⏰ ${channelName} 채널 연결 시간 초과`)
+  }
+}
+
+// 실시간 구독 해제
+const unsubscribeFromRealtime = () => {
+  if (subscriptionChannels) {
+    console.log('🔌 실시간 구독 해제 중...')
+    
+    if (subscriptionChannels.trainingJobsChannel) {
+      supabase.removeChannel(subscriptionChannels.trainingJobsChannel)
+    }
+    if (subscriptionChannels.trainingMetricsChannel) {
+      supabase.removeChannel(subscriptionChannels.trainingMetricsChannel)
+    }
+    if (subscriptionChannels.modelRegistryChannel) {
+      supabase.removeChannel(subscriptionChannels.modelRegistryChannel)
+    }
+    
+    subscriptionChannels = null
+    console.log('🔌 실시간 구독 해제 완료')
+  }
 }
 
 // 자동 새로고침 설정
@@ -879,6 +977,7 @@ onMounted(async () => {
 // 컴포넌트 언마운트 시 정리
 onUnmounted(() => {
   stopAutoRefresh()
+  unsubscribeFromRealtime()
 })
 </script>
 

@@ -28,7 +28,7 @@ class PhasedSyntheticGeneration:
         # 단계별 설정
         self.phases = {
             'phase1': {
-                'name': '핵심 부품 테스트',
+                'name': '핵심 부품',
                 'parts_count': 100,
                 'images_per_part': 500,
                 'estimated_size_gb': 3.75,  # 100 * 500 * 75KB
@@ -221,7 +221,7 @@ echo "✅ 3단계 완료: {phase_config['estimated_size_gb']}GB 생성"
         
         if capacity_info['bucket_usage_percent'] > 80:
             suggestions.append("📦 1단계 완료 후 용량 확인 후 2단계 진행")
-            suggestions.append("🗂️ 불필요한 테스트 데이터 정리")
+            suggestions.append("🗂️ 불필요한 데이터 정리")
             suggestions.append("📊 중요 부품 우선 생성")
         
         if capacity_info['bucket_usage_percent'] > 90:

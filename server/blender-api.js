@@ -92,7 +92,7 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
     const blenderScript = path.join(__dirname, '..', 'scripts', 'render_ldraw_to_supabase.py')
     const ldrawPath = 'C:/LDraw/parts'
     
-    // 적응형 샘플링 시스템을 위한 고급 옵션 추가
+    // 적응형 샘플링 시스템을 위한 고급 옵션
     const blenderArgs = [
       '--background',
       '--python', blenderScript,
@@ -102,7 +102,7 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
       '--count', imageCount.toString(),
       '--quality', quality || 'fast',
       '--output-dir', path.join(__dirname, '..', 'temp', 'renders'),
-      // 적응형 샘플링 시스템 활성화
+      // 적응형 샘플링 시스템 설정
       '--enable-adaptive',
       '--enable-noise-correction',
       '--quality-threshold', '0.95',

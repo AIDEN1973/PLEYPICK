@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""
+모든 부품 이미지를 Supabase Storage로 마이그레이션
+- CDN 링크를 사용하는 부품들을 Supabase Storage로 업로드
+- part_images 테이블에 등록
+- 일관된 이미지 소스 보장
+"""
+
+import os
+import sys
+import json
+import requests
+from datetime import datetime
+from supabase import create_client, Client
+from PIL import Image
+import io
+
+# 환경 변수 로드
+def load_env():
+    env_vars = {}
+    try:
+        with open('.env', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    env_vars[key] = value
+    except FileNotFoundError:
+        print("❌ .env 파일을 찾을 수 없습니다.")
+        sys.exit(1)
+    return env_vars
+
+def main():
+    print("🚀 모든 부품 이미지를 Supabase Storage로 마이그레이션 시작")
+    print("=" * 60)
+    
+    # 환경 변수 로드
+    env = load_env()
+    
+    SUPABASE_URL = env.get('VITE_SUPABASE_URL')
+    SUPABASE_KEY = env.get('VITE_SUPABASE_ANON_KEY')
+    
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("❌ Supabase 환경 변수가 설정되지 않았습니다.")
+        sys.exit(1)
+    
+    # Supabase 클라이언트 생성
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    try:
+        # 1. CDN 링크를 사용하는 모든 부품 조회
+        print("📋 CDN 링크를 사용하는 부품 조회 중...")
+        
+        query = """
+        SELECT DISTINCT 
+            sp.part_id,
+            sp.color_id,
+            lp.part_img_url,
+            lc.name as color_name
+        FROM set_parts sp
+        JOIN lego_parts lp ON sp.part_id = lp.part_num
+        JOIN lego_colors lc ON sp.color_id = lc.color_id
+        LEFT JOIN part_images pi ON sp.part_id = pi.part_id AND sp.color_id = pi.color_id
+        WHERE lp.part_img_url IS NOT NULL 
+        AND lp.part_img_url LIKE '%cdn.rebrickable.com%'
+        AND pi.part_id IS NULL
+        ORDER BY sp.part_id, sp.color_id
+        LIMIT 1000
+        """
+        
+        result = supabase.rpc('execute_sql', {'sql': query}).execute()
+        
+        if not result.data:
+            print("✅ 마이그레이션할 부품이 없습니다.")
+            return
+        
+        parts_to_migrate = result.data
+        print(f"📦 마이그레이션 대상: {len(parts_to_migrate)}개 부품")
+        
+        # 2. 각 부품 이미지 다운로드 및 업로드
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for i, part in enumerate(parts_to_migrate, 1):
+            part_id = part['part_id']
+            color_id = part['color_id']
+            image_url = part['part_img_url']
+            color_name = part['color_name']
+            
+            print(f"\n[{i}/{len(parts_to_migrate)}] 처리 중: {part_id} (색상: {color_name})")
+            
+            try:
+                # 이미지 다운로드
+                print(f"  📥 다운로드 중: {image_url}")
+                response = requests.get(image_url, timeout=30)
+                response.raise_for_status()
+                
+                # WebP로 변환
+                print(f"  🔄 WebP 변환 중...")
+                img = Image.open(io.BytesIO(response.content))
+                
+                # 이미지 최적화 (최대 800px)
+                max_size = 800
+                if img.width > max_size or img.height > max_size:
+                    img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+                
+                # WebP로 변환
+                webp_buffer = io.BytesIO()
+                img.save(webp_buffer, format='WebP', quality=80, optimize=True)
+                webp_data = webp_buffer.getvalue()
+                
+                # Supabase Storage에 업로드
+                print(f"  📤 Supabase Storage 업로드 중...")
+                file_name = f"{part_id}_{color_id}.webp"
+                file_path = f"images/{file_name}"
+                
+                # 기존 파일 삭제 (있다면)
+                try:
+                    supabase.storage.from_('lego_parts_images').remove([file_path])
+                except:
+                    pass
+                
+                # 새 파일 업로드
+                upload_result = supabase.storage.from_('lego_parts_images').upload(
+                    file_path, 
+                    webp_data, 
+                    file_options={"content-type": "image/webp"}
+                )
+                
+                if upload_result.error:
+                    raise Exception(f"Upload failed: {upload_result.error}")
+                
+                # part_images 테이블에 등록
+                print(f"  💾 데이터베이스에 등록 중...")
+                public_url = f"{SUPABASE_URL}/storage/v1/object/public/lego_parts_images/{file_path}"
+                
+                insert_result = supabase.table('part_images').insert({
+                    'part_id': part_id,
+                    'color_id': color_id,
+                    'original_url': image_url,
+                    'uploaded_url': public_url,
+                    'filename': file_name,
+                    'upload_status': 'completed',
+                    'created_at': datetime.now().isoformat()
+                }).execute()
+                
+                if insert_result.error:
+                    raise Exception(f"Database insert failed: {insert_result.error}")
+                
+                success_count += 1
+                print(f"  ✅ 완료: {file_name}")
+                
+            except Exception as e:
+                error_count += 1
+                error_msg = f"부품 {part_id} (색상: {color_name}) 처리 실패: {str(e)}"
+                errors.append(error_msg)
+                print(f"  ❌ 실패: {error_msg}")
+                
+                # 오류가 너무 많으면 중단
+                if error_count > 50:
+                    print(f"\n⚠️ 오류가 너무 많습니다 ({error_count}개). 중단합니다.")
+                    break
+        
+        # 3. 결과 요약
+        print("\n" + "=" * 60)
+        print("📊 마이그레이션 결과 요약")
+        print("=" * 60)
+        print(f"✅ 성공: {success_count}개")
+        print(f"❌ 실패: {error_count}개")
+        print(f"📈 성공률: {success_count/(success_count+error_count)*100:.1f}%")
+        
+        if errors:
+            print(f"\n❌ 오류 목록 (최대 10개):")
+            for error in errors[:10]:
+                print(f"  - {error}")
+        
+        # 4. 로그 저장
+        log_data = {
+            'timestamp': datetime.now().isoformat(),
+            'total_parts': len(parts_to_migrate),
+            'success_count': success_count,
+            'error_count': error_count,
+            'success_rate': success_count/(success_count+error_count)*100 if (success_count+error_count) > 0 else 0,
+            'errors': errors
+        }
+        
+        log_filename = f"migration_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        with open(log_filename, 'w', encoding='utf-8') as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=2)
+        
+        print(f"\n📄 상세 로그 저장됨: {log_filename}")
+        
+    except Exception as e:
+        print(f"❌ 마이그레이션 실패: {str(e)}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

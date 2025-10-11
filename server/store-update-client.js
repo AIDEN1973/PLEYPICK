@@ -561,11 +561,11 @@ class StoreUpdateClient {
 
   async getCurrentPerformance() {
     try {
-      // 실제 성능 메트릭 수집
+      // 실제 성능 메트릭 수집 (시뮬레이션 제거됨)
       const performance = {
-        accuracy: Math.random() * 0.2 + 0.8, // 80-100% (시뮬레이션)
-        fps: Math.random() * 10 + 20, // 20-30 FPS (시뮬레이션)
-        memory_usage: Math.random() * 500 + 100, // 100-600MB (시뮬레이션)
+        accuracy: 0.0, // 실제 측정 필요
+        fps: 0.0, // 실제 측정 필요
+        memory_usage: 0, // 실제 측정 필요
         timestamp: new Date().toISOString()
       }
       
@@ -639,7 +639,7 @@ class StoreUpdateClient {
 if (require.main === module) {
   const config = {
     storeId: process.env.STORE_ID || 'store_001',
-    storeName: process.env.STORE_NAME || '테스트 매장',
+    storeName: process.env.STORE_NAME || '매장',
     centralServerUrl: process.env.CENTRAL_SERVER_URL || 'http://localhost:3002',
     location: process.env.STORE_LOCATION || '서울시 강남구',
     contact: process.env.STORE_CONTACT || '010-1234-5678',

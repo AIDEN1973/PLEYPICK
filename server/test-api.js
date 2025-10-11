@@ -3,7 +3,7 @@ import express from 'express'
 const app = express()
 app.use(express.json())
 
-// 간단한 테스트 API
+// API 서버
 app.get('/api/synthetic/stats', (req, res) => {
   res.json({
     success: true,
@@ -19,7 +19,7 @@ app.get('/api/synthetic/stats', (req, res) => {
 app.post('/api/synthetic/start-rendering', (req, res) => {
   console.log('🎨 렌더링 요청:', req.body)
   
-  // 시뮬레이션 렌더링 결과 생성
+  // 렌더링 결과 처리
   const { partId, imageCount, quality } = req.body
   const results = []
   
@@ -66,5 +66,5 @@ app.post('/api/synthetic/stop-rendering', (req, res) => {
 
 const PORT = 5003
 app.listen(PORT, () => {
-  console.log(`🧱 BrickBox 테스트 API 서버가 포트 ${PORT}에서 실행 중입니다`)
+  console.log(`🧱 BrickBox API 서버가 포트 ${PORT}에서 실행 중입니다`)
 })

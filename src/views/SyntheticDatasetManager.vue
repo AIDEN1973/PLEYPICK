@@ -154,7 +154,7 @@
           <label>부품 ID</label>
           <input 
             v-model="selectedPartId" 
-            placeholder="예: 65635"
+            placeholder="부품 번호 입력"
             @input="validatePartId"
           />
           <div v-if="partValidation" class="validation-message">
@@ -167,7 +167,7 @@
           <div style="display:flex; gap:8px; align-items:center;">
             <input 
               v-model="selectedSetNum" 
-              placeholder="예: 76917 (데이터베이스에서 로드)" 
+              placeholder="세트 번호 입력" 
               @keyup.enter="loadSetParts"
             />
             <button class="btn-secondary" @click="loadSetParts">부품 로드 (DB)</button>
@@ -493,16 +493,13 @@
 <script>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSyntheticDataset } from '@/composables/useSyntheticDataset'
-import { createClient } from '@supabase/supabase-js'
+import { useSupabase } from '@/composables/useSupabase'
 
 export default {
   name: 'SyntheticDatasetManager',
   setup() {
-    // Supabase 클라이언트 초기화
-    const supabase = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
-    )
+    // Supabase 클라이언트 초기화 (중복 방지)
+    const { supabase } = useSupabase()
     
     const { 
       getStats,
@@ -1192,7 +1189,7 @@ export default {
             }
           }, POLL_INTERVAL_MS)
         } else {
-          // 폴백: 시뮬레이션
+          // 폴백: 기본값 사용
           simulateRendering()
         }
         
@@ -1610,8 +1607,8 @@ export default {
         renderResults.value = [
           {
             id: 1,
-            partId: selectedPartId.value || '3001',
-            imageUrl: '/api/placeholder/3001_001.png',
+            partId: selectedPartId.value || '',
+            imageUrl: '/api/placeholder/part_placeholder.png',
             colorName: '빨강',
             angle: '45°',
             resolution: '640x640'

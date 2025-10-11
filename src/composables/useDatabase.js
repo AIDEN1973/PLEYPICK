@@ -5,6 +5,60 @@ export function useDatabase() {
   const loading = ref(false)
   const error = ref(null)
 
+
+  // 중복 세트 삭제 (재등록 시)
+  const deleteSetAndParts = async (setId, setNum, deleteLLMAnalysis = false) => {
+    try {
+      // 1. 부품 이미지 삭제
+      const { data: setParts, error: partsError } = await supabase
+        .from('set_parts')
+        .select('part_id, color_id')
+        .eq('set_id', setId)
+
+      if (!partsError && setParts) {
+        // part_images 테이블에서 관련 이미지 삭제
+        for (const part of setParts) {
+          await supabase
+            .from('part_images')
+            .delete()
+            .eq('part_id', part.part_id)
+            .eq('color_id', part.color_id)
+        }
+        
+        // LLM 분석 데이터 삭제 (옵션)
+        if (deleteLLMAnalysis) {
+          console.log('🧠 LLM 분석 데이터 삭제 중...')
+          for (const part of setParts) {
+            await supabase
+              .from('parts_master_features')
+              .delete()
+              .eq('part_id', part.part_id)
+              .eq('color_id', part.color_id)
+          }
+          console.log('✅ LLM 분석 데이터 삭제 완료')
+        }
+      }
+
+      // 2. set_parts 삭제
+      await supabase
+        .from('set_parts')
+        .delete()
+        .eq('set_id', setId)
+
+      // 3. 세트 삭제
+      await supabase
+        .from('lego_sets')
+        .delete()
+        .eq('id', setId)
+
+      console.log(`✅ Deleted existing set ${setNum} and all related data`)
+      return true
+    } catch (err) {
+      console.error('Error deleting existing set:', err)
+      return false
+    }
+  }
+
   // 레고 세트 저장
   const saveLegoSet = async (setData) => {
     loading.value = true
@@ -399,23 +453,18 @@ export function useDatabase() {
 
   // 이미 등록된 세트인지 확인
   const checkSetExists = async (setNum) => {
-    loading.value = true
-    error.value = null
-
     try {
       const { data, error: dbError } = await supabase
         .from('lego_sets')
-        .select('id, set_num, name, created_at')
+        .select('id, set_num, name, year, num_parts, created_at')
         .eq('set_num', setNum)
         .maybeSingle()
 
       if (dbError) throw dbError
       return data
     } catch (err) {
-      error.value = err.message
-      throw err
-    } finally {
-      loading.value = false
+      console.error('Error checking set existence:', err)
+      return null
     }
   }
 
@@ -454,6 +503,7 @@ export function useDatabase() {
     getPartImages,
     getOperationLogs,
     checkSetExists,
-    checkMultipleSetsExist
+    checkMultipleSetsExist,
+    deleteSetAndParts
   }
 }

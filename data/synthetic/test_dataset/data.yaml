@@ -1,0 +1,7 @@
+names:
+- lego_part
+nc: 1
+path: C:\cursor\brickbox\data\synthetic\test_dataset
+test: images/test
+train: images/train
+val: images/val
