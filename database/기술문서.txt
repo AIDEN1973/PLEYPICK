@@ -1,0 +1,530 @@
+# BrickBox 운영형 최종 결론 기술문서
+
+🧱 BrickBox 운영형 최종 결론 기술문서 (WebP 반영판 · Complete)
+
+버전: 1.2 (2025-10-11)
+적용대상: 세트별 폐쇄 환경 · 실사 0장 · 부품당 WebP 렌더링 200장 · 세트당 최대 4,000 부품(수량 기준; 고유 파츠 기준으론 수백~천 단위)
+요약: YOLO 1-class seg로 탐지 전담, CLIP/FGC 임베딩 + FAISS Two-Stage + Adaptive Fusion으로 식별 전담, **BOM 제약 + 헝가리안(계층/희소/비동기)**으로 중복·초과 차단, WebP 전용 정책/캐싱으로 성능·용량 동시 달성
+
+1. 목적 · 범위 · SLO
+목적
+
+WebP 기반 합성 데이터와 AI 메타를 활용하여 실시간 누락 부품 검출을 안정적으로 달성하는 종단 파이프라인 정의.
+
+범위
+
+데이터 레이아웃/분할/중복 방지/QA, WebP 정책/캐시
+
+탐지(Detector) ↔ 식별(Identifier) 완전 분리
+
+임베딩 검색: FAISS(HNSW) Two-Stage (+ confusions aware)
+
+Adaptive Feature Fusion(img/meta/txt + topo/area 보정)
+
+BOM 제약 + 헝가리안(계층/희소/비동기, 싱글 라이터 보장)
+
+모니터링/알림/런북, 보안·변경관리, 검증/A/B 인수 기준
+
+확장: 하드 템플릿, L1/L2 인덱스, FGC-Encoder 전환
+
+운영 SLO
+항목	목표
+탐지 Recall(소형 포함)	≥ 0.95
+식별 Top-1@BOM	≥ 0.97
+오검출률	≤ 3%
+보류율	≤ 5%
+평균 지연	100–150 ms/frame (중급 GPU, 타일링 포함)
+WebP 디코딩 p95	≤ 15 ms/frame
+인덱스 검색 p95	≤ 10 ms (Stage-1), ≤ 15 ms (Stage-2)
+
+1. 시스템 상위 아키텍처
+입력(WebP 프레임)
+└─ YOLO(1-class seg, @768/960) → bbox+mask
+└─ tight-crop(마스크 정규화, 패딩 규칙)
+└─ 임베딩 추출: CLIP(운영 기본) / FGC(연구·보조)
+└─ FAISS(HNSW) 검색: BOM 서브셋 (Two-Stage: Top-5 → 필요시 Top-10/ef=160)
+└─ Adaptive Fusion(img/meta/txt + topo_penalty + area_consistency)
+└─ BOM 제약 + 헝가리안(계층·희소·비동기 / 싱글 라이터 병합)
+└─ 누락/초과 산출 + 보류 큐 재평가
+
+핵심 설계 철학
+
+Detection is not Identification. (탐지/식별 완전 분리)
+
+Closed-World by BOM. (BOM 제약 + Hungarian)
+
+Search small, adaptively. (Two-Stage + Fusion 동적 가중)
+
+Compress smart. (WebP q=90 + SSIM 0.965)
+
+1. 데이터 정책 (WebP)
+2.1 세트 단위 디렉토리·메타 구조
+/dataset_{SET_ID}/
+images/train|val|test/{element_id}/{uuid}.webp
+labels/ # YOLO seg labels (txt/poly)
+masks_bin/ (선택, PNG) # 바이너리 마스크 (품질 점검/연구)
+meta/
+renders.jsonl # {set_id, element_id, render_id, seed, pose, light, domain, dup_of?}
+ai_meta.jsonl # 7.1 스키마 준수
+faiss_index/ # 인덱스 + 버전 태그 (L1/L2 구분 가능)
+
+2.2 분할(누수 방지)
+
+(seed, pose, light) 조합 단위로 Train/Val/Test 분리(동일 조합 cross-split 금지).
+
+기본 80/10/10. domain=original|rdaX 태깅(RDA 강도 기록; 분할 기준 X).
+
+2.3 중복 제거(손실 압축 보정)
+
+3단계: pHash → SSIM → CLIP cos.
+
+WebP lossy(q≈90) 사용 시 SSIM 임계 0.965(기본 0.97에서 보정).
+
+동일 (seed,pose,light)는 메타 기반 즉시 중복. renders.jsonl.dup_of 기록 → 재훈련/재인덱싱 차단.
+
+2.4 WebP 인코딩·마스크 정책
+
+학습 이미지: WebP lossy q=90, -m 6, -af on, sRGB(ICC 유지)
+
+템플릿/하드 템플릿: lossless 권장(대안: q=95 + 임계 보정)
+
+마스크/라벨: 손실 압축 금지(텍스트 폴리곤 or PNG)
+
+2.5 WebP 디코딩 성능(캐시/프리패치)
+
+DataLoader(num_workers=8~12, prefetch_factor=2~4, pin_memory=True)
+
+Tensor LRU 캐시(최소 5,000장 ≈ ~4GB) + 비동기 디코딩 풀
+
+효과: 학습 스루풋 +20~30%, GPU idle 감소, 디코딩 p95 ≤ 15 ms 유지
+
+1. 데이터 품질 · QA
+3.1 라벨/마스크 QA 규칙
+
+mask 면적 / bbox 면적: 25~98% 범위를 벗어나면 플래그
+
+Topology: hole count Z-score > |3| → 리뷰 큐
+
+EarlyStopping: 15 epoch 내 mAP 개선 < 0.1% → 조기 종료
+
+3.2 RDA(Render Domain Randomization)
+
+Train **80%**에 조명/HDR/스크래치/배경/렌즈왜곡.
+
+Val/Test는 원본 중심(일반화 평가).
+
+3.3 AI 메타 DB 동기화(자동 매핑) - v2.1 업데이트
+JSONL 키	DB 필드(parts_master_features)	매핑 방식
+shape_tag	shape_tag (VARCHAR)	직접 저장
+shape_tag	part_category (INTEGER)	Enum 참조 (part_categories 테이블)
+series	series (VARCHAR)	직접 저장 (system/duplo/technic/bionicle)
+stud_count_top	expected_stud_count	직접 매핑
+tube_count_bottom	expected_hole_count	직접 매핑
+groove, center_stud	groove, center_stud	직접 매핑
+confusions	confusion_groups	직접 매핑
+distinguishing_features	distinguishing_features	직접 매핑
+recognition_hints	recognition_hints	직접 매핑
+topo_applicable	meta_penalty	플래그 변환
+image_quality.*	image_quality_q/snr	집계 변환
+
+v2.1 주요 변경사항:
+- shape_tag와 series 역할 분리 (형태 vs 시리즈)
+- part_category: Enum 테이블 기반 동적 매핑 (확장 가능)
+- 카테고리 범위: 1-99 (기존 0-7 제한 해제)
+- 카테고리 종류: 30+개 지원 (plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, hinge, clip, bar, fence, door, window, roof, inverted, minifig_part, animal_figure, plant_leaf, wheel, tire, wing, propeller, gear, chain, axle, unknown)
+
+업서트 배치 시 version 증가, operation_logs.metadata에 변경 이력 저장.
+
+1. 탐지(Detector) — YOLO 1-class Segmentation
+4.1 모델 선택
+
+기본: YOLO11m-seg @768
+
+벤치: 11m-seg@768 vs YOLOv8-L-seg@768 (대표 세트 3종 × 500프레임)
+
+소형 Recall ≥ 0.95 and FPS ≥ 5 → 채택
+
+미달 시 960 재벤치 → 미달 시 v8-L-seg 승급
+
+4.2 학습/추론 기본값
+
+학습: epochs=100 (ES=15), batch=16~32, copy_paste=0.6, mosaic=0.5, fliplr=0.5, hsv=(0.7,0.4,0.4), perspective=0.001, erasing=0.2, AdamW + cosine LR
+
+추론: conf=0.15, iou=0.60, max_det=1200, imgsz=768
+
+밀집 프레임: 2×2 타일링(overlap 15%) 자동 스위치
+
+출력: bbox + mask → tight-crop 품질 결정(패딩=mask 외곽 4~8px 권장)
+
+1. 식별(Identifier) — 임베딩 검색 + Adaptive Fusion
+5.1 FAISS 검색 (Two-Stage)
+
+인덱스: BOM 서브셋(클래스당 대표 10~20 + Hard 5)
+
+Stage-1: Top-5 (ef=128)
+
+Stage-2: confusions에 포함된 유사 파츠가 Top-5에 없으면 Top-10(ef=160) 재검색
+
+인덱스 관리: 2주 주기 full rebuild(파편화 방지), Hard 템플릿 자동 선별(misclass_rate>5% or hold>10%)
+
+5.2 Adaptive Feature Fusion(동적 가중)
+sim_final =
+w_img  * cos(emb_img,  tmpl_img)
+
+- w_meta * cos(emb_meta, tmpl_meta)
+- w_txt * cos(emb_txt, tmpl_txt)
+- topo_penalty(query_mask, meta)
+- area_bonus(query_mask, cls_stats)
+
+초기값: w_img=0.65, w_meta=0.25, w_txt=0.15
+
+타일/프린트 위주(stud_count_top≤1≥40%): w_meta=0.20, w_txt=0.20
+
+스터드/튜브 뚜렷(stud_count_top≥2≥70%): w_meta=0.30, w_txt=0.10
+
+세트 규모 보정: 부품>2,000 → w_txt += 0.05(≤0.20) / 부품<200 → w_txt -= 0.05(≥0.10)
+
+자동 튜닝(24h 롤링): 오검출>3% → w_meta/txt += 0.05(상한 준수) / 보류>7% → Hard 템플릿 +3/cls, w_img += 0.05(≤0.70)
+
+5.3 topo_penalty & area_consistency
+
+topo_applicable=true인 파츠에서 상면 구멍 수 vs 하부 튜브 수 비교
+
+차이 0 → 0 / 차이 1 → -0.03 / 차이 ≥2 → -0.06~-0.08
+
+area_consistency: 예상 면적 ±30% 이내면 +0.10 보너스
+
+5.4 텍스트 품질·언어 대응(다국어)
+
+lang_aware_keyword_score + noun_density로 품질 점수(0~1) → w_txt 초기화(0.05/0.10/0.15)
+
+지원 언어(초기 4개 → 확장 로드맵): en/ko/ja/de
+
+1. DB 스키마 매핑(핵심 테이블)
+목적	테이블	주요 필드(예)
+파츠 메타/임베딩/혼동	parts_master_features	feature_json, feature_text, clip_text_emb, recognition_hints, confusion_groups, expected_stud_count/hole_count, image_quality_q, tier, score_*
+합성 데이터/레이블	synthetic_dataset / synthetic_part_stats	image_path/url, annotation_path/url, metadata, total_images, angle/color/background dist
+렌더링 설정	synthetic_render_configs	render_settings, material/lighting/background
+세트/BOM	lego_sets, set_parts	set_num, element_id, quantity, is_spare
+모델/버전/인덱스	model_registry, active_models	model_version/type/path, dataset_id, performance_metrics, is_active
+학습 잡/메트릭	training_jobs, training_metrics, training_job_stats	config/progress/metrics, duration, started/completed_at
+운영 로그/알림	operation_logs, automation_config, auto_training_stats	operation_type, status, metadata(jsonb); 경보/튜닝 기록
+
+인덱스 파일은 Storage에 보관, model_registry.metrics.index_manifest로 해시·경로 관리 권장.
+
+
+1. BOM 제약 + 헝가리안 (계층/희소/비동기)
+7.1 비용/임계
+
+비용 = −sim_final, 확정 임계 0.80, 보류: sim_final < 0.80 또는 Top1–Top2 < 0.10
+
+7.2 희소화/계층 처리
+
+Pre-filter: 각 탐지 Top-3 후보(또는 sim_final ≥ 0.50)만 비용 행렬 포함
+
+계층:
+
+고확신 >0.90: 즉시 할당(greedy)
+
+중간 0.70~0.90: 배치 헝가리안(예: 100개씩)
+
+저확신 ≤0.70: 보류/휴리스틱
+
+인접 억제: 센트로이드 거리 < min_size×0.5 → 낮은 점수 제거
+
+7.3 비동기 스케줄러(Option A: 스냅샷+단일 병합자)
+
+탐지/식별과 헝가리안 완전 분리.
+
+프레임별 BOM 스냅샷 전달 → 결과만 싱글 라이터가 병합, 음수 방지 검증.
+
+큐 깊이>10 → sync 폴백. 타임아웃 500ms → greedy 폴백 + 경보.
+
+1. 하드 템플릿(L2) · 인덱스 운영
+8.1 추가·갱신
+
+자동 선별: misclass_rate > 5% or hold_rate > 10% → Hard +3~5/cls
+
+L1/L2 계층 인덱스: L1(대표) 메모리 상주, L2(하드) mmap(SSD). 콜드 스타트 +5~10ms.
+
+8.2 Pruning(3단계, 6개월 주기)
+
+Tier 1 (즉시 제거): hit_rate < 0.01 or success_rate < 0.05
+
+Tier 2 (검토): hit_rate < 0.05 and success_rate < 0.10 (A/B 후 결정)
+
+Tier 3 (유지): 기타
+
+Pruning 전 ΔTop-1 < 0.1%p 검증 필수, 최소 유지 15장/클래스.
+
+1. FGC-Encoder (ArcFace) — 연구→운영 전환
+9.1 전환 정량 기준
+
+Top-1 +1.5%p 이상, p95 지연 ≤ 1.3×, 검증 샘플 ≥ 10,000, 95% CI 통과
+
+9.2 Adaptive Ensemble(마진 기반)
+
+margin = sim_top1 − sim_top2 작을수록 FGC 가중↑
+
+기본식: w_fgc = clamp(0.3 + (0.2 - margin)*1.2, 0.3, 0.7)
+
+A/B 캘리브레이션: slope∈{1.0,1.2,1.5}, pivot∈{0.15,0.20,0.25} → model_registry.performance_metrics.fgc_margin_curve 기록
+
+1. 성능 · 용량 · 자원 가이드
+10.1 지연 구성(중급 GPU 기준)
+
+탐지(11m-seg@768): 25~40ms (타일 2×2 → 100~160ms)
+
+임베딩: 300~800 크롭/프레임, 배치 64/128 → 20~60ms
+
+검색: FAISS Top-5(→Top-10) → <10ms (Stage-2 진입 10~25%)
+
+총합: 무타일 60~130ms / 타일 120~200ms
+
+10.2 메모리/스토리지
+
+인덱스 RAM: 2,000 cls × 15 tmpl × 512 dim × float32(4B) ≈ ~61MB (+meta/text tens of MB)
+
+WebP q=90: PNG 대비 60~70% 절감
+
+1 파츠(200장) × 90KB(평균) ≈ ~18MB/파츠 → 1,000 파츠 ≈ ~18GB(실사용은 라벨/메타 제외한 순수 학습셋 기준)
+
+10.3 IO/파이프라인 최적화
+
+Pinned memory + pre-decode tensor cache
+
+Batch collation: 크롭 사이즈 상한/패딩 규칙 통일
+
+ONNX/TensorRT(CLIP/FGC)로 임베딩 p95 ↓
+
+1. 모니터링 · 알림 (대시보드/지표/규칙)
+11.1 핵심 지표
+카테고리	지표	임계	조치
+SLO	소형 Recall, Top-1@BOM, 오검출, 보류율, FPS/p95	SLO 미달	런북 12장 참조
+Fusion	w_img/w_meta/w_txt 값·변경 이력	24h 3회↑	텍스트/메타 점검
+FAISS	Stage-2 진입률, confusions 커버리지, 검색시간	>25% / >15ms	템플릿 보강/Pruning
+topo/area	적용률·감점 빈도	급증	메타 검증
+WebP	decode p95	>15ms	LRU/워커 확장
+Index	index_size	>120MB	Pruning 트리거
+FGC	CLIP 대비 ΔTop-1	<0	1h 내 롤백
+
+모든 경보는 operation_logs와 통합, Slack/Webhook 발송(automation_config).
+
+1. 런북(장애 대응)
+증상	즉시 조치	후속
+탐지 과소(Recall↓)	conf 0.15→0.12, imgsz 768→960, 11m→v8-L	데이터 QA 재점검(3장)
+식별 혼동↑	Hard 템플릿 +3/cls, w_meta/w_txt +0.05, margin 0.12	confusions 목록 보강
+보류 과다	Stage-2 확대, 템플릿 다양성 보강	RDA 강도 조정
+FPS 저하	CLIP ONNX/TensorRT, WebP 캐시 확대, Stage-2 제한	하드웨어 스케일
+BOM 음수	큐 정지 + 상태 리빌드	병합 로직/락 검사
+Hungarian 큐 10↑	sync 모드 전환	워커 수/배치 크기 조정
+decode p95 >15ms	LRU 배수↑, 워커↑	q=92 일부 구간 상향 검토
+2. 보안 · 변경관리 · 버전 태깅
+
+데이터셋/모델/인덱스/메타 모두 버전 해시 관리.
+
+세트별 배포 Manifest: detector/imgsz/fusion 가중/인덱스 버전/RDA 정책.
+
+접근 제어: 인덱스·메타 읽기 최소권한, 로그 PII 배제.
+
+변경 이력: operation_logs(metadata: jsonb) 표준화(누가 무엇을 언제 왜).
+
+1. 검증 · A/B · 인수 기준
+
+사전 검증: 3 세트 × 2,000 샘플 = 6,000건 / 세트별 SLO 준수
+
+A/B: Detector(11m vs v8-L), Top-K(Stage-1 5/10), Fusion(동적/고정), FGC Ensemble(3 설정)
+
+인수: SLO 5일 연속 충족, 주요 알림 무발생
+
+세트 규모 보정 A/B 계획
+
+small(100부품): w_txt=0.10 vs 0.15
+mid(1,000부품): w_txt=0.15 고정
+large(3,000부품): w_txt=0.15 vs 0.20
+가설: large에서 w_txt=0.20 → Top-1 +1~2%p
+
+FGC Ensemble 캘리브레이션
+
+slope∈{1.0,1.2,1.5} × pivot∈{0.15,0.20,0.25}
+
+평가: margin<0.1 케이스 Top-1, p95 latency, Stage-2 rate
+
+1. 의사코드(핵심 모듈 · 프로덕션 강화)
+15.1 Two-Stage FAISS + Confusion-Aware Gate
+
+# 초기화 1회
+
+confusion_index = {cls: set(meta[cls].confusions) for cls in classes}
+
+cands = faiss_topk(query_emb, k=5, ef=128)  # Stage-1
+top5 = set(cands.classes)
+
+# 해당 쿼리의 confusions가 top5에 없으면 Stage-2
+
+needs_stage2 = not confusion_index[query_class].isdisjoint(top5)
+if needs_stage2:
+cands = faiss_topk(query_emb, k=10, ef=160)  # Stage-2
+
+sim_img  = cosine(img_emb,  tmpl_img[cands])
+sim_meta = cosine(meta_emb, tmpl_meta[cands])
+sim_txt  = cosine(txt_emb,  tmpl_txt[cands])
+
+sim_final = w_img*sim_img + w_meta*sim_meta + w_txt*sim_txt \
+- topo_penalty(query_mask, meta) + area_bonus(query_mask, cls_stats)
+
+15.2 헝가리안(계층·희소·비동기, Option A)
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+pool = ThreadPoolExecutor(max_workers=4)
+
+def process_frame(frame, bom_state):
+dets = detect(frame)
+crops = tight_crop(frame, dets)
+embs  = embed(crops)
+
+```
+pairs = prefilter_topk(embs, k=3, thr=0.5)    # 희소화
+greedy = assign_greedy(high_conf(pairs, thr=0.9))  # 즉시
+
+future = pool.submit(hungarian, mid_conf(pairs, 0.7, 0.9), bom_state.copy())
+try:
+    assign_mid = future.result(timeout=0.5)
+except TimeoutError:
+    assign_mid = greedy_fallback(pairs)
+    log_alert("Hungarian timeout → greedy used")
+
+result = merge_assignments(greedy, assign_mid)
+enqueue_for_single_writer(result)  # BOM 병합 (단일 스레드)
+
+```
+
+15.3 WebP LRU 프리캐시
+class CachedWebPDataset:
+def **init**(self, paths, cache_size=5000):
+self.cache = LRU(cache_size)
+self.pool  = ThreadPool(8)
+def **getitem**(self, i):
+if i in self.cache: return self.cache[i]
+tensor = self.pool.apply(decode_webp, self.paths[i])
+self.cache[i] = tensor
+return tensor
+
+15.4 FGC Adaptive Ensemble(마진 기반)
+margin = sim_top1 - sim_top2
+w_fgc  = clamp(0.3 + (0.2 - margin)*1.2, 0.3, 0.7)  # A/B로 slope,pivot 캘리브레이트
+emb    = (1 - w_fgc) * clip_emb + w_fgc * fgc_emb
+
+15.5 텍스트 품질 초기화(언어 대응)
+
+# 예시 키워드 (초기 4개 언어)
+
+KW = {
+'en':['stud','hole','groove','print','color','brick'],
+'ko':['스터드','구멍','홈','프린트','색상','브릭'],
+'ja':['スタッド','穴','溝','プリント','色','ブロック'],
+'de':['Noppe','Loch','Nut','Aufdruck','Farbe','Stein']
+}
+def lang_aware_keyword_score(text, lang='en'):
+L = detect_lang(text) or 'en'
+keys = KW.get(L, KW['en'])
+hits = sum(kw.lower() in text.lower() for kw in keys)
+return min(hits/6, 0.4)  # max 0.4
+def noun_density(text):
+# spaCy / MeCab 등으로 명사비율 측정 (max 0.6*0.5=0.3)
+return min(noun_ratio(text), 0.5) * 0.6
+
+1. 핵심 파라미터 요약(초기값·튜닝 범위)
+구분	값(초기)	튜닝 범위/조건
+YOLO(seg)	imgsz=768, conf=0.15, iou=0.60, max_det=1200	imgsz 960(소형 리콜↑), conf 0.12~0.18
+증강	copy_paste=0.6, mosaic=0.5, fliplr=0.5, hsv(0.7,0.4,0.4), perspective=0.001, erasing=0.2	세트별 난이도 따라 ±0.1
+검색	FAISS HNSW M=32, ef=128(→160 Stage-2)	ef 96~192 (지연/정확도 트레이드오프)
+Fusion	w_img=0.65, w_meta=0.25, w_txt=0.15	세트 규모/지표 기반 자동 조정
+임계	확정 ≥ 0.80, 보류 < 0.80 or margin < 0.10	운영 A/B로 0.78~0.82 검토
+topo	적용 대상만 0~0.08 감점	차이(±) 폭에 비례 스케일
+WebP	학습 q=90, 템플릿 lossless(or q=95), SSIMthr=0.965	지표 악화 시 q=92 재인코딩
+2. 운영 절차(배포·롤백·승급)
+
+사전 벤치(대표 3세트 × 500프레임) → SLO 체크
+
+Stage-1 배포(10%): 경보 라인 완화(실측 확보)
+
+Stage-2(50%): Fusion auto-tune 허용(24h 제한)
+
+Full(100%): 경보 임계 SLO로 복귀, 인수 기준 충족 시 승급
+
+롤백 규칙: FGC ΔTop-1<0, decode p95>15ms, BOM 음수 발생 시 즉시 롤백
+
+1. 알려진 제약·향후 과제
+
+현재 제약
+
+비동기 헝가리안: Option A(스냅샷+병합) 채택 → 병합 로직 회귀테스트 필요
+
+FGC Ensemble 수식: slope/pivot A/B 캘리브레이션 대기
+
+텍스트 품질 언어: 초기 4개 언어(en/ko/ja/de)만 가중 최적화
+
+로드맵(12개월)
+
+Q1’26: FGC 캘리브레이션 완료 → Adaptive 고정 또는 100% 전환
+
+Q2’26: 다국어 10개 확장, 키워드 사전 고도화
+
+Q3’26: Hard 템플릿 Pruning 1차 실행, 효과 검증
+
+Q4’26: 세트 5,000 부품 확장(스케줄러/메모리 최적화)
+
+1. 결론(운영 보증)
+
+본 설계는 탐지/식별 분리 + FAISS Two-Stage + Adaptive Fusion + BOM 제약 + QA/중복 관리 + WebP 캐시를 축으로, **정확도(Recall≥0.95 · Top-1≥0.97)**와 **성능(≤150ms/frame)**을 동시 달성한다.
+핵심 성공 요인:
+
+WebP 용도별 압축(q=90 / 템플릿 lossless) + SSIM 보정(0.965)
+
+YOLO 1-class seg로 탐지 전담, 임베딩/메타/텍스트로 식별 전담
+
+FAISS Two-Stage로 지연 통제 + Recall 확보, confusion-aware 게이트
+
+Adaptive Fusion + topo/area 보정으로 시각·구조·문맥의 균형
+
+- *헝가리안(계층/희소/비동기 + 싱글 라이터)**로 대규모 세트에서도 중복/초과 차단
+
+Hard 템플릿 + 정기 rebuild + 3단계 Pruning으로 인덱스 건강성 유지
+
+FGC-Encoder는 정량 기준 및 A/B 캘리브레이션으로 점진·안전 전환
+
+이 문서의 파라미터/로직/런북을 그대로 적용하면, WebP 채택 하에서도 12개월 이상 운영 품질의 일관성을 유지할 수 있다.
+
+부록 A. 운영 체크리스트(배포 전/후)
+
+배포 전
+
+YOLO 벤치(768/960) + 소형 리콜 체크
+
+인덱스 해시/경로 검증(index_manifest)
+
+WebP decode p95 측정(캐시 on/off 비교)
+
+Fusion 초기값/세트 규모 보정 세팅
+
+경보 라우팅(Slack/Webhook) 유효성
+
+배포 후(24~72h)
+
+Stage-2 진입률 ≤ 25% 유지
+
+w_txt 자동 조정 ≤ 3회/24h
+
+BOM 음수/큐 오버플로 0건
+
+FGC ΔTop-1 ≥ 0 or 자동 롤백 확인
+
+부록 B. 권장 하드웨어(중급 GPU 예시)
+
+GPU: RTX 4070/4080급(12~16GB VRAM)
+
+CPU: 8C/16T 이상, NVMe SSD(>3GB/s)
+
+RAM: 32~64GB, OS 캐시 여유
+
+스토리지: 세트 1,000 파츠 기준 ~18GB(학습셋) + 인덱스/메타/리포트 여유 50GB

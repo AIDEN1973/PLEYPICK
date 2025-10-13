@@ -75,8 +75,8 @@ export function useClosedWorldDetection() {
           color_id,
           quantity,
           is_spare,
-          lego_parts!inner(name),
-          lego_colors!inner(name, rgb)
+          lego_parts(name),
+          lego_colors(name, rgb)
         `)
         .eq('set_id', setData.id)
       

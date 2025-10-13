@@ -11,6 +11,8 @@
         <div v-if="user" class="lego-menu">
           <router-link to="/new-lego" class="nav-link">신규 레고 등록</router-link>
           <router-link to="/saved-lego" class="nav-link">저장된 레고</router-link>
+          <router-link to="/element-search" class="nav-link">🔍 Element ID 검색</router-link>
+          <router-link to="/metadata-management" class="nav-link">🤖 메타데이터 관리</router-link>
           <router-link to="/store-manager" class="nav-link">매장 관리</router-link>
           <router-link to="/store-management" class="nav-link">🏪 매장 대시보드</router-link>
           <router-link to="/synthetic-dataset" class="nav-link">합성 데이터셋</router-link>

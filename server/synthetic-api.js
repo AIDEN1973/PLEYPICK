@@ -1,10 +1,12 @@
 import express from 'express'
+import sharp from 'sharp'
 import { createClient } from '@supabase/supabase-js'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
+import net from 'net'
 
 // 환경 변수 로드
 dotenv.config()
@@ -198,6 +200,32 @@ app.get('/api/synthetic/stats', async (req, res) => {
       success: false,
       error: error.message
     })
+  }
+})
+
+// Rebrickable 이미지 → WebP 변환 프록시
+app.get('/api/upload/proxy-image', async (req, res) => {
+  try {
+    const sourceUrl = String(req.query.url || '').trim()
+    if (!sourceUrl) return res.status(400).json({ error: 'url query required' })
+
+    const f = await ensureFetch()
+    if (!f) return res.status(500).json({ error: 'fetch unavailable' })
+
+    const resp = await f(sourceUrl, { headers: { 'Accept': 'image/*', 'User-Agent': 'BrickBox/1.0' } })
+    if (!resp.ok) return res.status(resp.status).json({ error: 'source fetch failed' })
+
+    const arr = await resp.arrayBuffer()
+    const buffer = Buffer.from(arr)
+
+    const webp = await sharp(buffer).webp({ quality: 80, effort: 4 }).toBuffer()
+
+    res.set('Content-Type', 'image/webp')
+    res.set('Cache-Control', 'public, max-age=31536000')
+    res.end(webp)
+  } catch (e) {
+    console.error('proxy-image error:', e)
+    res.status(500).json({ error: 'proxy failed' })
   }
 })
 
@@ -616,11 +644,56 @@ async function startBlenderRendering(job) {
   })
 }
 
-// 서버 시작
-const PORT = process.env.PORT || 3004
-app.listen(PORT, () => {
-  console.log(`🧱 BrickBox 합성 데이터셋 API 서버가 포트 ${PORT}에서 실행 중입니다`)
-})
+// ================================
+// 🔧 Auto Port Selection Logic
+// ================================
+
+const DEFAULT_PORT = parseInt(process.env.PORT || '3004', 10);
+const MAX_PORT = 3100;
+
+/**
+ * 지정된 포트가 사용 중인지 확인
+ * @param {number} port
+ * @returns {Promise<boolean>}
+ */
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const tester = net
+      .createServer()
+      .once('error', () => resolve(false))
+      .once('listening', () => {
+        tester
+          .once('close', () => resolve(true))
+          .close();
+      })
+      .listen(port);
+  });
+}
+
+/**
+ * 사용 가능한 포트를 찾아 서버 실행
+ */
+async function startServer() {
+  let port = DEFAULT_PORT;
+  while (port <= MAX_PORT && !(await isPortAvailable(port))) {
+    console.log(`⚠️ Port ${port} is in use, trying next...`);
+    port++;
+  }
+
+  if (port > MAX_PORT) {
+    console.error('❌ No available ports found between 3004–3100.');
+    process.exit(1);
+  }
+
+  app.listen(port, () => {
+    console.log(`🧱 BrickBox 합성 데이터셋 API 서버가 포트 ${port}에서 실행 중입니다`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('🚨 Failed to start server:', err);
+  process.exit(1);
+});
 
 // 생성된 이미지 파일 목록 반환 API (로컬 출력 기반)
 app.get('/api/synthetic/files/:partId', async (req, res) => {

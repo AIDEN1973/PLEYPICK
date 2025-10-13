@@ -1,6 +1,7 @@
 import { ref, reactive } from 'vue'
 import { supabase } from './useSupabase'
 import { analyzePartWithLLM, generateTextEmbeddingsBatch, saveToMasterPartsDB } from './useMasterPartsPreprocessing'
+import { useAutoImageMigration } from './useAutoImageMigration'
 
 /**
  * 백그라운드 LLM 분석 시스템
@@ -12,10 +13,10 @@ import { analyzePartWithLLM, generateTextEmbeddingsBatch, saveToMasterPartsDB } 
 // OpenAI API 리밋 설정
 const API_LIMITS = {
   requestsPerMinute: 500, // 보수적으로 500 RPM 설정
-  tokensPerMinute: 40000, // 보수적으로 40K TPM 설정
-  maxConcurrent: 3, // 동시 요청 최대 3개
-  requestDelay: 2000, // 요청 간 2초 대기
-  retryDelay: 5000, // 재시도 시 5초 대기
+  tokensPerMinute: 200000, // 실제 제한: 200K TPM
+  maxConcurrent: 2, // 동시 요청 최대 2개로 줄임 (rate limit 방지)
+  requestDelay: 500, // 요청 간 500ms 대기 (안정적인 처리)
+  retryDelay: 1000, // 재시도 시 1초 대기 (지수 백오프로 증가)
   maxRetries: 3
 }
 
@@ -42,6 +43,12 @@ export function useBackgroundLLMAnalysis() {
     console.log(`🔍 DEBUG: Parts count:`, parts.length)
     console.log(`🔍 DEBUG: First few parts:`, parts.slice(0, 3))
     
+    // 이미지 마이그레이션 시스템 초기화 (한 번만 초기화)
+    if (!window.imageMigrationInstance) {
+      window.imageMigrationInstance = useAutoImageMigration()
+    }
+    const imageMigration = window.imageMigrationInstance
+    
     const taskId = `llm-analysis-${setData.set_num}-${Date.now()}`
     
     const task = {
@@ -56,7 +63,8 @@ export function useBackgroundLLMAnalysis() {
       totalParts: parts.length,
       processedParts: 0,
       failedParts: 0,
-      errors: []
+      errors: [],
+      imageMigration: imageMigration // 이미지 마이그레이션 시스템 추가
     }
     
     console.log(`📋 Created task:`, task)
@@ -100,7 +108,7 @@ export function useBackgroundLLMAnalysis() {
   }
   
   /**
-   * LLM 분석 실행
+   * LLM 분석 실행 (배치 처리)
    */
   const executeLLMAnalysis = async (task) => {
     try {
@@ -109,50 +117,72 @@ export function useBackgroundLLMAnalysis() {
       
       console.log(`🤖 Starting background LLM analysis for ${task.setNum} (${task.totalParts} parts)`)
       
-      // 1단계: LLM 분석 (리밋 준수)
+      // ✅ 1단계: LLM 분석 (배치 병렬 처리)
       const analysisResults = []
-      const batchSize = 1 // 한 번에 1개씩 처리
+      const BATCH_SIZE = 10 // 한 번에 10개씩 처리
       
-      for (let i = 0; i < task.parts.length; i++) {
-        const part = task.parts[i]
+      // 배치 생성
+      const batches = []
+      for (let i = 0; i < task.parts.length; i += BATCH_SIZE) {
+        batches.push(task.parts.slice(i, i + BATCH_SIZE))
+      }
+      
+      console.log(`📦 Created ${batches.length} batches of ${BATCH_SIZE} parts each`)
+      
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex]
+        console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} parts)...`)
         
-        try {
-          // 기존 분석 확인 (개발 모드에서는 강제 재실행)
-          const existing = await checkExistingAnalysis(part.part.part_num, part.color.id)
-          if (existing && !import.meta.env.DEV) {
-            console.log(`⏭️ Skipping existing analysis for ${part.part.part_num}`)
-            analysisResults.push({ ...existing, part: part.part, color: part.color })
-            task.processedParts++
-            task.progress = Math.round((task.processedParts / task.totalParts) * 50)
-            continue
-          } else if (existing && import.meta.env.DEV) {
-            console.log(`🔄 DEV MODE: Re-analyzing existing part ${part.part.part_num}`)
-          }
-          
-          // LLM 분석 실행 (리밋 준수)
-          console.log(`🧠 Analyzing part ${i + 1}/${task.totalParts}: ${part.part.part_num}`)
-          const analysis = await analyzePartWithRetry(part)
-          
-          if (analysis) {
-            analysisResults.push({ ...analysis, part: part.part, color: part.color })
-            task.processedParts++
+        // 배치 내 부품을 병렬로 분석
+        const batchResults = await Promise.allSettled(
+          batch.map(async (part) => {
+            try {
+              // 기존 분석 확인 (개발 모드에서는 강제 재실행)
+              const existing = await checkExistingAnalysis(part.part.part_num, part.color.id)
+              if (existing && !import.meta.env.DEV) {
+                console.log(`⏭️ Skipping existing analysis for ${part.part.part_num}`)
+                return { ...existing, part: part.part, color: part.color, skipped: true }
+              } else if (existing && import.meta.env.DEV) {
+                console.log(`🔄 DEV MODE: Re-analyzing existing part ${part.part.part_num}`)
+              }
+              
+              // LLM 분석 실행 (재시도 포함)
+              console.log(`🧠 Analyzing ${part.part.part_num}`)
+              const analysis = await analyzePartWithRetry(part)
+              
+              if (!analysis) {
+                throw new Error(`Analysis returned null for ${part.part.part_num}`)
+              }
+              
+              return { ...analysis, part: part.part, color: part.color }
+            } catch (error) {
+              throw {
+                partNum: part.part.part_num,
+                error: error.message
+              }
+            }
+          })
+        )
+        
+        // 배치 결과 처리
+        batchResults.forEach((promiseResult) => {
+          if (promiseResult.status === 'fulfilled') {
+            analysisResults.push(promiseResult.value)
+            if (!promiseResult.value.skipped) {
+              task.processedParts++
+            }
           } else {
             task.failedParts++
-            task.errors.push(`Failed to analyze ${part.part.part_num}`)
+            task.errors.push(`Error analyzing ${promiseResult.reason.partNum}: ${promiseResult.reason.error}`)
           }
-          
-          // 진행률 업데이트
-          task.progress = Math.round((task.processedParts / task.totalParts) * 50)
-          
-          // API 리밋 준수: 요청 간 대기
-          if (i < task.parts.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, API_LIMITS.requestDelay))
-          }
-          
-        } catch (error) {
-          console.error(`❌ Analysis failed for ${part.part.part_num}:`, error)
-          task.failedParts++
-          task.errors.push(`Error analyzing ${part.part.part_num}: ${error.message}`)
+        })
+        
+        // 진행률 업데이트
+        task.progress = Math.round((task.processedParts / task.totalParts) * 50)
+        
+        // 배치 간 대기 (API 리밋 준수) - 배치당 500ms로 충분
+        if (batchIndex < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 500))
         }
       }
       
@@ -204,7 +234,17 @@ export function useBackgroundLLMAnalysis() {
    */
   const analyzePartWithRetry = async (part, retryCount = 0) => {
     try {
-      return await analyzePartWithLLM(part)
+      const result = await analyzePartWithLLM(part)
+      
+      // 결과가 null인 경우 (JSON 파싱 실패 등) 재시도
+      if (result === null && retryCount < API_LIMITS.maxRetries) {
+        console.warn(`⚠️ LLM 분석 결과가 null, 재시도 중... (시도 ${retryCount + 1})`)
+        const delay = API_LIMITS.retryDelay * Math.pow(2, retryCount)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        return await analyzePartWithRetry(part, retryCount + 1)
+      }
+      
+      return result
     } catch (error) {
       if (error.message.includes('429') || error.message.includes('rate limit')) {
         if (retryCount < API_LIMITS.maxRetries) {

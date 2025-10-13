@@ -8,6 +8,7 @@ import NewLegoRegistration from './views/NewLegoRegistration.vue'
 import SavedLegoManager from './views/SavedLegoManager.vue'
 import RealtimeDetection from './views/RealtimeDetection.vue'
 import IntegratedVisionDetection from './views/IntegratedVisionDetection.vue'
+import ElementIdSearchTest from './views/ElementIdSearchTest.vue'
 import MasterDataBuilder from './views/MasterDataBuilder.vue'
 import StoreManager from './views/StoreManager.vue'
 import SyntheticDatasetManager from './views/SyntheticDatasetManager.vue'
@@ -16,6 +17,7 @@ import AutomatedTrainingDashboard from './views/AutomatedTrainingDashboard.vue'
 import StoreManagementDashboard from './views/StoreManagementDashboard.vue'
 import MonitoringDashboard from './views/MonitoringDashboard.vue'
 import ModelMonitoringDashboard from './views/ModelMonitoringDashboard.vue'
+import MetadataManagement from './views/MetadataManagement.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -23,6 +25,7 @@ const routes = [
   { path: '/dashboard', name: 'Dashboard', component: Dashboard },
   { path: '/new-lego', name: 'NewLegoRegistration', component: NewLegoRegistration },
   { path: '/saved-lego', name: 'SavedLegoManager', component: SavedLegoManager },
+  { path: '/element-search', name: 'ElementIdSearchTest', component: ElementIdSearchTest },
   { path: '/detection', name: 'RealtimeDetection', component: RealtimeDetection },
   { path: '/integrated-vision', name: 'IntegratedVisionDetection', component: IntegratedVisionDetection },
   { path: '/master-builder', name: 'MasterDataBuilder', component: MasterDataBuilder },
@@ -32,7 +35,8 @@ const routes = [
   { path: '/automated-training', name: 'AutomatedTrainingDashboard', component: AutomatedTrainingDashboard },
   { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard },
   { path: '/monitoring', name: 'MonitoringDashboard', component: MonitoringDashboard },
-  { path: '/model-monitoring', name: 'ModelMonitoringDashboard', component: ModelMonitoringDashboard }
+  { path: '/model-monitoring', name: 'ModelMonitoringDashboard', component: ModelMonitoringDashboard },
+  { path: '/metadata-management', name: 'MetadataManagement', component: MetadataManagement }
 ]
 
 const router = createRouter({

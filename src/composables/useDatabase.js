@@ -16,36 +16,180 @@ export function useDatabase() {
         .eq('set_id', setId)
 
       if (!partsError && setParts) {
+        // Storage 버킷에서 실제 파일들 삭제
+        console.log('🗂️ Storage 버킷에서 이미지 파일 삭제 중...')
+        
+        // 먼저 Storage 버킷의 현재 파일 목록 확인
+        try {
+          const { data: bucketFiles, error: listError } = await supabase.storage
+            .from('lego_parts_images')
+            .list('images', { limit: 1000 })
+          
+          if (listError) {
+            console.warn('⚠️ Storage 버킷 목록 조회 실패:', listError)
+          } else {
+            console.log('📁 Storage 버킷 현재 파일 수:', bucketFiles?.length || 0)
+            console.log('📁 Storage 버킷 파일 샘플:', bucketFiles?.slice(0, 5)?.map(f => f.name))
+          }
+        } catch (listErr) {
+          console.warn('⚠️ Storage 버킷 목록 조회 중 오류:', listErr)
+        }
+        
+        const filesToDelete = []
+        
+        for (const part of setParts) {
+          try {
+            // part_images 테이블에서 파일 경로 조회
+            const { data: partImages, error: imagesError } = await supabase
+              .from('part_images')
+              .select('uploaded_url, local_path, filename')
+              .eq('part_id', part.part_id)
+              .eq('color_id', part.color_id)
+            
+            if (imagesError) {
+              console.warn(`⚠️ part_images 조회 실패 (${part.part_id}, ${part.color_id}):`, imagesError.message)
+              continue // 다음 부품으로 넘어감
+            }
+            
+            if (partImages && partImages.length > 0) {
+              for (const image of partImages) {
+                // uploaded_url에서 파일 경로 추출
+                if (image.uploaded_url) {
+                  // URL에서 파일 경로 추출 (예: https://...supabase.co/storage/v1/object/public/lego_parts_images/images/3001_72.webp)
+                  const urlParts = image.uploaded_url.split('/')
+                  const fileName = urlParts[urlParts.length - 1]
+                  if (fileName) {
+                    filesToDelete.push(`images/${fileName}`)
+                  }
+                }
+                // local_path가 있다면 사용
+                else if (image.local_path) {
+                  filesToDelete.push(image.local_path)
+                }
+                // filename만 있다면 기본 경로 사용
+                else if (image.filename) {
+                  filesToDelete.push(`images/${image.filename}`)
+                }
+              }
+            }
+          } catch (partError) {
+            console.warn(`⚠️ 부품 ${part.part_id} 이미지 조회 중 오류:`, partError.message)
+            continue // 다음 부품으로 넘어감
+          }
+        }
+        
+        // Storage에서 파일들 삭제
+        if (filesToDelete.length > 0) {
+          console.log('🗑️ 삭제할 파일 목록:', filesToDelete)
+          try {
+            const { data: deleteData, error: deleteError } = await supabase.storage
+              .from('lego_parts_images')
+              .remove(filesToDelete)
+            
+            if (deleteError) {
+              console.error('❌ Storage 파일 삭제 실패:', deleteError)
+              console.error('삭제 실패한 파일들:', filesToDelete)
+            } else {
+              console.log(`✅ Storage에서 ${filesToDelete.length}개 파일 삭제 완료`)
+              console.log('삭제된 파일들:', deleteData)
+            }
+          } catch (storageError) {
+            console.error('❌ Storage 파일 삭제 중 예외 발생:', storageError)
+            console.error('삭제 시도한 파일들:', filesToDelete)
+          }
+        } else {
+          console.log('ℹ️ 삭제할 Storage 파일이 없습니다.')
+        }
+        
         // part_images 테이블에서 관련 이미지 삭제
         for (const part of setParts) {
-          await supabase
-            .from('part_images')
-            .delete()
-            .eq('part_id', part.part_id)
-            .eq('color_id', part.color_id)
+          try {
+            const { error: deleteError } = await supabase
+              .from('part_images')
+              .delete()
+              .eq('part_id', part.part_id)
+              .eq('color_id', part.color_id)
+            
+            if (deleteError) {
+              console.warn(`⚠️ part_images 삭제 실패 (${part.part_id}, ${part.color_id}):`, deleteError.message)
+            }
+          } catch (deleteErr) {
+            console.warn(`⚠️ 부품 ${part.part_id} 이미지 메타데이터 삭제 중 오류:`, deleteErr.message)
+          }
         }
         
         // LLM 분석 데이터 삭제 (옵션)
         if (deleteLLMAnalysis) {
           console.log('🧠 LLM 분석 데이터 삭제 중...')
           for (const part of setParts) {
-            await supabase
-              .from('parts_master_features')
-              .delete()
-              .eq('part_id', part.part_id)
-              .eq('color_id', part.color_id)
+            try {
+              const { error: llmDeleteError } = await supabase
+                .from('parts_master_features')
+                .delete()
+                .eq('part_id', part.part_id)
+                .eq('color_id', part.color_id)
+              
+              if (llmDeleteError) {
+                console.warn(`⚠️ LLM 분석 데이터 삭제 실패 (${part.part_id}, ${part.color_id}):`, llmDeleteError.message)
+              }
+            } catch (llmErr) {
+              console.warn(`⚠️ 부품 ${part.part_id} LLM 데이터 삭제 중 오류:`, llmErr.message)
+            }
           }
           console.log('✅ LLM 분석 데이터 삭제 완료')
         }
       }
 
-      // 2. set_parts 삭제
+      // 2. 세트 이미지도 Storage에서 삭제
+      console.log('🖼️ 세트 이미지 삭제 중...')
+      try {
+        const { data: setData, error: setError } = await supabase
+          .from('lego_sets')
+          .select('set_img_url, webp_image_url')
+          .eq('id', setId)
+          .single()
+        
+        if (!setError && setData) {
+          const setFilesToDelete = []
+          
+          // WebP 이미지가 있다면 삭제 대상에 추가
+          if (setData.webp_image_url) {
+            // URL에서 파일 경로 추출
+            const urlParts = setData.webp_image_url.split('/')
+            const fileName = urlParts[urlParts.length - 1]
+            if (fileName) {
+              setFilesToDelete.push(`sets/${fileName}`)
+            }
+          }
+          
+          if (setFilesToDelete.length > 0) {
+            console.log('🗑️ 삭제할 세트 이미지 목록:', setFilesToDelete)
+            const { data: deleteSetData, error: deleteSetError } = await supabase.storage
+              .from('lego_parts_images')
+              .remove(setFilesToDelete)
+            
+            if (deleteSetError) {
+              console.error('❌ 세트 이미지 삭제 실패:', deleteSetError)
+              console.error('삭제 실패한 세트 이미지들:', setFilesToDelete)
+            } else {
+              console.log(`✅ 세트 이미지 ${setFilesToDelete.length}개 삭제 완료`)
+              console.log('삭제된 세트 이미지들:', deleteSetData)
+            }
+          } else {
+            console.log('ℹ️ 삭제할 세트 이미지가 없습니다.')
+          }
+        }
+      } catch (setImageError) {
+        console.warn('⚠️ 세트 이미지 삭제 중 오류:', setImageError)
+      }
+
+      // 3. set_parts 삭제
       await supabase
         .from('set_parts')
         .delete()
         .eq('set_id', setId)
 
-      // 3. 세트 삭제
+      // 4. 세트 삭제
       await supabase
         .from('lego_sets')
         .delete()
@@ -313,19 +457,47 @@ export function useDatabase() {
       console.log(`Loading parts for set ID: ${setId}`)
       
       // 방법 1: 단순하게 모든 데이터 가져오기 (제한 없이)
-      const { data, error: dbError, count } = await supabase
+      // 외래 키 제약 조건 제거로 인한 관계 인식 문제 해결을 위해 단계별 조회
+      const { data: setParts, error: setPartsError, count } = await supabase
         .from('set_parts')
-        .select(`
-          *,
-          lego_parts(*),
-          lego_colors(*)
-        `, { count: 'exact' })
+        .select('*', { count: 'exact' })
         .eq('set_id', setId)
-
-      if (dbError) {
-        console.error('Database error:', dbError)
-        throw dbError
+      
+      if (setPartsError) {
+        console.error('Database error:', setPartsError)
+        throw setPartsError
       }
+      
+      if (!setParts || setParts.length === 0) {
+        return { data: [], count: 0 }
+      }
+      
+      // part_id와 color_id 목록 추출
+      const partIds = [...new Set(setParts.map(sp => sp.part_id))]
+      const colorIds = [...new Set(setParts.map(sp => sp.color_id))]
+      
+      // lego_parts와 lego_colors 별도 조회
+      const { data: legoParts, error: legoPartsError } = await supabase
+        .from('lego_parts')
+        .select('part_num, name, part_cat_id, part_img_url')
+        .in('part_num', partIds)
+      
+      const { data: legoColors, error: legoColorsError } = await supabase
+        .from('lego_colors')
+        .select('color_id, name, rgb')
+        .in('color_id', colorIds)
+      
+      if (legoPartsError || legoColorsError) {
+        console.error('Related data error:', legoPartsError || legoColorsError)
+        throw legoPartsError || legoColorsError
+      }
+      
+      // 데이터 조합
+      const data = setParts.map(sp => ({
+        ...sp,
+        lego_parts: legoParts.find(lp => lp.part_num === sp.part_id),
+        lego_colors: legoColors.find(lc => lc.color_id === sp.color_id)
+      }))
 
       console.log(`Direct query returned ${data ? data.length : 0} parts`)
       console.log(`Total count in database: ${count}`)
@@ -489,6 +661,363 @@ export function useDatabase() {
     }
   }
 
+  // 모든 Storage 버킷 정리 (models 버킷 제외)
+  const clearAllStorageBuckets = async () => {
+    try {
+      console.log('🧹 모든 Storage 버킷 정리 시작...')
+      
+      const bucketsToClean = [
+        'lego_parts_images',
+        'lego-synthetic',
+        'temp',
+        'uploads'
+      ]
+      
+      const results = {
+        totalFiles: 0,
+        deletedFiles: 0,
+        errors: []
+      }
+      
+      for (const bucketName of bucketsToClean) {
+        console.log(`🗂️ ${bucketName} 버킷 정리 중...`)
+        
+        try {
+          // 버킷의 루트 레벨 항목 조회
+          const { data: rootItems, error: listError } = await supabase.storage
+            .from(bucketName)
+            .list('', { limit: 10000 })
+          
+          if (listError) {
+            console.warn(`⚠️ ${bucketName} 버킷 목록 조회 실패:`, listError)
+            results.errors.push(`${bucketName}: ${listError.message}`)
+            continue
+          }
+          
+          if (!rootItems || rootItems.length === 0) {
+            console.log(`✅ ${bucketName} 버킷이 이미 비어있습니다.`)
+            continue
+          }
+          
+          console.log(`📁 ${bucketName} 버킷에서 ${rootItems.length}개 루트 항목 발견`)
+          
+          // 알려진 폴더 구조를 직접 탐색
+          const allFilePaths = []
+          const knownFolders = ['images', 'sets', 'synthetic', 'temp', 'uploads']
+          
+          for (const folderName of knownFolders) {
+            console.log(`🔍 알려진 폴더 탐색: ${folderName}`)
+            
+            try {
+              const { data: folderItems, error: folderError } = await supabase.storage
+                .from(bucketName)
+                .list(folderName, { limit: 1000 })
+              
+              if (folderError) {
+                console.log(`❌ 폴더 ${folderName} 접근 실패:`, folderError.message)
+                continue
+              }
+              
+              if (!folderItems || folderItems.length === 0) {
+                console.log(`📁 빈 폴더: ${folderName}`)
+                continue
+              }
+              
+              console.log(`📁 폴더 ${folderName}에서 ${folderItems.length}개 항목 발견`)
+              
+              for (const item of folderItems) {
+                const fullPath = `${folderName}/${item.name}`
+                console.log(`📄 항목: ${item.name}, 전체 경로: ${fullPath}`)
+                console.log(`📄 메타데이터:`, item)
+                
+                if (item.metadata?.size > 0) {
+                  allFilePaths.push(fullPath)
+                  console.log(`✅ 파일 추가: ${fullPath}`)
+                } else {
+                  // 하위 폴더인 경우 더 깊이 탐색
+                  console.log(`📁 하위 폴더 탐색: ${fullPath}`)
+                  
+                  try {
+                    const { data: subItems, error: subError } = await supabase.storage
+                      .from(bucketName)
+                      .list(fullPath, { limit: 1000 })
+                    
+                    if (subError) {
+                      console.log(`❌ 하위 폴더 ${fullPath} 접근 실패:`, subError.message)
+                    } else if (subItems && subItems.length > 0) {
+                      console.log(`📁 하위 폴더 ${fullPath}에서 ${subItems.length}개 항목 발견`)
+                      
+                      for (const subItem of subItems) {
+                        const subPath = `${fullPath}/${subItem.name}`
+                        console.log(`📄 하위 항목: ${subItem.name}, 전체 경로: ${subPath}`)
+                        
+                        if (subItem.metadata?.size > 0) {
+                          allFilePaths.push(subPath)
+                          console.log(`✅ 하위 파일 추가: ${subPath}`)
+                        } else {
+                          console.log(`📁 하위 폴더 또는 빈 항목: ${subPath}`)
+                        }
+                      }
+                    } else {
+                      console.log(`📁 빈 하위 폴더: ${fullPath}`)
+                    }
+                  } catch (subError) {
+                    console.log(`❌ 하위 폴더 ${fullPath} 탐색 중 오류:`, subError.message)
+                  }
+                }
+              }
+            } catch (error) {
+              console.log(`❌ 폴더 ${folderName} 탐색 중 오류:`, error.message)
+            }
+          }
+          
+          console.log(`📋 수집된 파일 경로: ${allFilePaths.length}개`)
+          console.log(`📋 파일 목록:`, allFilePaths)
+          
+          results.totalFiles += allFilePaths.length
+          
+          if (allFilePaths.length > 0) {
+            console.log(`🗑️ ${bucketName} 버킷에서 ${allFilePaths.length}개 파일 삭제 중...`)
+            
+            // 배치로 파일 삭제 (한 번에 10개씩으로 줄임)
+            const batchSize = 10
+            for (let i = 0; i < allFilePaths.length; i += batchSize) {
+              const batch = allFilePaths.slice(i, i + batchSize)
+              console.log(`🗑️ 삭제 시도: ${batch.join(', ')}`)
+              
+              const { data: deleteData, error: deleteError } = await supabase.storage
+                .from(bucketName)
+                .remove(batch)
+              
+              console.log(`삭제 결과:`, { deleteData, deleteError })
+              
+              if (deleteError) {
+                console.error(`❌ ${bucketName} 버킷 파일 삭제 실패:`, deleteError)
+                console.error(`실패한 파일들:`, batch)
+                results.errors.push(`${bucketName}: ${deleteError.message}`)
+              } else {
+                console.log(`✅ ${bucketName} 버킷에서 ${batch.length}개 파일 삭제 완료`)
+                console.log(`삭제된 파일들:`, deleteData)
+                results.deletedFiles += batch.length
+              }
+              
+              // API 호출 제한 방지
+              if (i + batchSize < allFilePaths.length) {
+                await new Promise(resolve => setTimeout(resolve, 200))
+              }
+            }
+          }
+          
+        } catch (bucketError) {
+          console.error(`❌ ${bucketName} 버킷 처리 중 오류:`, bucketError)
+          results.errors.push(`${bucketName}: ${bucketError.message}`)
+        }
+      }
+      
+      console.log('🎉 Storage 버킷 정리 완료!')
+      console.log(`📊 총 ${results.totalFiles}개 파일 중 ${results.deletedFiles}개 삭제`)
+      
+      if (results.errors.length > 0) {
+        console.warn('⚠️ 일부 오류 발생:', results.errors)
+      }
+      
+      return results
+      
+    } catch (error) {
+      console.error('❌ Storage 버킷 정리 중 오류:', error)
+      throw error
+    }
+  }
+
+  // 데이터베이스만 초기화 (Storage 제외)
+  const resetDatabaseOnly = async () => {
+    try {
+      console.log('🔄 데이터베이스 초기화 시작...')
+      
+      const results = {
+        deletedRecords: 0,
+        errors: [],
+        steps: []
+      }
+      
+      // 데이터베이스 테이블 정리 (외래키 순서 고려)
+      const tablesToClean = [
+        // 의존성이 있는 테이블들부터 삭제
+        'parts_master_features',  // LLM 분석 데이터
+        'part_images',            // 부품 이미지 메타데이터
+        'set_parts',              // 세트-부품 관계
+        'lego_sets',              // 레고 세트
+        'lego_parts',             // 레고 부품
+        'lego_colors',            // 레고 색상
+        'operation_logs',         // 작업 로그
+        'image_metadata',         // 이미지 메타데이터
+        'set_training_status',    // 훈련 상태
+        'training_jobs',          // 훈련 작업
+        'training_metrics',       // 훈련 메트릭
+        'model_registry'          // 모델 레지스트리
+      ]
+      
+      // 모든 테이블을 정상적인 방식으로 삭제
+      const allTablesToClean = [
+        // 의존성이 있는 테이블들부터 삭제
+        'parts_master_features',  // LLM 분석 데이터
+        'part_images',            // 부품 이미지 메타데이터
+        'set_parts',              // 세트-부품 관계
+        'lego_sets',              // 레고 세트
+        'lego_parts',             // 레고 부품
+        'lego_colors',            // 레고 색상
+        'operation_logs',         // 작업 로그
+        'synthetic_dataset',      // 합성 데이터셋
+        'synthetic_part_stats',   // 합성 부품 통계
+        'image_metadata',         // 이미지 메타데이터
+        'set_training_status',    // 훈련 상태
+        'training_jobs',          // 훈련 작업
+        'training_metrics',       // 훈련 메트릭
+        'model_registry'          // 모델 레지스트리
+      ]
+      
+      // 모든 테이블을 하나의 루프에서 처리
+      for (const tableName of allTablesToClean) {
+        console.log(`🗑️ ${tableName} 테이블 정리 중...`)
+        
+        try {
+          // 먼저 현재 레코드 수 확인
+          const { count: beforeCount, error: beforeError } = await supabase
+            .from(tableName)
+            .select('*', { count: 'exact', head: true })
+          
+          console.log(`📊 ${tableName} 삭제 전 레코드 수: ${beforeCount || 0}개`)
+          
+          if (beforeCount === 0) {
+            console.log(`⏭️ ${tableName} 테이블이 이미 비어있습니다.`)
+            results.steps.push(`${tableName}: 이미 비어있음`)
+            continue
+          }
+          
+          // 간단한 조건으로 모든 레코드 삭제 시도
+          let deleteQuery = supabase.from(tableName).delete()
+          
+          // 테이블별로 적절한 조건 사용
+          if (tableName === 'parts_master_features' || 
+              tableName === 'set_training_status' || 
+              tableName === 'training_jobs' || 
+              tableName === 'training_metrics' || 
+              tableName === 'model_registry' ||
+              tableName === 'synthetic_dataset') {
+            // integer ID 테이블들
+            deleteQuery = deleteQuery.gte('id', 0)
+          } else if (tableName === 'synthetic_part_stats') {
+            // synthetic_part_stats는 특별한 처리
+            deleteQuery = deleteQuery.not('part_id', 'is', null)
+          } else {
+            // UUID ID 테이블들
+            deleteQuery = deleteQuery.neq('id', '00000000-0000-0000-0000-000000000000')
+          }
+          
+          const { count, error: deleteError } = await deleteQuery
+          
+          if (deleteError) {
+            console.error(`❌ ${tableName} 테이블 정리 실패:`, deleteError)
+            results.errors.push(`${tableName}: ${deleteError.message}`)
+          } else {
+            console.log(`✅ ${tableName} 테이블 정리 완료`)
+            
+            // 실제 삭제 확인을 위해 레코드 수 조회
+            try {
+              const { count: remainingCount, error: countError } = await supabase
+                .from(tableName)
+                .select('*', { count: 'exact', head: true })
+              
+              if (countError) {
+                console.warn(`⚠️ ${tableName} 레코드 수 확인 실패:`, countError.message)
+              } else {
+                console.log(`📊 ${tableName} 남은 레코드 수: ${remainingCount || 0}개`)
+                if (remainingCount > 0) {
+                  console.warn(`⚠️ ${tableName} 테이블에 ${remainingCount}개 레코드가 남아있습니다!`)
+                  results.errors.push(`${tableName}: ${remainingCount}개 레코드가 남아있음`)
+                }
+              }
+            } catch (countErr) {
+              console.warn(`⚠️ ${tableName} 레코드 수 확인 중 오류:`, countErr.message)
+            }
+            
+            results.steps.push(`${tableName}: 테이블 정리 완료`)
+          }
+        } catch (tableError) {
+          console.error(`❌ ${tableName} 테이블 처리 중 오류:`, tableError)
+          results.errors.push(`${tableName}: ${tableError.message}`)
+        }
+      }
+      
+      // 3. 시퀀스 리셋 (PostgreSQL 시퀀스) - 건너뛰기
+      console.log('⏭️ 시퀀스 리셋 건너뛰기 (RPC 함수 없음)')
+      results.steps.push('시퀀스 리셋 건너뛰기')
+      
+      console.log('🎉 데이터베이스 초기화 완료!')
+      console.log(`📊 처리된 단계: ${results.steps.length}개`)
+      console.log(`❌ 오류: ${results.errors.length}개`)
+      
+      if (results.errors.length > 0) {
+        console.warn('⚠️ 일부 오류 발생:', results.errors)
+      }
+      
+      return results
+      
+    } catch (error) {
+      console.error('❌ 데이터베이스 초기화 중 오류:', error)
+      throw error
+    }
+  }
+
+  // 프로젝트 데이터 완전 초기화 (Storage + Database)
+  const resetAllProjectData = async () => {
+    try {
+      console.log('🔄 프로젝트 데이터 완전 초기화 시작...')
+      
+      const results = {
+        deletedRecords: 0,
+        errors: [],
+        steps: []
+      }
+      
+      // 1. Storage 버킷 정리 (models 제외)
+      console.log('🗂️ Storage 버킷 정리 중...')
+      try {
+        const storageResults = await clearAllStorageBuckets()
+        results.deletedRecords += storageResults.deletedFiles
+        results.steps.push(`Storage: ${storageResults.deletedFiles}개 파일 삭제`)
+      } catch (storageError) {
+        console.error('Storage 정리 실패:', storageError)
+        results.errors.push(`Storage: ${storageError.message}`)
+      }
+      
+      // 2. 데이터베이스 초기화
+      console.log('🗄️ 데이터베이스 초기화 중...')
+      try {
+        const dbResults = await resetDatabaseOnly()
+        results.steps.push(...dbResults.steps)
+        results.errors.push(...dbResults.errors)
+      } catch (dbError) {
+        console.error('데이터베이스 초기화 실패:', dbError)
+        results.errors.push(`Database: ${dbError.message}`)
+      }
+      
+      console.log('🎉 프로젝트 데이터 초기화 완료!')
+      console.log(`📊 처리된 단계: ${results.steps.length}개`)
+      console.log(`❌ 오류: ${results.errors.length}개`)
+      
+      if (results.errors.length > 0) {
+        console.warn('⚠️ 일부 오류 발생:', results.errors)
+      }
+      
+      return results
+      
+    } catch (error) {
+      console.error('❌ 프로젝트 데이터 초기화 중 오류:', error)
+      throw error
+    }
+  }
+
   return {
     loading,
     error,
@@ -504,6 +1033,9 @@ export function useDatabase() {
     getOperationLogs,
     checkSetExists,
     checkMultipleSetsExist,
-    deleteSetAndParts
+    deleteSetAndParts,
+    clearAllStorageBuckets,
+    resetDatabaseOnly,
+    resetAllProjectData
   }
 }

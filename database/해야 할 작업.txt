@@ -1,0 +1,21 @@
+# BrickBox AI Meta → Identifier 후속 작업 메모
+
+## 🧩 다음 단계: Identifier / 인덱스 통합 시 수행할 일
+
+1. **FAISS 인덱스 rebuild trigger 연결**
+   - 대상: parts_master_features 업데이트 후
+   - 시점: 모델 학습 완료 후 cron or manual trigger
+   - 참조: 기술문서 §5.1~5.3
+
+2. **operation_logs 기록**
+   - meta_sync 완료 시 operation_logs.insert
+   - 필드: {part_id, operation_type:'meta_sync', status:'success', version}
+
+3. **Depth / Occlusion 품질 확장**
+   - annotation v1.6.1의 quality_3d, occlusion_ratio 반영
+   - DB 필드: depth_quality_score, occlusion_ratio 추가 예정
+
+4. **security_level / RLS 정책 연결**
+   - part_access_policies 테이블과 access_group_hint 동기화
+
+📅 작성: 2025-10-12

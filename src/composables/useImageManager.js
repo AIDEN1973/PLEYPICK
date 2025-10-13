@@ -1,55 +1,79 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
 
-const UPLOAD_SERVER = 'https://vanessa2.godohosting.com'
-const UPLOAD_PROXY = '/api/upload'
+// UPLOAD_SERVER와 UPLOAD_PROXY 제거 - 로컬 프록시 사용
 const USE_SUPABASE_STORAGE = true // Supabase Storage 사용 여부
+
+// ✅ WebP 품질 설정 통일 (기술문서 권장: q=90)
+const WEBP_QUALITY = 0.90
+const WEBP_MAX_SIZE = 800 // 최대 이미지 크기 (px)
+
+// ✅ 중복 체크 캐시 (LRU 캐시)
+class ImageDuplicateCache {
+  constructor(maxSize = 1000) {
+    this.cache = new Map()
+    this.maxSize = maxSize
+  }
+  
+  get(key) {
+    if (!this.cache.has(key)) return undefined
+    
+    // LRU: 접근한 항목을 맨 뒤로 이동
+    const value = this.cache.get(key)
+    this.cache.delete(key)
+    this.cache.set(key, value)
+    
+    return value
+  }
+  
+  set(key, value) {
+    // 이미 존재하면 삭제 후 재추가 (맨 뒤로 이동)
+    if (this.cache.has(key)) {
+      this.cache.delete(key)
+    }
+    
+    // 캐시 크기 제한 (LRU: 가장 오래된 항목 제거)
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value
+      this.cache.delete(firstKey)
+    }
+    
+    this.cache.set(key, value)
+  }
+  
+  has(key) {
+    return this.cache.has(key)
+  }
+  
+  clear() {
+    this.cache.clear()
+  }
+  
+  get size() {
+    return this.cache.size
+  }
+}
+
+const imageDuplicateCache = new ImageDuplicateCache()
 
 export function useImageManager() {
   const uploading = ref(false)
   const downloading = ref(false)
   const error = ref(null)
 
-  // 이미지 다운로드 함수 (프록시 사용)
+  // 이미지 다운로드 함수 (로컬 프록시 사용)
   const downloadImage = async (imageUrl, filename) => {
     downloading.value = true
     error.value = null
 
     try {
-      // 1차: 프록시를 통한 다운로드 시도
-      let response
-      try {
-        if (imageUrl.includes('cdn.rebrickable.com')) {
-          const path = imageUrl.replace('https://cdn.rebrickable.com', '')
-          const proxyUrl = `/api/proxy${path}`
-          response = await fetch(proxyUrl)
-        } else {
-          response = await fetch(imageUrl)
-        }
-        
-        if (!response.ok) {
-          throw new Error(`Proxy download failed: ${response.status}`)
-        }
-      } catch (proxyErr) {
-        console.warn('Direct download failed, using alternative method:', proxyErr.message)
-        
-        // 2차: 직접 다운로드 시도 (CORS 우회)
-        try {
-          response = await fetch(imageUrl, {
-            mode: 'cors',
-            headers: {
-              'Accept': 'image/*',
-              'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
-            }
-          })
-          
-          if (!response.ok) {
-            throw new Error(`Direct download failed: ${response.status}`)
-          }
-        } catch (directErr) {
-          console.warn('All download methods failed:', directErr.message)
-          throw new Error(`Failed to download image: ${directErr.message}`)
-        }
+      // 로컬 프록시를 통한 다운로드
+      const response = await fetch(`/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`, {
+        method: 'GET'
+      })
+      
+      if (!response.ok) {
+        throw new Error(`프록시 다운로드 실패: ${response.status}`)
       }
 
       const blob = await response.blob()
@@ -130,12 +154,35 @@ export function useImageManager() {
     }
   }
 
-  // 부품별 이미지 중복 검사 함수 (부품번호 + 색상ID로 검사)
+  // 부품별 이미지 중복 검사 함수 (부품번호 + 색상ID로 검사) - ✅ 캐싱 적용
   const checkPartImageDuplicate = async (partNum, colorId) => {
     try {
+      const cacheKey = `${partNum}_${colorId}`
+      
+      // ✅ 캐시 확인
+      const cached = imageDuplicateCache.get(cacheKey)
+      if (cached !== undefined) {
+        console.log(`✅ Cache hit for ${cacheKey}: ${cached}`)
+        return cached
+      }
+      
       console.log(`Checking for existing image: part_num=${partNum}, color_id=${colorId}`)
       
-      // Storage 버킷에서 직접 확인 (테이블 대신 실제 파일 존재 여부 확인)
+      // 1. DB에서 먼저 확인 (더 정확함)
+      const { data: partImage, error: dbError } = await supabase
+        .from('part_images')
+        .select('uploaded_url, filename')
+        .eq('part_id', partNum)
+        .eq('color_id', colorId)
+        .maybeSingle()
+      
+      if (!dbError && partImage?.uploaded_url) {
+        console.log(`Existing image found in DB for ${partNum} (color: ${colorId}): ${partImage.uploaded_url}`)
+        imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
+        return true
+      }
+      
+      // 2. Storage 버킷에서 직접 확인 (폴백)
       const fileName = `${partNum}_${colorId}.webp`
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
       const bucketName = 'lego_parts_images'
@@ -145,13 +192,15 @@ export function useImageManager() {
       try {
         const response = await fetch(imageUrl, { method: 'HEAD' })
         if (response.ok) {
-          console.log(`Existing image found for ${partNum} (color: ${colorId}): ${imageUrl}`)
+          console.log(`Existing image found in Storage for ${partNum} (color: ${colorId}): ${imageUrl}`)
+          imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
           return true
         }
       } catch (fetchError) {
         console.log(`Image not found in Storage: ${fileName}`)
       }
       
+      imageDuplicateCache.set(cacheKey, false) // ✅ 캐시 저장 (없음)
       return false // 중복 없음
     } catch (err) {
       console.warn('Image existence check failed:', err)
@@ -204,8 +253,28 @@ export function useImageManager() {
           .from('lego_parts_images')
           .getPublicUrl(filePath)
 
+        // ✅ 최적화: 업로드 검증을 개발 모드에서만 실행 (프로덕션 성능 개선)
+        const publicUrl = urlData.publicUrl
+        
+        if (import.meta.env.DEV) {
+          // 개발 모드에서만 검증 (빠른 확인, 1회만)
+          try {
+            const verifyResponse = await fetch(publicUrl, { 
+              method: 'HEAD',
+              signal: AbortSignal.timeout(1000) // 1초 타임아웃
+            })
+            if (verifyResponse.ok) {
+              console.log(`✅ Upload verified: ${filePath}`)
+            } else {
+              console.warn(`⚠️ Upload verification failed (${verifyResponse.status}), but proceeding: ${filePath}`)
+            }
+          } catch (verifyError) {
+            console.warn(`⚠️ Upload verification skipped (timeout): ${filePath}`)
+          }
+        }
+
         return {
-          url: urlData.publicUrl,
+          url: publicUrl,
           path: filePath,
           bucket: 'lego_parts_images'
         }
@@ -302,10 +371,9 @@ export function useImageManager() {
         })
         
         // 이미지 크기 최적화 (최대 800px)
-        const maxSize = 800
         let { width, height } = img
-        if (width > maxSize || height > maxSize) {
-          const ratio = Math.min(maxSize / width, maxSize / height)
+        if (width > WEBP_MAX_SIZE || height > WEBP_MAX_SIZE) {
+          const ratio = Math.min(WEBP_MAX_SIZE / width, WEBP_MAX_SIZE / height)
           width = Math.round(width * ratio)
           height = Math.round(height * ratio)
         }
@@ -314,9 +382,9 @@ export function useImageManager() {
         canvas.height = height
         ctx.drawImage(img, 0, 0, width, height)
         
-        // WebP로 변환 (기술문서 권장: q=90)
+        // WebP로 변환 (통일된 품질 설정)
         const webpBlob = await new Promise(resolve => {
-          canvas.toBlob(resolve, 'image/webp', 0.90)
+          canvas.toBlob(resolve, 'image/webp', WEBP_QUALITY)
         })
         
         URL.revokeObjectURL(img.src)
@@ -325,40 +393,92 @@ export function useImageManager() {
         const fileName = `${partNum}_${colorId}.webp`
         const file = new File([webpBlob], fileName, { type: 'image/webp' })
         
-        // 서버에 업로드 (원본 파일명 그대로 사용)
-        const result = await uploadImage(file, uploadPath)
+        // Supabase Storage에 직접 업로드
+        const bucketName = 'lego_parts_images'
+        const filePath = `images/${fileName}`
         
-        console.log(`Successfully uploaded: ${fileName}`)
+        console.log(`📤 Supabase Storage 업로드 시도: ${filePath}`)
+        const { data, error: uploadError } = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, file, {
+            upsert: true // 파일이 이미 존재하면 덮어쓰기
+          })
+
+        if (uploadError) {
+          console.error(`❌ Supabase 업로드 실패:`, uploadError)
+          throw new Error(`Supabase upload failed: ${uploadError.message}`)
+        }
+        
+        console.log(`✅ Supabase 업로드 성공:`, data)
+        
+        // 공개 URL 생성
+        const { data: urlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(filePath)
+        
+        const uploadedUrl = urlData.publicUrl
+        console.log(`✅ 업로드된 이미지 URL: ${uploadedUrl}`)
         
         // part_images 동기화
-        await upsertPartImage({ partNum, colorId, uploadedUrl: result.url, filename: fileName })
+        await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName })
         
         return {
           originalUrl: imageUrl,
-          uploadedUrl: result.url,
-          filename: fileName, // 통일된 파일명 반환
-          path: result.path
+          uploadedUrl: uploadedUrl,
+          filename: fileName,
+          path: filePath
         }
       } catch (downloadErr) {
         console.warn('Direct download failed, using alternative method:', downloadErr.message)
         
         try {
-          // 대체 방법 1: 이미지 URL을 직접 서버로 전달하여 서버에서 다운로드
-          // 파일명도 일관되게 partNum_colorId.webp 사용
-          const combinedFilename = `${partNum}_${colorId}.webp`
-          const result = await uploadImageFromUrl(imageUrl, combinedFilename, uploadPath)
+          // 대체 방법 1: 프록시를 통한 이미지 다운로드 및 WebP 변환
+          const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+          console.log(`🔄 프록시를 통한 이미지 다운로드 시도: ${proxyUrl}`)
+          
+          const proxyResponse = await fetch(proxyUrl)
+          if (!proxyResponse.ok) {
+            throw new Error(`프록시 다운로드 실패: ${proxyResponse.status}`)
+          }
+          
+          const proxyBlob = await proxyResponse.blob()
+          const fileName = `${partNum}_${colorId}.webp`
+          const file = new File([proxyBlob], fileName, { type: 'image/webp' })
+          
+          // Supabase Storage에 직접 업로드
+          const bucketName = 'lego_parts_images'
+          const filePath = `images/${fileName}`
+          
+          console.log(`📤 Supabase Storage 업로드 시도 (프록시): ${filePath}`)
+          const { data, error: uploadError } = await supabase.storage
+            .from(bucketName)
+            .upload(filePath, file, {
+              upsert: true
+            })
+
+          if (uploadError) {
+            throw new Error(`Supabase upload failed: ${uploadError.message}`)
+          }
+          
+          // 공개 URL 생성
+          const { data: urlData } = supabase.storage
+            .from(bucketName)
+            .getPublicUrl(filePath)
+          
+          const uploadedUrl = urlData.publicUrl
+          console.log(`✅ 프록시를 통한 업로드 성공: ${uploadedUrl}`)
           
           // part_images 동기화
-          await upsertPartImage({ partNum, colorId, uploadedUrl: result.url, filename: result.filename })
+          await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName })
           
           return {
             originalUrl: imageUrl,
-            uploadedUrl: result.url,
-            filename: result.filename,
-            path: result.path
+            uploadedUrl: uploadedUrl,
+            filename: fileName,
+            path: filePath
           }
         } catch (serverErr) {
-          console.warn('Server upload failed, using local storage:', serverErr.message)
+          console.warn('프록시 업로드 실패, 로컬 저장소 사용:', serverErr.message)
           
           // 대체 방법 2: 로컬 저장소에 이미지 정보 저장
           const localResult = await saveImageLocally(imageUrl, originalFilename, uploadPath)
@@ -395,19 +515,15 @@ export function useImageManager() {
         // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
         let response
         try {
-          // 프록시를 통해 이미지 다운로드
-          let proxyUrl = imageUrl
-          if (imageUrl.includes('cdn.rebrickable.com')) {
-            const path = imageUrl.replace('https://cdn.rebrickable.com', '')
-            proxyUrl = `/api/proxy${path}`
-          }
+          // 로컬 프록시를 통해 이미지 다운로드 (WebP 변환 포함)
+          const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
           
           response = await fetch(proxyUrl)
           if (!response.ok) {
-            throw new Error(`Failed to download image: ${response.status}`)
+            throw new Error(`프록시 다운로드 실패: ${response.status}`)
           }
         } catch (proxyErr) {
-          console.warn('Proxy download failed, trying direct download:', proxyErr.message)
+          console.warn('프록시 다운로드 실패, 직접 다운로드 시도:', proxyErr.message)
           // 프록시 실패 시 직접 다운로드 시도
           response = await fetch(imageUrl)
           if (!response.ok) {
@@ -432,10 +548,9 @@ export function useImageManager() {
           })
           
           // 이미지 크기 최적화 (최대 800px)
-          const maxSize = 800
           let { width, height } = img
-          if (width > maxSize || height > maxSize) {
-            const ratio = Math.min(maxSize / width, maxSize / height)
+          if (width > WEBP_MAX_SIZE || height > WEBP_MAX_SIZE) {
+            const ratio = Math.min(WEBP_MAX_SIZE / width, WEBP_MAX_SIZE / height)
             width = Math.round(width * ratio)
             height = Math.round(height * ratio)
           }
@@ -444,9 +559,9 @@ export function useImageManager() {
           canvas.height = height
           ctx.drawImage(img, 0, 0, width, height)
           
-          // WebP로 변환 (품질 0.6 - 더 작은 용량)
+          // WebP로 변환 (통일된 품질 설정)
           webpBlob = await new Promise(resolve => {
-            canvas.toBlob(resolve, 'image/webp', 0.6)
+            canvas.toBlob(resolve, 'image/webp', WEBP_QUALITY)
           })
           
           URL.revokeObjectURL(img.src)
@@ -484,6 +599,22 @@ export function useImageManager() {
         const { data: urlData } = supabase.storage
           .from(bucketName)
           .getPublicUrl(filePath)
+
+        // 업로드 검증: 실제 파일 존재 여부 확인 (GET Range + Content-Type)
+        try {
+          const verifyResp = await fetch(urlData.publicUrl, {
+            method: 'GET',
+            headers: { 'Range': 'bytes=0-0' }
+          })
+          const ct = verifyResp.headers.get('content-type') || ''
+          if (!(verifyResp.ok || verifyResp.status === 206) || ct.includes('application/json')) {
+            console.warn(`⚠️ 세트 이미지 업로드 검증 실패: status=${verifyResp.status}, type=${ct}, url=${urlData.publicUrl}`)
+          } else {
+            console.log(`✅ 세트 이미지 업로드 검증 성공: ${urlData.publicUrl}`)
+          }
+        } catch (e) {
+          console.warn(`⚠️ 세트 이미지 업로드 검증 오류: ${e.message}`)
+        }
 
         return {
           url: urlData.publicUrl,
@@ -655,6 +786,13 @@ export function useImageManager() {
     saveImageMetadata,
     checkBucketExists,
     extractOriginalFilename,
-    checkPartImageDuplicate
+    checkPartImageDuplicate,
+    // ✅ 캐시 관리 함수 추가
+    clearImageCache: () => imageDuplicateCache.clear(),
+    getImageCacheSize: () => imageDuplicateCache.size,
+    getImageCacheStats: () => ({
+      size: imageDuplicateCache.size,
+      maxSize: imageDuplicateCache.maxSize
+    })
   }
 }

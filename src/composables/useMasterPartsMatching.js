@@ -354,7 +354,7 @@ export function useMasterPartsMatching() {
       if (supabaseUrl) {
         const bucketName = 'lego_parts_images'
         const fileName = `${partId}_${colorId}.webp`
-        const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/${fileName}`
+        const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
         
         // 이미지 존재 여부 확인
         try {

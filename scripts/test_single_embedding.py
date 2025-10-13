@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""단일 부품 임베딩 생성 테스트"""
+
+import os
+import sys
+from supabase import create_client
+from transformers import CLIPModel, CLIPTokenizer
+import torch
+
+# 환경 변수 확인
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY')
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("ERROR: SUPABASE_URL and SUPABASE_KEY required")
+    sys.exit(1)
+
+print(f"Connecting to: {SUPABASE_URL}")
+
+# Supabase 연결
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# 테스트 대상 조회
+print("\n1. Fetching test data...")
+response = supabase.table('parts_master_features') \
+    .select('id, part_id, feature_text, recognition_hints, embedding_status') \
+    .eq('id', 2124) \
+    .execute()
+
+if not response.data:
+    print("ERROR: No data found for id=2124")
+    sys.exit(1)
+
+item = response.data[0]
+print(f"   ID: {item['id']}")
+print(f"   Part ID: {item['part_id']}")
+print(f"   Feature Text: {item['feature_text']}")
+print(f"   Status: {item['embedding_status']}")
+
+# CLIP 모델 로드 (ViT-L/14: 768차원)
+print("\n2. Loading CLIP model (ViT-L/14, 768-dim)...")
+MODEL_NAME = "openai/clip-vit-large-patch14"
+model = CLIPModel.from_pretrained(MODEL_NAME)
+tokenizer = CLIPTokenizer.from_pretrained(MODEL_NAME)
+model.eval()
+print(f"   Model loaded: {MODEL_NAME} (768-dim)")
+
+# 텍스트 준비
+text = item['feature_text']
+if item.get('recognition_hints') and item['recognition_hints'].get('ko'):
+    text += " " + item['recognition_hints']['ko']
+print(f"\n3. Input text: {text}")
+
+# 임베딩 생성
+print("\n4. Generating embedding...")
+with torch.no_grad():
+    inputs = tokenizer(text, return_tensors="pt", padding=True, truncation=True)
+    text_features = model.get_text_features(**inputs)
+    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+    emb = text_features.cpu().numpy()[0]
+
+print(f"   Embedding shape: {emb.shape}")
+print(f"   First 5 values: {emb[:5]}")
+print(f"   Norm: {(emb**2).sum()**0.5:.6f}")
+
+# 리스트 변환
+emb_list = emb.tolist()
+print(f"   Converted to list, length: {len(emb_list)}")
+
+# 문자열 변환
+emb_str = '[' + ','.join([f'{v:.6f}' for v in emb_list]) + ']'
+print(f"   String length: {len(emb_str)}")
+print(f"   String preview: {emb_str[:100]}...")
+
+# RPC 함수 호출
+print("\n5. Calling update_part_embedding RPC...")
+try:
+    result = supabase.rpc('update_part_embedding', {
+        'p_id': item['id'],
+        'p_embedding': emb_str
+    }).execute()
+    print(f"   RPC result: {result.data}")
+except Exception as e:
+    print(f"   ERROR: {e}")
+    print(f"   Error type: {type(e)}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+
+# 결과 확인
+print("\n6. Verifying update...")
+verify = supabase.table('parts_master_features') \
+    .select('id, part_id, embedding_status') \
+    .eq('id', item['id']) \
+    .execute()
+
+if verify.data:
+    v = verify.data[0]
+    print(f"   ID: {v['id']}")
+    print(f"   Part ID: {v['part_id']}")
+    print(f"   Status: {v['embedding_status']}")
+    
+    if v['embedding_status'] == 'completed':
+        print("\n✅ SUCCESS!")
+    else:
+        print(f"\n❌ FAILED: Status is {v['embedding_status']}")
+else:
+    print("\n❌ FAILED: Could not verify")
+

@@ -36,6 +36,17 @@
             </option>
           </select>
           
+          <button @click="clearStorage" :disabled="loading" class="btn btn-warning">
+            🗑️ Storage 정리
+          </button>
+          
+          <button @click="resetDatabase" :disabled="loading" class="btn btn-info">
+            🗄️ DB 초기화
+          </button>
+          
+          <button @click="resetProjectData" :disabled="loading" class="btn btn-danger">
+            🔄 전체 초기화
+          </button>
         </div>
       </div>
     </div>
@@ -55,16 +66,6 @@
           <h3>WebP 이미지</h3>
           <p class="stat-number">{{ processedImages }}</p>
           <p class="stat-subtitle">{{ totalSets > 0 ? Math.round((processedImages / totalSets) * 100) : 0 }}% 변환됨</p>
-        </div>
-        <div class="stat-card">
-          <h3>📦 Supabase</h3>
-          <p class="stat-number">{{ imageSourceStats.supabase }}</p>
-          <p class="stat-subtitle">로컬 저장소</p>
-        </div>
-        <div class="stat-card">
-          <h3>🌐 CDN</h3>
-          <p class="stat-number">{{ imageSourceStats.cdn }}</p>
-          <p class="stat-subtitle">외부 링크</p>
         </div>
       </div>
     </div>
@@ -172,6 +173,13 @@
           </tbody>
         </table>
       </div>
+      
+      <!-- ✅ 더 보기 버튼 -->
+      <div v-if="savedSets.length < totalSets" class="load-more-section">
+        <button @click="loadMore" :disabled="loading" class="btn btn-secondary load-more-btn">
+          {{ loading ? '로딩 중...' : `더 보기 (${savedSets.length} / ${totalSets})` }}
+        </button>
+      </div>
     </div>
 
     <!-- 빈 상태 -->
@@ -226,15 +234,6 @@
               </div>
             </div>
 
-            <!-- 자동 마이그레이션 진행률 -->
-            <div v-if="migrating" class="migration-progress">
-              <h4>🔄 이미지 자동 마이그레이션 중...</h4>
-              <div class="progress">
-                <div class="progress-bar" :style="{ width: (migrationStats.completed / migrationStats.total * 100) + '%' }"></div>
-                <span>{{ Math.round(migrationStats.completed / migrationStats.total * 100) }}%</span>
-              </div>
-              <small>완료: {{ migrationStats.completed }}개 | 실패: {{ migrationStats.failed }}개 | 건너뜀: {{ migrationStats.skipped }}개</small>
-            </div>
 
             <!-- 부품 목록 -->
             <div v-if="setParts.length > 0" class="parts-section">
@@ -247,10 +246,10 @@
                 >
                   <div class="part-image" @click="toggleMetadata(part)">
                     <img 
-                      :src="part.supabase_image_url || part.lego_parts.part_img_url" 
+                      :src="getPartImageUrl(part)" 
                       :alt="part.lego_parts.name"
                       @error="handleImageError"
-                      :title="part.supabase_image_url ? 'Supabase Storage에서 로드됨' : 'Rebrickable CDN에서 로드됨'"
+                      :title="part.supabase_image_url ? 'Supabase Storage에서 로드됨' : '프록시를 통해 로드됨'"
                     />
                     <div v-if="part.supabase_image_url" class="image-source-badge supabase-badge">
                       📦 Supabase Storage
@@ -266,15 +265,19 @@
                         <h4>🧠 LLM 분석 결과</h4>
                         <p class="tooltip-hint">💡 클릭하여 닫기</p>
                         <div v-if="part.metadata" class="metadata-details">
-                          <p><strong>형태:</strong> {{ part.metadata.shape || '정보 없음' }}</p>
-                          <p><strong>기능:</strong> {{ part.metadata.function || '정보 없음' }}</p>
-                          <p><strong>연결방식:</strong> {{ part.metadata.connection || '정보 없음' }}</p>
-                          <p><strong>중심 스터드:</strong> {{ part.metadata.center_stud ? '있음' : '없음' }}</p>
-                          <p><strong>홈:</strong> {{ part.metadata.groove ? '있음' : '없음' }}</p>
+                          <p><strong>형태:</strong> {{ getSmartShape(part.metadata, part.lego_parts?.name) }}</p>
+                          <p><strong>기능:</strong> {{ getDisplayValue(part.metadata.function_tag || part.metadata.function) }}</p>
+                          <p><strong>연결방식:</strong> {{ getDisplayValue(part.metadata.connection) }}</p>
+                          <p><strong>스케일:</strong> {{ getSmartScale(part.metadata, part.lego_parts?.name) }}</p>
+                          <p><strong>중심 스터드:</strong> {{ part.metadata.center_stud ? '✅ 있음' : '❌ 없음' }}</p>
+                          <p><strong>홈:</strong> {{ part.metadata.groove ? '✅ 있음' : '❌ 없음' }}</p>
                           <p><strong>신뢰도:</strong> {{ Math.round((part.metadata.confidence || 0) * 100) }}%</p>
                           <!-- 디버깅용: 실제 메타데이터 구조 확인 -->
                           <details style="margin-top: 10px; font-size: 0.8rem; color: #ccc;">
                             <summary>🔍 디버깅 정보</summary>
+                            <div style="margin-bottom: 10px;">
+                              <strong>부품 이름:</strong> {{ part.lego_parts?.name || '없음' }}
+                            </div>
                             <pre style="white-space: pre-wrap; word-break: break-all;">{{ JSON.stringify(part.metadata, null, 2) }}</pre>
                           </details>
                           <div v-if="part.metadata.recognition_hints" class="recognition-hints">
@@ -312,6 +315,13 @@
                   <div class="part-info">
                     <h4>{{ part.lego_parts.name }}</h4>
                     <p><strong>부품 번호:</strong> {{ part.lego_parts.part_num }}</p>
+                    <p v-if="part.element_id" class="element-id-info">
+                      <strong>Element ID:</strong> 
+                      <span class="element-id-badge">{{ part.element_id }}</span>
+                      <router-link :to="`/element-search?q=${part.element_id}`" class="element-search-link" title="Element ID로 검색">
+                        🔍
+                      </router-link>
+                    </p>
                     <p><strong>색상:</strong> {{ part.lego_colors.name }}</p>
                     <p><strong>수량:</strong> {{ part.quantity }}개</p>
                   </div>
@@ -341,7 +351,6 @@ import { useDatabase } from '../composables/useDatabase'
 import { supabase } from '../composables/useSupabase'
 import { useImageManager } from '../composables/useImageManager'
 import { useBatchPartLoading } from '../composables/useBatchPartLoading'
-import { useAutoImageMigration } from '../composables/useAutoImageMigration'
 
 export default {
   name: 'SavedLegoManager',
@@ -350,7 +359,11 @@ export default {
       loading,
       error,
       getLegoSets,
-      getSetParts
+      getSetParts,
+      deleteSetAndParts,
+      clearAllStorageBuckets,
+      resetDatabaseOnly,
+      resetAllProjectData
     } = useDatabase()
 
     const {
@@ -365,12 +378,6 @@ export default {
       resetLoading
     } = useBatchPartLoading()
 
-    const { 
-      migrating, 
-      migrationStats, 
-      batchMigrateImages, 
-      resetMigrationStats 
-    } = useAutoImageMigration()
 
     const searchQuery = ref('')
     const savedSets = ref([])
@@ -383,68 +390,82 @@ export default {
     const selectedTheme = ref('')
     const selectedYear = ref('')
     const hoveredPart = ref(null)
-
-    // 통계 정보
-    const totalSets = computed(() => savedSets.value.length)
-    const totalParts = computed(() => {
-      return savedSets.value.reduce((sum, set) => sum + (set.num_parts || 0), 0)
-    })
-    const processedImages = computed(() => {
-      // WebP로 변환된 세트 이미지 수 계산
-      return savedSets.value.filter(set => set.webp_image_url).length
-    })
     
-    // 이미지 소스별 통계
-    const imageSourceStats = computed(() => {
-      if (!setParts.value.length) return { supabase: 0, cdn: 0 }
-      
-      const supabaseCount = setParts.value.filter(part => part.supabase_image_url).length
-      const cdnCount = setParts.value.length - supabaseCount
-      
-      return { supabase: supabaseCount, cdn: cdnCount }
-    })
+    // ✅ 페이지네이션 상태
+    const currentPage = ref(1)
+    const itemsPerPage = ref(50) // 한번에 50개씩 로드
+    const totalCount = ref(0)
 
-    // 저장된 세트 로드
-    const loadSavedSets = async () => {
+    // ✅ 최적화: 통계는 DB에서 직접 조회
+    const totalSets = ref(0)
+    const totalParts = ref(0)
+    const processedImages = ref(0)
+    
+    // 통계 정보 로드
+    const loadStats = async () => {
       try {
-        const sets = await getLegoSets(1, 1000) // 모든 세트 로드
+        // 총 세트 수
+        const { count: setsCount } = await supabase
+          .from('lego_sets')
+          .select('*', { count: 'exact', head: true })
+        totalSets.value = setsCount || 0
         
-        // 각 세트의 WebP 이미지 URL 확인 및 적용
-        const setsWithWebPImages = await Promise.all(sets.map(async (set) => {
-          try {
-            const webpImageUrl = await getSetWebPImageUrl(set.set_num)
-            if (webpImageUrl) {
-              return {
-                ...set,
-                webp_image_url: webpImageUrl,
-                display_image_url: webpImageUrl // WebP 이미지를 우선 표시
-              }
-            } else {
-              return {
-                ...set,
-                webp_image_url: null,
-                display_image_url: set.set_img_url // 원본 이미지 사용
-              }
-            }
-          } catch (err) {
-            return {
-              ...set,
-              webp_image_url: null,
-              display_image_url: set.set_img_url
-            }
-          }
+        // 총 부품 수 (sum)
+        const { data: partsSumData } = await supabase
+          .from('lego_sets')
+          .select('num_parts')
+        totalParts.value = partsSumData?.reduce((sum, set) => sum + (set.num_parts || 0), 0) || 0
+        
+        // WebP 변환 이미지 수
+        const { count: webpCount } = await supabase
+          .from('lego_sets')
+          .select('*', { count: 'exact', head: true })
+          .not('webp_image_url', 'is', null)
+        processedImages.value = webpCount || 0
+      } catch (err) {
+        console.error('통계 로드 실패:', err)
+      }
+    }
+    
+
+    // ✅ 최적화: 페이지네이션 추가
+    const loadSavedSets = async (page = 1, limit = 50) => {
+      try {
+        const sets = await getLegoSets(page, limit)
+        
+        // ✅ 최적화: N+1 쿼리 제거 - 이미 DB에서 webp_image_url을 가져왔으므로 추가 쿼리 불필요
+        const setsWithWebPImages = sets.map(set => ({
+          ...set,
+          display_image_url: set.webp_image_url || set.set_img_url // WebP 우선, 없으면 원본
         }))
         
-        savedSets.value = setsWithWebPImages
-        extractThemesAndYears(setsWithWebPImages)
+        if (page === 1) {
+          savedSets.value = setsWithWebPImages
+        } else {
+          savedSets.value = [...savedSets.value, ...setsWithWebPImages]
+        }
+        
+        extractThemesAndYears(savedSets.value)
+        currentPage.value = page
+        
+        console.log(`✅ 페이지 ${page}: ${sets.length}개 세트 로드 (총 ${savedSets.value.length}개)`)
       } catch (err) {
         console.error('Failed to load saved sets:', err)
+      }
+    }
+    
+    // ✅ 무한 스크롤: 더 로드하기
+    const loadMore = async () => {
+      if (savedSets.value.length < totalSets.value) {
+        await loadSavedSets(currentPage.value + 1, itemsPerPage.value)
       }
     }
 
     // 세트의 WebP 이미지 URL 조회
     const getSetWebPImageUrl = async (setNum) => {
       try {
+        console.log(`🔍 WebP 이미지 URL 조회 중: ${setNum}`)
+        
         // 1) lego_sets 테이블에서 WebP 이미지 URL 조회
         const { data: setImageData, error: setImageError } = await supabase
           .from('lego_sets')
@@ -454,19 +475,141 @@ export default {
           .maybeSingle()
 
         if (!setImageError && setImageData?.webp_image_url) {
+          console.log(`✅ lego_sets에서 WebP URL 발견: ${setImageData.webp_image_url}`)
           return setImageData.webp_image_url
         }
 
-        // 2) Supabase Storage에서 직접 확인 (WebP 파일이 있을 가능성이 높을 때만)
-        // 현재는 WebP 파일이 없으므로 HEAD 요청을 하지 않음
-        // const webpFileName = `${setNum}_set.webp`
-        // const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-        // const bucketName = 'lego_parts_images'
-        // const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/lego_sets_images/${webpFileName}`
+        // 2) set_images 테이블에서 우선 조회 (메타 보조 테이블)
+        const { data: setImgRow, error: setImgErr } = await supabase
+          .from('set_images')
+          .select('supabase_url')
+          .eq('set_num', setNum)
+          .maybeSingle()
+        if (!setImgErr && setImgRow?.supabase_url) {
+          console.log(`✅ set_images에서 WebP URL 발견: ${setImgRow.supabase_url}`)
+          return setImgRow.supabase_url
+        }
 
-        return null
+        // 3) Supabase Storage에서 직접 확인 (여러 버킷과 경로 시도)
+        const webpFileName = `${setNum}_set.webp`
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        
+        // ✅ 레고 세트 이미지 경로: lego_parts_images > lego_sets_images 폴더만 확인
+        const imageUrl = `${supabaseUrl}/storage/v1/object/public/lego_parts_images/lego_sets_images/${webpFileName}`
+        console.log(`🔍 Storage에서 WebP 파일 확인 (GET Range): ${imageUrl}`)
+        
+        try {
+          const resp = await fetch(imageUrl, { headers: { Range: 'bytes=0-0' } })
+          if (resp.ok || resp.status === 206) {
+            console.log(`✅ Storage에서 WebP 파일 발견: ${imageUrl}`)
+            console.log(`📁 실제 경로: lego_parts_images/lego_sets_images/${webpFileName}`)
+            return imageUrl
+          }
+          console.log(`❌ lego_parts_images/lego_sets_images/${webpFileName}에서 WebP 파일 없음: ${resp.status}`)
+        } catch (fetchError) {
+          console.log(`❌ lego_parts_images/lego_sets_images/${webpFileName} 확인 실패: ${fetchError.message}`)
+        }
+        
+        console.log(`⚠️ 모든 경로에서 세트 이미지를 찾을 수 없음: ${setNum}`)
+        
+        // ✅ 세트 이미지가 없는 경우 Rebrickable에서 가져와서 WebP로 변환
+        try {
+          console.log(`🔄 Rebrickable에서 세트 이미지 다운로드 시도: ${setNum}`)
+          const rebrickableUrl = `https://cdn.rebrickable.com/media/sets/${setNum}.jpg`
+          
+          // Rebrickable 이미지를 WebP로 변환하여 Storage에 저장
+          const webpImageUrl = await convertAndUploadSetImage(setNum, rebrickableUrl)
+          if (webpImageUrl) {
+            console.log(`✅ 세트 이미지 생성 완료: ${webpImageUrl}`)
+            return webpImageUrl
+          }
+        } catch (convertError) {
+          console.warn(`⚠️ 세트 이미지 변환 실패: ${convertError.message}`)
+        }
+        
+        // 최종 폴백: Rebrickable 원본 이미지 사용
+        return `https://cdn.rebrickable.com/media/sets/${setNum}.jpg`
       } catch (err) {
+        console.error(`❌ WebP 이미지 URL 조회 실패: ${err.message}`)
         return null
+      }
+    }
+
+    // ✅ Rebrickable 이미지를 WebP로 변환하여 Storage에 업로드
+    const convertAndUploadSetImage = async (setNum, rebrickableUrl) => {
+      try {
+        // 1. Rebrickable에서 이미지 다운로드 (CORS 우회를 위해 프록시 사용)
+        const imagePath = rebrickableUrl.replace('https://cdn.rebrickable.com/media/', '')
+        const proxyUrl = `/api/proxy/media/${imagePath}`
+        const response = await fetch(proxyUrl)
+        if (!response.ok) {
+          throw new Error(`Rebrickable 이미지 다운로드 실패: ${response.status}`)
+        }
+        
+        const imageBlob = await response.blob()
+        
+        // 2. Canvas를 사용하여 WebP로 변환
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        const img = new Image()
+        
+        return new Promise((resolve, reject) => {
+          img.onload = async () => {
+            try {
+              // Canvas 크기 설정 (최대 800px)
+              const maxSize = 800
+              const ratio = Math.min(maxSize / img.width, maxSize / img.height)
+              canvas.width = img.width * ratio
+              canvas.height = img.height * ratio
+              
+              // 이미지 그리기
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+              
+              // WebP로 변환 (품질 90%)
+              canvas.toBlob(async (webpBlob) => {
+                try {
+                  // 3. Supabase Storage에 업로드 (올바른 경로: lego_parts_images/lego_sets_images/)
+                  const fileName = `${setNum}_set.webp`
+                  const filePath = `lego_sets_images/${fileName}`  // ✅ lego_parts_images/lego_sets_images/ 경로
+                  
+                  const { data, error } = await supabase.storage
+                    .from('lego_parts_images')
+                    .upload(filePath, webpBlob, {
+                      contentType: 'image/webp',
+                      upsert: true
+                    })
+                  
+                  if (error) {
+                    throw new Error(`Storage 업로드 실패: ${error.message}`)
+                  }
+                  
+                  // 4. 공개 URL 반환
+                  const { data: urlData } = supabase.storage
+                    .from('lego_parts_images')
+                    .getPublicUrl(filePath)
+                  
+                  console.log(`✅ 세트 이미지 WebP 변환 및 업로드 완료: ${urlData.publicUrl}`)
+                  resolve(urlData.publicUrl)
+                } catch (uploadError) {
+                  console.error(`❌ Storage 업로드 실패: ${uploadError.message}`)
+                  reject(uploadError)
+                }
+              }, 'image/webp', 0.9)
+            } catch (canvasError) {
+              console.error(`❌ Canvas 변환 실패: ${canvasError.message}`)
+              reject(canvasError)
+            }
+          }
+          
+          img.onerror = () => {
+            reject(new Error('이미지 로드 실패'))
+          }
+          
+          img.src = URL.createObjectURL(imageBlob)
+        })
+      } catch (error) {
+        console.error(`❌ 세트 이미지 변환 실패: ${error.message}`)
+        throw error
       }
     }
 
@@ -547,22 +690,25 @@ export default {
         
         setParts.value = result.parts
         
-        // CDN 링크를 사용하는 부품들을 자동으로 Supabase Storage로 마이그레이션
-        const cdnParts = result.parts.filter(part => 
-          !part.supabase_image_url && part.lego_parts.part_img_url
-        )
-        
-        if (cdnParts.length > 0) {
-          console.log(`🔄 자동 마이그레이션 시작: ${cdnParts.length}개 부품`)
-          resetMigrationStats()
-          
-          // 백그라운드에서 마이그레이션 실행
-          batchMigrateImages(cdnParts).then(() => {
-            console.log('✅ 자동 마이그레이션 완료')
-            // 마이그레이션 완료 후 부품 목록 다시 로드
-            selectSet(set)
+        // ✅ 최적화: 메타데이터를 비동기로 백그라운드 로드 (부품 표시를 차단하지 않음)
+        console.log(`🧠 Background loading AI metadata for ${result.parts.length} parts...`)
+        getBatchPartMetadata(result.parts).then(metadataMap => {
+          // 각 부품에 메타데이터 할당
+          result.parts.forEach(part => {
+            const partNum = part.lego_parts?.part_num || part.part_id
+            const colorId = part.lego_colors?.id || part.color_id
+            const key = `${partNum}_${colorId}`
+            
+            if (metadataMap[key]) {
+              part.metadata = metadataMap[key]
+            }
           })
-        }
+          
+          const metadataCount = Object.keys(metadataMap).length
+          console.log(`✅ AI metadata loading completed: ${metadataCount}개 매칭됨`)
+        }).catch(err => {
+          console.error('메타데이터 백그라운드 로딩 실패:', err)
+        })
         
       } catch (err) {
         console.error('Failed to batch load set parts:', err)
@@ -599,9 +745,73 @@ export default {
       }
     }
 
+    // 부품 이미지 URL 생성 (CORS 우회)
+    const getPartImageUrl = (part) => {
+      // 1. Supabase Storage 이미지가 있으면 우선 사용
+      if (part.supabase_image_url) {
+        return part.supabase_image_url
+      }
+      
+      // 2. Rebrickable CDN URL을 프록시를 통해 로드
+      if (part.lego_parts?.part_img_url) {
+        // 프록시 서버를 통해 이미지 로드
+        return `/api/upload/proxy-image?url=${encodeURIComponent(part.lego_parts.part_img_url)}`
+      }
+      
+      // 3. 플레이스홀더 이미지
+      return '/placeholder-image.png'
+    }
+
     // LLM 분석 메타데이터 조회
+    // ✅ 배치 메타데이터 로딩 (N+1 쿼리 방지)
+    const getBatchPartMetadata = async (parts) => {
+      try {
+        // 부품 ID와 색상 ID 조합 생성
+        const partColorPairs = parts
+          .map(part => ({
+            part_id: part.lego_parts?.part_num || part.part_id,
+            color_id: part.lego_colors?.id || part.color_id
+          }))
+          .filter(p => p.part_id && p.color_id !== undefined)
+        
+        if (partColorPairs.length === 0) return {}
+        
+        // 모든 part_id 추출
+        const partIds = [...new Set(partColorPairs.map(p => p.part_id))]
+        
+        console.log(`🔍 배치 메타데이터 조회 중: ${partIds.length}개 부품`)
+        
+        // ✅ 단일 쿼리로 모든 메타데이터 가져오기
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('*')
+          .in('part_id', partIds)
+        
+        if (error) {
+          console.warn('❌ 배치 메타데이터 조회 실패:', error)
+          return {}
+        }
+        
+        // Map으로 변환 (빠른 조회를 위해)
+        const metadataMap = {}
+        data?.forEach(item => {
+          const key = `${item.part_id}_${item.color_id}`
+          metadataMap[key] = item
+        })
+        
+        console.log(`✅ 배치 메타데이터 로드 완료: ${data?.length || 0}개`)
+        return metadataMap
+        
+      } catch (err) {
+        console.error('배치 메타데이터 조회 오류:', err)
+        return {}
+      }
+    }
+    
     const getPartMetadata = async (partNum, colorId) => {
       try {
+        console.log(`🔍 Querying metadata for part_id='${partNum}', color_id=${colorId}`)
+        
         const { data, error } = await supabase
           .from('parts_master_features')
           .select('*')
@@ -610,11 +820,16 @@ export default {
           .maybeSingle()
 
         if (error) {
-          console.log(`No metadata found for ${partNum} (color: ${colorId})`)
+          console.warn(`❌ Query error for ${partNum} (color: ${colorId}):`, error)
           return null
         }
 
-        if (!data) return null
+        if (!data) {
+          console.log(`ℹ️ No data returned for ${partNum} (color: ${colorId})`)
+          return null
+        }
+        
+        console.log(`✅ Metadata found for ${partNum} (color: ${colorId}):`, data)
 
         // feature_json 파싱하여 메타데이터 구성
         let processedMeta = null
@@ -688,24 +903,30 @@ export default {
       selectSet(set)
     }
 
-    // 세트 삭제
+    // 세트 삭제 (관련 데이터 모두 삭제)
     const deleteSet = async (set) => {
-      if (!confirm(`"${set.name}" 세트를 삭제하시겠습니까?`)) return
+      if (!confirm(`"${set.name}" 세트와 관련된 모든 데이터(부품, 이미지, 메타데이터)를 삭제하시겠습니까?`)) return
       
       try {
-        const { error } = await supabase
-          .from('lego_sets')
-          .delete()
-          .eq('id', set.id)
-
-        if (error) throw error
+        loading.value = true
+        successMessage.value = '세트와 관련 데이터를 삭제하는 중...'
+        
+        // deleteSetAndParts 함수 사용 (관련 데이터 모두 삭제)
+        const deleteSuccess = await deleteSetAndParts(set.id, set.set_num, true) // LLM 분석 데이터도 삭제
+        
+        if (!deleteSuccess) {
+          throw new Error('세트 삭제에 실패했습니다.')
+        }
         
         // 목록에서 제거
         savedSets.value = savedSets.value.filter(s => s.id !== set.id)
-        successMessage.value = '세트가 성공적으로 삭제되었습니다.'
+        successMessage.value = '세트와 관련된 모든 데이터가 성공적으로 삭제되었습니다.'
+        
       } catch (err) {
         console.error('Failed to delete set:', err)
-        error.value = '삭제 중 오류가 발생했습니다.'
+        error.value = '삭제 중 오류가 발생했습니다: ' + err.message
+      } finally {
+        loading.value = false
       }
     }
 
@@ -713,6 +934,87 @@ export default {
     const closeModal = () => {
       selectedSet.value = null
       setParts.value = []
+    }
+
+    // Storage 버킷 정리
+    const clearStorage = async () => {
+      if (!confirm('모든 Storage 버킷의 데이터를 삭제하시겠습니까?\n(models 버킷 제외)\n\n⚠️ 이 작업은 되돌릴 수 없습니다!')) return
+      
+      try {
+        loading.value = true
+        successMessage.value = 'Storage 버킷 정리 중...'
+        
+        const results = await clearAllStorageBuckets()
+        
+        successMessage.value = `Storage 정리 완료! ${results.totalFiles}개 파일 중 ${results.deletedFiles}개 삭제됨`
+        
+        if (results.errors.length > 0) {
+          console.warn('일부 오류 발생:', results.errors)
+          successMessage.value += ` (${results.errors.length}개 오류 발생)`
+        }
+        
+      } catch (err) {
+        console.error('Storage 정리 실패:', err)
+        error.value = 'Storage 정리 중 오류가 발생했습니다: ' + err.message
+      } finally {
+        loading.value = false
+      }
+    }
+
+    // 데이터베이스만 초기화 (Storage 제외)
+    const resetDatabase = async () => {
+      if (!confirm('데이터베이스를 초기화하시겠습니까?\n\n삭제될 데이터:\n• 모든 레고 세트 및 부품 정보\n• 모든 이미지 메타데이터\n• LLM 분석 데이터\n• 훈련 데이터 및 모델\n• 작업 로그\n\n⚠️ 이 작업은 되돌릴 수 없습니다!')) return
+      
+      try {
+        loading.value = true
+        successMessage.value = '데이터베이스 초기화 중...'
+        
+        const results = await resetDatabaseOnly()
+        
+        successMessage.value = `데이터베이스 초기화 완료! ${results.steps.length}개 단계 처리됨`
+        
+        if (results.errors.length > 0) {
+          console.warn('일부 오류 발생:', results.errors)
+          successMessage.value += ` (${results.errors.length}개 오류 발생)`
+        }
+        
+        // 목록 새로고침
+        await loadSavedSets()
+        
+      } catch (err) {
+        console.error('데이터베이스 초기화 실패:', err)
+        error.value = '데이터베이스 초기화 중 오류가 발생했습니다: ' + err.message
+      } finally {
+        loading.value = false
+      }
+    }
+
+    // 프로젝트 데이터 완전 초기화
+    const resetProjectData = async () => {
+      if (!confirm('프로젝트 데이터를 완전히 초기화하시겠습니까?\n\n삭제될 데이터:\n• 모든 Storage 파일 (models 제외)\n• 모든 레고 세트 및 부품 정보\n• 모든 이미지 및 메타데이터\n• LLM 분석 데이터\n• 훈련 데이터 및 모델\n• 작업 로그\n\n⚠️ 이 작업은 되돌릴 수 없습니다!')) return
+      
+      try {
+        loading.value = true
+        successMessage.value = '프로젝트 데이터 초기화 중...'
+        
+        const results = await resetAllProjectData()
+        
+        successMessage.value = `프로젝트 초기화 완료! ${results.steps.length}개 단계 처리됨`
+        
+        if (results.errors.length > 0) {
+          console.warn('일부 오류 발생:', results.errors)
+          successMessage.value += ` (${results.errors.length}개 오류 발생)`
+        }
+        
+        // 목록 새로고침
+        await loadSavedSets()
+        
+      } catch (err) {
+        console.error('프로젝트 초기화 실패:', err)
+        error.value = '프로젝트 초기화 중 오류가 발생했습니다: ' + err.message
+      } finally {
+        loading.value = false
+      }
     }
 
     // 날짜 포맷팅
@@ -726,21 +1028,27 @@ export default {
       
       // 세트 이미지 오류 처리
       const set = savedSets.value.find(s => 
-        s.display_image_url === img.src || s.set_img_url === img.src
+        s.display_image_url === img.src || s.set_img_url === img.src || s.webp_image_url === img.src
       )
       
       if (set) {
+        console.log(`🖼️ 이미지 로드 실패: ${set.set_num}, 현재 src: ${img.src}`)
+        
         if (set.webp_image_url && img.src === set.webp_image_url) {
           // WebP 이미지 로드 실패 시 원본 이미지로 폴백
-          console.log(`WebP image failed for ${set.set_num}, falling back to original`)
+          console.log(`🔄 WebP 이미지 실패, 원본으로 폴백: ${set.set_num}`)
           img.src = set.set_img_url
         } else if (set.display_image_url && img.src === set.display_image_url) {
           // 표시 이미지 로드 실패 시 원본으로 폴백
-          console.log(`Display image failed for ${set.set_num}, falling back to original`)
+          console.log(`🔄 표시 이미지 실패, 원본으로 폴백: ${set.set_num}`)
           img.src = set.set_img_url
+        } else if (img.src === set.set_img_url) {
+          // 원본 이미지도 실패 시 플레이스홀더
+          console.log(`🔄 원본 이미지도 실패, 플레이스홀더 사용: ${set.set_num}`)
+          img.src = '/placeholder-image.png'
         } else {
-          // 모든 이미지 로드 실패 시 플레이스홀더
-          console.log(`All images failed for ${set.set_num}, using placeholder`)
+          // 알 수 없는 이미지 실패 시 플레이스홀더
+          console.log(`🔄 알 수 없는 이미지 실패, 플레이스홀더 사용: ${set.set_num}`)
           img.src = '/placeholder-image.png'
         }
         return
@@ -753,10 +1061,11 @@ export default {
       
       if (part && part.supabase_image_url && img.src === part.supabase_image_url) {
         // Supabase 이미지 로드 실패 시 Rebrickable CDN으로 폴백
-        console.log(`Supabase image failed for ${part.lego_parts.part_num}, falling back to CDN`)
+        console.log(`🔄 Supabase 이미지 실패, CDN으로 폴백: ${part.lego_parts.part_num}`)
         img.src = part.lego_parts.part_img_url
       } else {
         // 모든 이미지 로드 실패 시 플레이스홀더
+        console.log(`🔄 모든 이미지 실패, 플레이스홀더 사용`)
         img.src = '/placeholder-image.png'
       }
     }
@@ -768,9 +1077,83 @@ export default {
       return uniqueParts.size
     })
 
+    // 메타데이터 표시값 헬퍼 함수
+    const getDisplayValue = (value, fieldType = null) => {
+      if (!value || value === '' || value === 'unknown') {
+        return '정보 없음'
+      }
+      
+      // 영문 값을 한글로 변환
+      const translations = {
+        'plate': '플레이트',
+        'brick': '브릭',
+        'tile': '타일',
+        'slope': '경사',
+        'round': '둥근',
+        'technic': '테크닉',
+        'hinge': '힌지',
+        'clip': '클립',
+        'bar': '막대',
+        'connector': '연결',
+        'wedge': '쐐기',
+        'panel': '패널',
+        'system': '시스템',
+        'duplo': '듀플로',
+        'stud': '스터드',
+        'tube': '튜브',
+        'solid_tube': '단단한 튜브',
+        'hollow': '속이 빈',
+        'reinforced': '보강된',
+        'animal': '동물',
+        'figure': '피규어',
+        'minifig': '미니피규어',
+        'plant': '식물',
+        'vehicle': '차량'
+      }
+      
+      const lowercaseValue = value.toLowerCase()
+      
+      // "duplo"는 스케일로만 표시되어야 함
+      if (fieldType === 'shape' && lowercaseValue === 'duplo') {
+        return '정보 없음'
+      }
+      
+      return translations[lowercaseValue] || value
+    }
+    
+    // 스마트 메타데이터 추출 (부품 이름에서 힌트)
+    const getSmartScale = (metadata, partName) => {
+      // 부품 이름에 Duplo가 있으면 듀플로
+      if (partName && partName.toLowerCase().includes('duplo')) {
+        return '듀플로'
+      }
+      return getDisplayValue(metadata.scale_type || metadata.scale)
+    }
+    
+    const getSmartShape = (metadata, partName) => {
+      const rawShape = metadata.shape_tag || metadata.shape
+      
+      // "duplo"는 스케일이므로 형태로 사용하지 않음
+      if (rawShape && rawShape.toLowerCase() === 'duplo') {
+        // 부품 이름에서 힌트 추출
+        if (partName) {
+          if (partName.toLowerCase().includes('animal')) return '동물'
+          if (partName.toLowerCase().includes('figure')) return '피규어'
+          if (partName.toLowerCase().includes('brick')) return '브릭'
+          if (partName.toLowerCase().includes('plate')) return '플레이트'
+        }
+        return '정보 없음'
+      }
+      
+      return getDisplayValue(rawShape, 'shape')
+    }
 
-    onMounted(() => {
-      loadSavedSets()
+    onMounted(async () => {
+      // ✅ 최적화: 통계와 세트 병렬 로드
+      await Promise.all([
+        loadStats(),
+        loadSavedSets(1, itemsPerPage.value)
+      ])
     })
 
     return {
@@ -790,7 +1173,6 @@ export default {
       totalSets,
       totalParts,
       processedImages,
-      imageSourceStats,
       searchSavedSets,
       filterByTheme,
       filterByYear,
@@ -803,8 +1185,16 @@ export default {
       uniquePartsCount,
       toggleMetadata,
       getLoadingStatus,
-      migrating,
-      migrationStats
+      clearStorage,
+      resetDatabase,
+      resetProjectData,
+      getPartImageUrl,
+      getDisplayValue,
+      getSmartScale,
+      getSmartShape,
+      loadMore, // ✅ 무한 스크롤 함수 추가
+      currentPage,
+      itemsPerPage
     }
   }
 }
@@ -1061,6 +1451,18 @@ export default {
   border-radius: 4px;
 }
 
+/* ✅ 더 보기 버튼 */
+.load-more-section {
+  margin: 2rem 0;
+  text-align: center;
+}
+
+.load-more-btn {
+  min-width: 200px;
+  padding: 0.75rem 2rem;
+  font-size: 1rem;
+}
+
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;
@@ -1137,54 +1539,6 @@ export default {
   font-weight: 500;
 }
 
-.migration-progress {
-  background: linear-gradient(135deg, #ff9800, #f57c00);
-  color: white;
-  padding: 1rem;
-  border-radius: 8px;
-  margin: 1rem 0;
-  box-shadow: 0 4px 12px rgba(255, 152, 0, 0.3);
-}
-
-.migration-progress h4 {
-  margin: 0 0 0.5rem 0;
-  font-size: 1rem;
-}
-
-.migration-progress .progress {
-  background: rgba(255, 255, 255, 0.3);
-  border-radius: 10px;
-  height: 20px;
-  margin: 0.5rem 0;
-  position: relative;
-  overflow: hidden;
-}
-
-.migration-progress .progress-bar {
-  background: linear-gradient(90deg, #4caf50, #8bc34a);
-  height: 100%;
-  border-radius: 10px;
-  transition: width 0.3s ease;
-  position: relative;
-}
-
-.migration-progress .progress span {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-weight: 600;
-  font-size: 0.8rem;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-}
-
-.migration-progress small {
-  display: block;
-  margin-top: 0.5rem;
-  font-size: 0.8rem;
-  opacity: 0.9;
-}
 
 .modal-overlay {
   position: fixed;
@@ -1379,6 +1733,42 @@ export default {
   margin-bottom: 0.25rem;
 }
 
+/* Element ID 스타일 */
+.element-id-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.element-id-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.element-search-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #f8f9fa;
+  border-radius: 50%;
+  text-decoration: none;
+  transition: all 0.2s;
+  font-size: 0.9rem;
+}
+
+.element-search-link:hover {
+  background: #667eea;
+  transform: scale(1.1);
+}
+
 .btn {
   padding: 0.5rem 1rem;
   border: none;
@@ -1439,7 +1829,7 @@ export default {
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .tooltip-content {
@@ -1452,6 +1842,45 @@ export default {
   min-width: 300px;
   font-size: 0.9rem;
   line-height: 1.4;
+  cursor: default;
+}
+
+.tooltip-content details {
+  cursor: pointer;
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 6px;
+}
+
+.tooltip-content details summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.8rem;
+  color: #ccc;
+  list-style-position: outside;
+  padding-left: 4px;
+}
+
+.tooltip-content details summary:hover {
+  color: #fff;
+}
+
+.tooltip-content details[open] summary {
+  margin-bottom: 8px;
+  color: #fff;
+}
+
+.tooltip-content details pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.7rem;
+  background: rgba(0,0,0,0.3);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
 }
 
 .tooltip-content h4 {

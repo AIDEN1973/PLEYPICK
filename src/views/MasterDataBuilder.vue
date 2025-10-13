@@ -187,15 +187,15 @@
                   </div>
                   <div class="metadata-item">
                     <span class="label">모양:</span>
-                    <span class="value">{{ record.feature_json?.shape || 'Unknown' }}</span>
+                    <span class="value">{{ getDisplayValue(record.shape_tag || record.feature_json?.shape_tag || record.feature_json?.shape) }}</span>
                   </div>
                   <div class="metadata-item">
                     <span class="label">연결:</span>
-                    <span class="value">{{ record.feature_json?.connection || 'Unknown' }}</span>
+                    <span class="value">{{ getDisplayValue(record.feature_json?.connection) }}</span>
                   </div>
                   <div class="metadata-item">
                     <span class="label">기능:</span>
-                    <span class="value">{{ record.feature_json?.function || 'Unknown' }}</span>
+                    <span class="value">{{ getDisplayValue(record.function_tag || record.feature_json?.function_tag || record.feature_json?.function) }}</span>
                   </div>
                   <div class="metadata-item">
                     <span class="label">중앙 스터드:</span>
@@ -841,10 +841,10 @@ const getPartImageUrl = (record) => {
   // Supabase Storage에서 이미지 URL 생성
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
   const bucketName = 'lego_parts_images'
-  const fileName = `${partId}_${colorId}.webp`
+  const fileName = `${partId}_${record.color_id}.webp`
   
   if (supabaseUrl) {
-    const url = `${supabaseUrl}/storage/v1/object/public/${bucketName}/${fileName}`
+    const url = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
     console.log('✅ Supabase URL 생성:', url)
     return url
   }
@@ -881,6 +881,38 @@ const buildCompleteDatabase = async () => {
     console.error('Complete build failed:', err)
     error.value = err.message
   }
+}
+
+// 메타데이터 표시값 헬퍼 함수
+const getDisplayValue = (value) => {
+  if (!value || value === '' || value === 'unknown') {
+    return '정보 없음'
+  }
+  
+  // 영문 값을 한글로 변환
+  const translations = {
+    'plate': '플레이트',
+    'brick': '브릭',
+    'tile': '타일',
+    'slope': '경사',
+    'round': '둥근',
+    'technic': '테크닉',
+    'hinge': '힌지',
+    'clip': '클립',
+    'bar': '막대',
+    'connector': '연결',
+    'wedge': '쐐기',
+    'panel': '패널',
+    'system': '시스템',
+    'duplo': '듀플로',
+    'stud': '스터드',
+    'tube': '튜브',
+    'solid_tube': '단단한 튜브',
+    'hollow': '속이 빈',
+    'reinforced': '보강된'
+  }
+  
+  return translations[value.toLowerCase()] || value
 }
 </script>
 

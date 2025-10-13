@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""
+BrickBox CLIP 임베딩 생성 스크립트
+
+실행 방법:
+  pip install openai-clip torch supabase
+  python generate_embeddings.py
+
+환경 변수:
+  SUPABASE_URL, SUPABASE_KEY
+"""
+
+import os
+import sys
+import json
+import numpy as np
+from typing import List, Dict
+from tqdm import tqdm
+
+try:
+    import torch
+    import clip
+    from supabase import create_client
+except ImportError as e:
+    print(f"❌ 패키지 설치 필요: {e}")
+    print("실행: pip install openai-clip torch supabase")
+    sys.exit(1)
+
+# ============================================
+# 설정
+# ============================================
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+BATCH_SIZE = 10
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# 샘플 ID (전체 확장 시 수정)
+PART_IDS = list(range(2124, 2134))  # 10건
+
+# ============================================
+# 초기화
+# ============================================
+print("========================================")
+print("🔧 BrickBox 임베딩 생성 시작")
+print("========================================")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("❌ 환경 변수 설정 필요:")
+    print("  export SUPABASE_URL='...'")
+    print("  export SUPABASE_KEY='...'")
+    sys.exit(1)
+
+print(f"📱 Device: {DEVICE}")
+print(f"📦 배치 크기: {BATCH_SIZE}")
+print(f"🎯 대상: {len(PART_IDS)}개 부품")
+print("")
+
+# CLIP 모델 로드 (ViT-L/14: 768차원)
+print("⏳ CLIP 모델 로드 중 (ViT-L/14, 768차원)...")
+try:
+    model, preprocess = clip.load("ViT-L/14", device=DEVICE)
+    model.eval()
+    print("✅ CLIP 모델 로드 완료 (768차원)")
+except Exception as e:
+    print(f"❌ CLIP 모델 로드 실패: {e}")
+    sys.exit(1)
+
+# DB 연결
+print("⏳ Supabase 연결 중...")
+try:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    print("✅ Supabase 연결 완료")
+except Exception as e:
+    print(f"❌ Supabase 연결 실패: {e}")
+    sys.exit(1)
+
+print("")
+
+# ============================================
+# 데이터 로드
+# ============================================
+print("📥 부품 데이터 로드 중...")
+try:
+    response = supabase.table('parts_master_features') \
+        .select('id, part_id, part_name, feature_text') \
+        .in_('id', PART_IDS) \
+        .execute()
+    
+    parts = response.data
+    print(f"✅ {len(parts)}개 부품 로드 완료")
+except Exception as e:
+    print(f"❌ 데이터 로드 실패: {e}")
+    sys.exit(1)
+
+if not parts:
+    print("❌ 부품 데이터가 없습니다")
+    sys.exit(1)
+
+print("")
+
+# ============================================
+# 임베딩 생성
+# ============================================
+print("🔄 임베딩 생성 중...")
+print("========================================")
+
+success_count = 0
+fail_count = 0
+
+for i in tqdm(range(0, len(parts), BATCH_SIZE), desc="Progress"):
+    batch = parts[i:i+BATCH_SIZE]
+    
+    try:
+        # 텍스트 준비
+        texts = [p['feature_text'] or f"{p['part_name']} 레고 부품" for p in batch]
+        
+        # CLIP 임베딩
+        text_tokens = clip.tokenize(texts, truncate=True).to(DEVICE)
+        with torch.no_grad():
+            text_features = model.encode_text(text_tokens)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        
+        # DB 업데이트
+        for j, part in enumerate(batch):
+            emb = text_features[j].cpu().numpy()
+            emb_str = '[' + ','.join([f'{v:.6f}' for v in emb]) + ']'
+            
+            try:
+                supabase.table('parts_master_features') \
+                    .update({
+                        'clip_text_emb': emb_str,
+                        'semantic_vector': emb_str,  # 동일 벡터 사용
+                        'updated_at': 'NOW()'
+                    }) \
+                    .eq('id', part['id']) \
+                    .execute()
+                
+                success_count += 1
+            except Exception as e:
+                print(f"\n❌ {part['part_id']} 업데이트 실패: {e}")
+                fail_count += 1
+    
+    except Exception as e:
+        print(f"\n❌ 배치 {i} 실패: {e}")
+        fail_count += len(batch)
+
+print("")
+print("========================================")
+print(f"✅ 성공: {success_count}개")
+print(f"❌ 실패: {fail_count}개")
+print("========================================")
+
+# ============================================
+# 검증
+# ============================================
+print("")
+print("🔍 임베딩 검증 중...")
+
+try:
+    response = supabase.table('parts_master_features') \
+        .select('id, part_id, clip_text_emb') \
+        .in_('id', PART_IDS) \
+        .limit(3) \
+        .execute()
+    
+    print("")
+    print("샘플 확인:")
+    print("----------------------------------------")
+    
+    for part in response.data:
+        emb = json.loads(part['clip_text_emb'])
+        norm = np.linalg.norm(emb)
+        
+        status = "✅ OK" if len(emb) == 768 and abs(norm - 1.0) < 0.01 else "❌ FAIL"
+        
+        print(f"{status} {part['part_id']}")
+        print(f"  - 차원: {len(emb)}")
+        print(f"  - 노름: {norm:.4f}")
+        print(f"  - 샘플: [{emb[0]:.4f}, {emb[1]:.4f}, {emb[2]:.4f}, ...]")
+        print("")
+    
+    print("========================================")
+    print("🎉 P0 임베딩 생성 완료!")
+    print("다음 단계: psql -f fix_metadata_p1.sql")
+    print("========================================")
+
+except Exception as e:
+    print(f"❌ 검증 실패: {e}")
+    sys.exit(1)
+

@@ -33,30 +33,64 @@ export function useBatchPartLoading() {
       currentStep.value = '부품 데이터 로딩 중...'
       errors.value = []
       
-      // 1. 한 번에 모든 부품 데이터 로딩 (배치 없이)
+      // ✅ 외래 키 제약 조건 제거로 인한 JOIN 문제 해결: 단계별 조회
       currentStep.value = '부품 데이터 로딩 중...'
-      const { data: allParts, error: partsError } = await supabase
+      
+      // 1단계: set_parts 조회
+      const { data: setParts, error: setPartsError } = await supabase
         .from('set_parts')
-        .select(`
-          *,
-          lego_parts!inner(*),
-          lego_colors!inner(*)
-        `)
+        .select('*')
         .eq('set_id', setId)
       
-      if (partsError) {
-        throw new Error(`Failed to load parts: ${partsError.message}`)
+      if (setPartsError) {
+        throw new Error(`Failed to load set_parts: ${setPartsError.message}`)
       }
       
-      if (!allParts || allParts.length === 0) {
+      if (!setParts || setParts.length === 0) {
         return { parts: [], metadata: [] }
       }
+      
+      // 2단계: part_id 목록 추출
+      const partIds = [...new Set(setParts.map(sp => sp.part_id))]
+      const colorIds = [...new Set(setParts.map(sp => sp.color_id))]
+      
+      // 3단계: lego_parts 조회 (스키마에 맞는 컬럼만 선택)
+      const { data: legoParts, error: legoPartsError } = await supabase
+        .from('lego_parts')
+        .select('part_num, name, part_cat_id, part_img_url')
+        .in('part_num', partIds)
+      
+      if (legoPartsError) {
+        throw new Error(`Failed to load lego_parts: ${legoPartsError.message}`)
+      }
+      
+      // 4단계: lego_colors 조회
+      const { data: legoColors, error: legoColorsError } = await supabase
+        .from('lego_colors')
+        .select('color_id, name, rgb, is_trans')
+        .in('color_id', colorIds)
+      
+      if (legoColorsError) {
+        throw new Error(`Failed to load lego_colors: ${legoColorsError.message}`)
+      }
+      
+      // 5단계: 수동 데이터 조합
+      const allParts = setParts.map(setPart => {
+        const legoPart = legoParts.find(lp => lp.part_num === setPart.part_id)
+        const legoColor = legoColors.find(lc => lc.color_id === setPart.color_id)
+        
+        return {
+          ...setPart,
+          lego_parts: legoPart || null,
+          lego_colors: legoColor || null
+        }
+      })
       
       loadingState.total = allParts.length
       loadingState.loaded = allParts.length
       progress.value = 30
       
-      console.log(`✅ Loaded ${allParts.length} parts in single query`)
+      console.log(`✅ Loaded ${allParts.length} parts with manual JOIN`)
       
       // 2. 모든 이미지 URL과 메타데이터를 한 번에 조회 (초고속)
       currentStep.value = '이미지 및 메타데이터 조회 중...'

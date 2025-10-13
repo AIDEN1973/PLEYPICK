@@ -218,6 +218,10 @@ class LDrawRenderer:
         self.resolution = (1024, 1024)  # 고해상도 기본 설정
         self.target_fill = 0.85
         
+        # 흰색 부품 감지 임계값 (설정 가능)
+        self.WHITE_THRESHOLD = 0.9  # RGB 값이 이 값 이상이면 흰색으로 판단
+        self.BRIGHT_PART_DARKENING = 0.95  # 밝은 부품을 이 비율만큼 어둡게 조정
+        
         # 캐싱 시스템 초기화
         self.scene_cache = {}  # 부품별 기본 씬 캐시
         self.material_cache = {}  # 재질/텍스처 캐시
@@ -1410,8 +1414,8 @@ class LDrawRenderer:
                     g = int(hexstr[2:4], 16) / 255.0
                     b = int(hexstr[4:6], 16) / 255.0
                     
-                    # 흰색 감지 (RGB 모두 0.9 이상)
-                    if r >= 0.9 and g >= 0.9 and b >= 0.9:
+                    # 흰색 감지 (RGB 모두 임계값 이상)
+                    if r >= self.WHITE_THRESHOLD and g >= self.WHITE_THRESHOLD and b >= self.WHITE_THRESHOLD:
                         is_white = True
                     
                     # sRGB → Linear 변환 (Blender는 기본적으로 선형 워크플로우)
@@ -1487,16 +1491,17 @@ class LDrawRenderer:
             material.blend_method = 'OPAQUE'
         
         # 밝은 부품 가시성 개선 (Adaptive Bright-Part Rendering)
-        if is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9):
+        if is_white or (color_rgba[0] > self.WHITE_THRESHOLD and color_rgba[1] > self.WHITE_THRESHOLD and color_rgba[2] > self.WHITE_THRESHOLD):
             # 조건부 병합 방식: 밝은 부품 처리
             adjusted_color = (
-                color_rgba[0] * 0.95,  # 5% 어둡게
-                color_rgba[1] * 0.95,
-                color_rgba[2] * 0.95,
+                color_rgba[0] * self.BRIGHT_PART_DARKENING,  # 설정 가능한 비율만큼 어둡게
+                color_rgba[1] * self.BRIGHT_PART_DARKENING,
+                color_rgba[2] * self.BRIGHT_PART_DARKENING,
                 color_rgba[3]
             )
             bsdf.inputs['Base Color'].default_value = adjusted_color
             bsdf.inputs['Roughness'].default_value = 0.5  # 경계선 강화
+            print(f"🔧 밝은 부품 보정: RGB 값을 {self.BRIGHT_PART_DARKENING * 100}%로 조정")
             
             # 배경 밝기 조정을 위한 메타데이터 저장
             self.bright_part_rendering = True
@@ -1527,9 +1532,9 @@ class LDrawRenderer:
         return {
             'color_name': color_name,
             'color_rgba': color_rgba,
-            'is_bright_part': is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9),
+            'is_bright_part': is_white or (color_rgba[0] > self.WHITE_THRESHOLD and color_rgba[1] > self.WHITE_THRESHOLD and color_rgba[2] > self.WHITE_THRESHOLD),
             'is_transparent': is_transparent,
-            'visibility_boost': is_white or (color_rgba[0] > 0.9 and color_rgba[1] > 0.9 and color_rgba[2] > 0.9)
+            'visibility_boost': is_white or (color_rgba[0] > self.WHITE_THRESHOLD and color_rgba[1] > self.WHITE_THRESHOLD and color_rgba[2] > self.WHITE_THRESHOLD)
         }
     
     def calculate_bounding_box(self, part_object):
@@ -1998,14 +2003,14 @@ class LDrawRenderer:
         bbox_data = self.calculate_bounding_box(part_object)
         polygon_uv = self.convex_hull_uv(self.project_vertices_uv(part_object))
         
-        # 11. 렌더링 직전 배경 재확인 (다른 설정에 의해 덮어씌워졌을 수 있음)
-        self.setup_background()
-        
-        # 11.5. 밝은 부품을 위한 적응형 조명 설정
+        # 11. 밝은 부품 체크 및 적응형 배경/조명 설정
         is_bright_part = material_data and material_data.get('is_bright_part', False)
         if is_bright_part:
-            print("🔆 밝은 부품 감지: 적응형 조명 적용")
+            print(f"🔆 밝은 부품 감지: 배경 자동 보정 ({self.background} → gray #D9D9D9)")
             self.setup_adaptive_lighting(is_bright_part=True)
+        else:
+            # 밝은 부품이 아닐 때만 원래 배경 유지
+            self.setup_background()
         
         # 12. 출력 파일 경로 (엘리먼트 아이디가 있으면 파일명에도 반영)
         base_id_for_filename = element_id_value if element_id_value else part_id

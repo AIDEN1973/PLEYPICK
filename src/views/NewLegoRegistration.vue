@@ -20,19 +20,19 @@
         </button>
       </div>
       
-      <!-- 마스터 데이터 구축 옵션 -->
+      <!-- LLM 분석 옵션 -->
       <div class="master-data-option">
         <label class="checkbox-label">
           <input 
             type="checkbox" 
-            v-model="buildMasterData"
+            v-model="skipLLMAnalysis"
             :disabled="loading || processing"
           />
           <span class="checkmark"></span>
           ⚡ 빠른 저장 (LLM 분석 건너뛰기)
         </label>
         <small class="form-help">
-          체크하면 기본 데이터만 저장하고 LLM 분석을 건너뜁니다. (기본값: LLM 분석 실행)
+          체크하면 기본 데이터만 저장하고 LLM 분석을 건너뜁니다. (기본값: 체크 해제 = LLM 분석 실행)
         </small>
       </div>
     </div>
@@ -254,26 +254,26 @@
     </div>
 
     <!-- 배치 처리 진행률 -->
-    <div v-if="getProcessingStatus().processing" class="batch-processing-progress">
+    <div v-if="batchLoading" class="batch-processing-progress">
       <h4>⚡ 배치 처리 중...</h4>
       <div class="progress">
-        <div class="progress-bar" :style="{ width: getProcessingStatus().progress + '%' }"></div>
-        <span>{{ getProcessingStatus().progress }}%</span>
+        <div class="progress-bar" :style="{ width: batchProgress + '%' }"></div>
+        <span>{{ batchProgress }}%</span>
       </div>
-      <small>{{ getProcessingStatus().currentStep }}</small>
-      <div v-if="getProcessingStatus().errors.length > 0" class="processing-errors">
-        <small>오류: {{ getProcessingStatus().errors.length }}개</small>
+      <small>{{ batchCurrentStep }}</small>
+      <div v-if="batchError" class="processing-errors">
+        <small>오류: {{ batchError }}</small>
       </div>
     </div>
 
-    <!-- 마스터 데이터 구축 진행률 -->
-    <div v-if="!buildMasterData && masterDataProgress > 0" class="master-data-progress">
-      <h4>🤖 마스터 데이터 구축 중...</h4>
+    <!-- LLM 분석 진행률 -->
+    <div v-if="!skipLLMAnalysis && masterDataProgress > 0" class="master-data-progress">
+      <h4>🤖 AI 메타데이터 생성 중...</h4>
       <div class="progress">
         <div class="progress-bar" :style="{ width: masterDataProgress + '%' }"></div>
         <span>{{ masterDataProgress }}%</span>
       </div>
-      <small>LLM 분석 및 임베딩 생성 중... (품질 유지)</small>
+      <small>LLM 분석 및 CLIP 임베딩 생성 중... (고품질 메타데이터)</small>
     </div>
 
     <!-- 백그라운드 작업 상태 -->
@@ -327,6 +327,9 @@ import {
 } from '../composables/useMasterPartsPreprocessing'
 import { useBackgroundLLMAnalysis } from '../composables/useBackgroundLLMAnalysis'
 import { useBatchProcessing } from '../composables/useBatchProcessing'
+import { useAutoImageMigration } from '../composables/useAutoImageMigration'
+import { waitForMigrationComplete } from '../composables/useMigrationStatus'
+import { useSlackAlert } from '../composables/useSlackAlert'
 
 export default {
   name: 'LegoSetManager',
@@ -380,9 +383,16 @@ export default {
 
     const {
       batchProcessSet,
-      getProcessingStatus,
-      resetProcessing
+      loading: batchLoading,
+      progress: batchProgress,
+      currentStep: batchCurrentStep,
+      error: batchError
     } = useBatchProcessing()
+
+    const {
+      alertMigrationFailed,
+      alertBatchProcessingFailed
+    } = useSlackAlert()
 
     const searchQuery = ref('')
     const searchResults = ref([])
@@ -397,15 +407,16 @@ export default {
     const partsStats = ref(null) // 부품 통계 정보
     const categorizedParts = ref(null) // 부품 분류 정보
     const setMinifigs = ref([]) // 세트의 미니피규어 정보
-    const buildMasterData = ref(false) // 마스터 데이터 구축 옵션 (기본값: false = LLM 분석 실행)
-    const masterDataProgress = ref(0) // 마스터 데이터 구축 진행률
+    const skipLLMAnalysis = ref(false) // LLM 분석 건너뛰기 옵션 (기본값: false = LLM 분석 실행)
+    const masterDataProgress = ref(0) // LLM 분석 진행률
     const processing = ref(false) // 전체 처리 상태
 
     // 단일 제품 번호인지 확인하는 함수
     const isSingleSetNumber = (query) => {
       const trimmedQuery = query.trim()
-      // 레고 세트 번호 패턴: 숫자로만 구성되고 3-6자리
-      const setNumberPattern = /^\d{3,6}$/
+      // 레고 세트 번호 패턴: 숫자로만 구성되고 3-6자리, 선택적으로 하이픈과 버전 번호 포함
+      // 예: "60315", "60315-1", "10497-1"
+      const setNumberPattern = /^\d{3,6}(-\d+)?$/
       return setNumberPattern.test(trimmedQuery)
     }
 
@@ -711,18 +722,28 @@ export default {
       loadingParts.value = true
       try {
         console.log(`Loading all parts for set ${selectedSet.value.set_num}...`)
-        const result = await getSetPartsAPI(selectedSet.value.set_num)
-        setParts.value = result.results || []
-        console.log(`Loaded ${setParts.value.length} parts`)
         
-        // 미니피규어 정보 로드
-        console.log(`Loading minifigs for set ${selectedSet.value.set_num}...`)
-        try {
-          const minifigResult = await getSetMinifigs(selectedSet.value.set_num)
-          setMinifigs.value = minifigResult.results || []
-          console.log(`Loaded ${setMinifigs.value.length} minifigs`)
-        } catch (minifigErr) {
-          console.log('No minifigs found for this set:', minifigErr.message)
+        // ✅ 부품과 미니피규어 정보를 병렬로 로드 (성능 개선)
+        const [partsResult, minifigsResult] = await Promise.allSettled([
+          getSetPartsAPI(selectedSet.value.set_num),
+          getSetMinifigs(selectedSet.value.set_num)
+        ])
+        
+        // 부품 정보 처리
+        if (partsResult.status === 'fulfilled') {
+          setParts.value = partsResult.value.results || []
+          console.log(`✅ Loaded ${setParts.value.length} parts`)
+        } else {
+          console.error('❌ Failed to load parts:', partsResult.reason)
+          setParts.value = []
+        }
+        
+        // 미니피규어 정보 처리
+        if (minifigsResult.status === 'fulfilled') {
+          setMinifigs.value = minifigsResult.value.results || []
+          console.log(`✅ Loaded ${setMinifigs.value.length} minifigs`)
+        } else {
+          console.log('ℹ️ No minifigs found for this set:', minifigsResult.reason?.message)
           setMinifigs.value = []
         }
         
@@ -798,54 +819,75 @@ export default {
       try {
         console.log(`🖼️ Starting bulk image download for ${setParts.value.length} parts...`)
         
+        // ✅ 배치 병렬 처리 (10개씩)
+        const BATCH_SIZE = 10
+        const batches = []
+        for (let i = 0; i < setParts.value.length; i += BATCH_SIZE) {
+          batches.push(setParts.value.slice(i, i + BATCH_SIZE))
+        }
+        
         const results = []
         const errors = []
+        let processedCount = 0
         
-        for (let i = 0; i < setParts.value.length; i++) {
-          const part = setParts.value[i]
-          try {
-            console.log(`🖼️ Processing image ${i + 1}/${setParts.value.length}: ${part.part.part_num}`)
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+          const batch = batches[batchIndex]
+          console.log(`🔄 Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} images)...`)
+          
+          // 배치 내 이미지를 병렬로 처리
+          const batchResults = await Promise.allSettled(
+            batch.map(async (part) => {
+              try {
+                const result = await processRebrickableImage(
+                  part.part.part_img_url,
+                  part.part.part_num,
+                  part.color.id
+                )
+                
+                // 이미지 메타데이터를 Supabase에 저장
+                if (result.uploadedUrl) {
+                  await saveImageMetadata({
+                    original_url: part.part.part_img_url,
+                    supabase_url: result.uploadedUrl,
+                    file_path: result.path,
+                    file_name: result.filename,
+                    part_num: part.part.part_num,
+                    color_id: part.color.id,
+                    set_num: selectedSet.value?.set_num
+                  })
+                }
+                
+                return {
+                  partNum: part.part.part_num,
+                  result: result
+                }
+              } catch (err) {
+                throw {
+                  partNum: part.part.part_num,
+                  error: err.message
+                }
+              }
+            })
+          )
+          
+          // 배치 결과 처리
+          batchResults.forEach((promiseResult, index) => {
+            processedCount++
+            console.log(`🖼️ Processing image ${processedCount}/${setParts.value.length}`)
             
-            const result = await processRebrickableImage(
-              part.part.part_img_url,
-              part.part.part_num,
-              part.color.id
-            )
-            
-            // 이미지 메타데이터를 Supabase에 저장
-            if (result.uploadedUrl) {
-              console.log(`💾 Saving image metadata for ${part.part.part_num}...`)
-              await saveImageMetadata({
-                original_url: part.part.part_img_url,
-                supabase_url: result.uploadedUrl,
-                file_path: result.path,
-                file_name: result.filename,
-                part_num: part.part.part_num,
-                color_id: part.color.id,
-                set_num: selectedSet.value?.set_num
-              })
-              console.log(`✅ Image metadata saved for ${part.part.part_num}`)
+            if (promiseResult.status === 'fulfilled') {
+              results.push(promiseResult.value)
             } else {
-              console.log(`❌ No uploaded URL for ${part.part.part_num}, skipping metadata save`)
+              errors.push(promiseResult.reason)
             }
-            
-            results.push({
-              partNum: part.part.part_num,
-              result: result
-            })
-            
-          } catch (err) {
-            console.error(`Failed to process image for ${part.part.part_num}:`, err)
-            errors.push({
-              partNum: part.part.part_num,
-              error: err.message
-            })
-          }
+          })
+          
+          // 진행률 업데이트 (UI에 표시 가능)
+          const progress = Math.round((processedCount / setParts.value.length) * 100)
+          console.log(`📊 Progress: ${progress}%`)
         }
         
         console.log(`🖼️ Bulk image processing completed: ${results.length} successful, ${errors.length} failed`)
-        console.log('Results:', results)
-        console.log('Errors:', errors)
         
         successMessage.value = `${results.length}개 이미지가 성공적으로 처리되었습니다. ${errors.length}개 오류가 발생했습니다.`
         
@@ -915,10 +957,10 @@ export default {
         // LLM 분석 재생성 플래그 설정
         if (shouldRegenerateLLM) {
           console.log('🔄 LLM 분석 재생성 모드 활성화')
-          buildMasterData.value = false // LLM 분석 활성화
+          skipLLMAnalysis.value = false // LLM 분석 실행
         } else {
           console.log('⏭️ 기존 LLM 분석 데이터 유지')
-          buildMasterData.value = true // LLM 분석 건너뛰기
+          skipLLMAnalysis.value = true // LLM 분석 건너뛰기
         }
         
         successMessage.value = '기존 데이터 삭제 완료. 새 데이터를 저장하는 중...'
@@ -930,14 +972,57 @@ export default {
 
         console.log(`Force resave completed:`, result)
 
-        // 백그라운드 LLM 분석 시작
-        if (!buildMasterData.value && result.savedParts > 0) {
-          console.log(`🤖 Starting background LLM analysis for ${result.savedParts} parts...`)
-          const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
-          console.log(`📋 Background task started: ${taskId}`)
-          successMessage.value = `세트 강제 재저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
-        } else if (buildMasterData.value) {
-          console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+        // 백그라운드 LLM 분석 시작 (이미지 마이그레이션 완료 후)
+        if (!skipLLMAnalysis.value && result.savedParts > 0) {
+          console.log(`🖼️ 이미지 마이그레이션 완료 후 AI 분석 시작...`)
+          
+          // 이미지 마이그레이션 완료 대기 (폴링 방식)
+          const { triggerFullMigration } = useAutoImageMigration()
+          try {
+            console.log(`🔄 전체 이미지 마이그레이션 시작...`)
+            const migrationResult = await triggerFullMigration()
+            console.log(`✅ 이미지 마이그레이션 트리거 완료:`, migrationResult)
+            
+            // 폴링 방식으로 마이그레이션 완료 대기 (최대 2분)
+            const migrationComplete = await waitForMigrationComplete(
+              selectedSet.value.set_num,
+              120000, // 최대 2분
+              2000    // 2초마다 확인
+            )
+            
+            if (migrationComplete) {
+              console.log(`🤖 이미지 마이그레이션 완료, LLM 분석 시작 (${result.savedParts}개 부품)`)
+            } else {
+              console.log(`⚠️ 마이그레이션 타임아웃, 원본 이미지로 LLM 분석 시작`)
+              
+              // Slack 알림: 마이그레이션 타임아웃
+              const status = { uploaded: result.processedImages || 0, total: result.totalParts || 0 }
+              await alertMigrationFailed(selectedSet.value.set_num, status, '마이그레이션 타임아웃 (120초 초과)')
+            }
+            
+            const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
+            console.log(`📋 Background task started: ${taskId}`)
+            successMessage.value = migrationComplete
+              ? `세트 강제 재저장 완료! 이미지 마이그레이션 후 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
+              : `세트 강제 재저장 완료! (원본 이미지로 LLM 분석 진행) (작업 ID: ${taskId})`
+          } catch (migrationError) {
+            console.warn(`⚠️ 이미지 마이그레이션 실패: ${migrationError.message}`)
+            
+            // Slack 알림: 마이그레이션 실패
+            await alertMigrationFailed(
+              selectedSet.value.set_num,
+              { uploaded: 0, total: result.savedParts || 0 },
+              migrationError.message
+            )
+            
+            // 마이그레이션 실패해도 AI 분석은 계속 진행 (원본 이미지로)
+            console.log(`🤖 원본 이미지로 백그라운드 LLM 분석 시작...`)
+            const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
+            console.log(`📋 Background task started: ${taskId}`)
+            successMessage.value = `세트 강제 재저장 완료! (이미지 마이그레이션 실패, 원본 이미지로 LLM 분석 진행) (작업 ID: ${taskId})`
+          }
+        } else if (skipLLMAnalysis.value) {
+          console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
           successMessage.value = `세트 강제 재저장 완료! (빠른 저장 모드)`
         }
 
@@ -1161,14 +1246,14 @@ export default {
               console.log(`🔍 DEBUG: Save completed - Success: ${savedParts.length}, Failed: ${failedParts.length}`)
               console.log(`🔍 DEBUG: Failed parts:`, failedParts)
               
-              // 마스터 데이터 구축 (백그라운드 처리)
-              if (!buildMasterData.value && savedParts.length > 0) {
-                console.log(`🤖 Starting background LLM analysis for ${savedParts.length} parts...`)
+              // LLM 분석 (백그라운드 처리)
+              if (!skipLLMAnalysis.value && savedParts.length > 0) {
+                console.log(`🤖 백그라운드 LLM 분석 시작 (${savedParts.length}개 부품)`)
                 const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
                 console.log(`📋 Background task started: ${taskId}`)
                 successMessage.value = `세트 저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
-              } else if (buildMasterData.value) {
-                console.log(`⚡ Skipping LLM analysis (quick save mode)`)
+              } else if (skipLLMAnalysis.value) {
+                console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
                 successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
               }
             }
@@ -1297,6 +1382,22 @@ export default {
             set_id: set.id
           })
           
+          // lego_sets 테이블의 webp_image_url 필드 업데이트
+          try {
+            const { error: updateError } = await supabase
+              .from('lego_sets')
+              .update({ webp_image_url: result.url })
+              .eq('set_num', set.set_num)
+            
+            if (updateError) {
+              console.warn(`⚠️ lego_sets webp_image_url 업데이트 실패: ${updateError.message}`)
+            } else {
+              console.log(`✅ lego_sets webp_image_url 업데이트 완료: ${set.set_num}`)
+            }
+          } catch (updateErr) {
+            console.warn(`⚠️ lego_sets webp_image_url 업데이트 중 오류: ${updateErr.message}`)
+          }
+          
           return {
             originalUrl: set.set_img_url,
             webpUrl: result.url,
@@ -1339,7 +1440,6 @@ export default {
       try {
         saving.value = true
         successMessage.value = ''
-        resetProcessing()
 
         console.log(`Starting batch save process for set ${selectedSet.value.set_num}...`)
         console.log(`Parts to save: ${setParts.value.length}`)
@@ -1387,40 +1487,62 @@ export default {
           // LLM 분석 재생성 플래그 설정
           if (shouldRegenerateLLM) {
             console.log('🔄 LLM 분석 재생성 모드 활성화')
-            buildMasterData.value = false // LLM 분석 활성화
+            skipLLMAnalysis.value = false // LLM 분석 실행
           } else {
             console.log('⏭️ 기존 LLM 분석 데이터 유지')
-            buildMasterData.value = true // LLM 분석 건너뛰기
+            skipLLMAnalysis.value = true // LLM 분석 건너뛰기
           }
           
           successMessage.value = '기존 세트 데이터를 삭제했습니다. 새 데이터를 저장합니다...'
         }
 
         // 배치 처리 실행
-        const result = await batchProcessSet(selectedSet.value, setParts.value, {
-          forceUpload: false
-        })
+        const result = await batchProcessSet(selectedSet.value, setParts.value)
 
         console.log(`Batch processing completed:`, result)
 
         // 백그라운드 LLM 분석 시작
-        console.log(`🔍 DEBUG: buildMasterData.value = ${buildMasterData.value}`)
-        console.log(`🔍 DEBUG: result.savedParts = ${result.savedParts}`)
+        console.log(`🔍 skipLLMAnalysis.value = ${skipLLMAnalysis.value}`)
+        console.log(`🔍 result.totalParts = ${result.totalParts}`)
         
-        if (!buildMasterData.value && result.savedParts > 0) {
-          console.log(`🤖 Starting background LLM analysis for ${result.savedParts} parts...`)
-          console.log(`🔍 DEBUG: Calling startBackgroundAnalysis with set:`, selectedSet.value.set_num)
-          console.log(`🔍 DEBUG: Parts count:`, setParts.value.length)
-          
+        // ✅ 최적화: 이미지 마이그레이션과 LLM 분석 분리 (독립 실행)
+        const { triggerFullMigration } = useAutoImageMigration()
+        
+    // ✅ 이미지 마이그레이션은 항상 실행 (백그라운드, 강제 재업로드)
+    if (result.totalParts > 0) {
+      console.log(`🖼️ 백그라운드 이미지 마이그레이션 시작 (강제 업로드)...`)
+      
+      // 캐시 초기화 후 강제 재업로드
+      const { clearCache } = useAutoImageMigration()
+      clearCache()
+      console.log(`🧹 이미지 마이그레이션 캐시 초기화 완료`)
+      
+      triggerFullMigration({ force: true }) // 강제 재업로드 옵션 추가
+        .then(migrationResult => {
+          console.log(`✅ 이미지 마이그레이션 완료:`, migrationResult)
+        })
+        .catch(migrationError => {
+          console.warn(`⚠️ 이미지 마이그레이션 실패: ${migrationError.message}`)
+          alertMigrationFailed(
+            selectedSet.value.set_num,
+            { uploaded: 0, total: result.totalParts || 0 },
+            migrationError.message
+          )
+        })
+    }
+        
+        // ✅ LLM 분석은 조건부 실행
+        if (!skipLLMAnalysis.value && result.totalParts > 0) {
+          console.log(`🤖 백그라운드 LLM 분석 시작...`)
           const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
-          console.log(`📋 Background task started: ${taskId}`)
-          successMessage.value = `세트 저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
-        } else if (buildMasterData.value) {
-          console.log(`⚡ Skipping LLM analysis (quick save mode)`)
-          successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
+          console.log(`📋 Background LLM task started: ${taskId}`)
+          successMessage.value = `세트 저장 완료! 백그라운드에서 이미지 마이그레이션과 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
+        } else if (skipLLMAnalysis.value) {
+          console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
+          successMessage.value = `세트 저장 완료! 백그라운드에서 이미지 마이그레이션을 진행합니다.`
         } else {
-          console.log(`⚠️ No parts saved, skipping LLM analysis`)
-          successMessage.value = `세트 저장 완료! (부품이 저장되지 않아 LLM 분석을 건너뜀)`
+          console.log(`⚠️ 부품이 저장되지 않아 LLM 분석 건너뜀`)
+          successMessage.value = `세트 저장 완료!`
         }
 
         // 작업 로그 저장
@@ -1428,20 +1550,17 @@ export default {
           operation_type: 'set_import',
           target_type: 'set',
           target_id: result.set.id,
-          status: result.failedParts === 0 ? 'success' : 'partial_success',
-          message: `세트 ${selectedSet.value.set_num} 배치 저장 완료. 성공: ${result.savedParts}개, 실패: ${result.failedParts}개`,
+          status: 'success',
+          message: `세트 ${selectedSet.value.set_num} 배치 저장 완료. 총 부품: ${result.totalParts}개, 관계: ${result.insertedRelationships}개`,
           metadata: {
             set_num: selectedSet.value.set_num,
-            total_parts: setParts.value.length,
-            saved_parts: result.savedParts,
-            failed_parts: result.failedParts,
-            processed_images: result.processedImages,
-            failed_images: result.failedImages,
+            total_parts: result.totalParts,
+            inserted_relationships: result.insertedRelationships,
             set_image: result.setImage
           }
         })
 
-        console.log(`Batch save completed: ${result.savedParts} parts, ${result.processedImages} images`)
+        console.log(`Batch save completed: ${result.totalParts} parts, ${result.insertedRelationships} relationships`)
         
       } catch (err) {
         console.error('Batch save failed:', err)
@@ -1473,7 +1592,7 @@ export default {
       partsCountValidation,
       partsStats,
       categorizedParts,
-      buildMasterData,
+      skipLLMAnalysis,
       masterDataProgress,
       processing,
       searchSets,
@@ -1486,10 +1605,13 @@ export default {
       forceResaveSet,
       exportPartsData,
       handleImageError,
-      getProcessingStatus,
       runningTasks,
       llmRunningTasks,
       queueStatus,
+      batchLoading,
+      batchProgress,
+      batchCurrentStep,
+      batchError,
       isSingleSetNumber,
       formatSetNumber,
       calculatePartsTotal,

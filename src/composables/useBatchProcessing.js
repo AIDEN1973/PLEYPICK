@@ -1,257 +1,20 @@
-import { ref, reactive } from 'vue'
+import { ref } from 'vue'
 import { supabase } from './useSupabase'
-import { useImageManager } from './useImageManager'
-
-/**
- * 배치 처리 시스템
- * - 부품 데이터 배치 저장
- * - 이미지 다운로드 배치 처리
- * - WebP 변환 배치 처리
- * - 데이터베이스 트랜잭션 최적화
- */
 
 export function useBatchProcessing() {
-  const { processRebrickableImage, uploadImageFromUrl } = useImageManager()
-  
-  const processing = ref(false)
+  const loading = ref(false)
   const progress = ref(0)
   const currentStep = ref('')
-  const errors = ref([])
-  
-  /**
-   * 부품 데이터 배치 저장
-   */
-  const batchSaveParts = async (parts, setId) => {
-    try {
-      processing.value = true
-      currentStep.value = '부품 데이터 저장 중...'
+  const error = ref(null)
+
+  // 진짜 배치 처리 함수
+  const batchProcessSet = async (setData, parts) => {
+    loading.value = true
       progress.value = 0
-      errors.value = []
-      
-      const batchSize = 10 // 한 번에 10개씩 처리
-      const savedParts = []
-      const failedParts = []
-      
-      // 1. 부품 정보 순차 저장 (외래 키 제약 조건 준수)
-      for (let i = 0; i < parts.length; i++) {
-        const partData = parts[i]
-        currentStep.value = `부품 데이터 저장 중... (${i + 1}/${parts.length})`
-        
-        try {
-          // 트랜잭션 방식으로 모든 작업을 한 번에 처리
-          console.log(`🔄 Processing part ${partData.part.part_num} in transaction...`)
-          
-          // 1. 부품 정보 저장
-          const { data: savedPart, error: partError } = await supabase
-            .from('lego_parts')
-            .upsert({
-              part_num: partData.part.part_num,
-              name: partData.part.name,
-              part_cat_id: partData.part.part_cat_id,
-              part_img_url: partData.part.part_img_url,
-              external_ids: partData.part.external_ids
-            }, { onConflict: 'part_num' })
-            .select()
-            .single()
-          
-          if (partError) {
-            console.error(`❌ Failed to save part ${partData.part.part_num}:`, partError)
-            throw partError
-          }
-          
-          // 2. 색상 정보 저장
-          const { data: savedColor, error: colorError } = await supabase
-            .from('lego_colors')
-            .upsert({
-              color_id: partData.color.id,
-              name: partData.color.name,
-              rgb: partData.color.rgb,
-              is_trans: partData.color.is_trans
-            }, { onConflict: 'color_id' })
-            .select()
-            .single()
-          
-          if (colorError) {
-            console.error(`❌ Failed to save color ${partData.color.id}:`, colorError)
-            throw colorError
-          }
-          
-          // 3. 세트-부품 관계 저장 (INSERT만 사용, upsert 대신)
-          // 주의: set_parts.part_id는 UUID가 아니라 lego_parts.part_num(varchar) 을 참조합니다
-          console.log(`🔗 Inserting set-part relationship: set_id=${setId}, part_id=${partData.part.part_num}, color_id=${savedColor.color_id}`)
-          const { data: savedSetPart, error: setPartError } = await supabase
-            .from('set_parts')
-            .insert({
-              set_id: setId,
-              part_id: partData.part.part_num,
-              color_id: savedColor.color_id,
-              quantity: partData.quantity,
-              is_spare: partData.is_spare,
-              element_id: partData.element_id,
-              inv_part_id: partData.inv_part_id
-            })
-            .select()
-            .single()
-          
-          if (setPartError) {
-            // 중복 키 오류인 경우 무시 (이미 존재하는 관계)
-            if (setPartError.code === '23505') {
-              console.log(`⚠️ Set-part relationship already exists for ${partData.part.part_num}, skipping...`)
-            } else {
-              console.error(`❌ Failed to save set-part relationship for ${partData.part.part_num}:`, setPartError)
-              throw setPartError
-            }
-          } else {
-            console.log(`✅ Set-part relationship saved successfully for ${partData.part.part_num}`)
-          }
-            
-          savedParts.push({
-            part_num: partData.part.part_num,
-            color: partData.color.name,
-            quantity: partData.quantity
-          })
-          
-        } catch (error) {
-          console.error(`Failed to save part ${partData.part.part_num}:`, error)
-          failedParts.push({
-            part_num: partData.part.part_num,
-            color: partData.color.name,
-            error: error.message
-          })
-        }
-        
-        // 진행률 업데이트
-        progress.value = Math.round(((i + 1) / parts.length) * 50)
-        
-        // API 부하 방지를 위한 짧은 대기
-        if (i < parts.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100))
-        }
-      }
-      
-      return { 
-        savedParts: savedParts.map(p => p.part_num), 
-        failedParts: failedParts.map(p => p.part_num) 
-      }
-      
-    } catch (error) {
-      console.error('Batch save parts failed:', error)
-      errors.value.push(error.message)
-      throw error
-    } finally {
-      processing.value = false
-    }
-  }
-  
-  /**
-   * 이미지 배치 다운로드 및 WebP 변환
-   */
-  const batchProcessImages = async (parts, options = {}) => {
+    currentStep.value = '세트 정보 저장 중...'
+    error.value = null
+
     try {
-      processing.value = true
-      currentStep.value = '이미지 처리 중...'
-      progress.value = 50
-      errors.value = []
-      
-      const batchSize = 5 // 이미지는 5개씩 처리
-      const processedImages = []
-      const failedImages = []
-      
-      for (let i = 0; i < parts.length; i += batchSize) {
-        const batch = parts.slice(i, i + batchSize)
-        currentStep.value = `이미지 처리 중... (${i + 1}/${parts.length})`
-        
-        const batchPromises = batch.map(async (partData) => {
-          try {
-            if (!partData.part.part_img_url) {
-              return { part_num: partData.part.part_num, skipped: true }
-            }
-            
-            // 이미지 다운로드 및 WebP 변환
-            const result = await processRebrickableImage(
-              partData.part.part_img_url,
-              partData.part.part_num,
-              partData.color.id,
-              { forceUpload: options.forceUpload || false }
-            )
-            
-            return {
-              part_num: partData.part.part_num,
-              color_id: partData.color.id,
-              result: result,
-              success: true
-            }
-            
-          } catch (error) {
-            console.error(`Failed to process image for ${partData.part.part_num}:`, error)
-            return {
-              part_num: partData.part.part_num,
-              color_id: partData.color.id,
-              error: error.message,
-              success: false
-            }
-          }
-        })
-        
-        const batchResults = await Promise.all(batchPromises)
-        processedImages.push(...batchResults.filter(r => r.success))
-        failedImages.push(...batchResults.filter(r => !r.success))
-        
-        // 진행률 업데이트
-        progress.value = 50 + Math.round(((i + batchSize) / parts.length) * 40)
-        
-        // 이미지 처리 부하 방지
-        if (i + batchSize < parts.length) {
-          await new Promise(resolve => setTimeout(resolve, 200))
-        }
-      }
-      
-      return { processedImages, failedImages }
-      
-    } catch (error) {
-      console.error('Batch process images failed:', error)
-      errors.value.push(error.message)
-      throw error
-    } finally {
-      processing.value = false
-    }
-  }
-  
-  /**
-   * 세트 이미지 WebP 변환
-   */
-  const processSetImage = async (setData, options = {}) => {
-    try {
-      if (!setData.set_img_url) return null
-      
-      currentStep.value = '세트 이미지 처리 중...'
-      
-      const result = await uploadImageFromUrl(
-        setData.set_img_url,
-        `${setData.set_num}_set`,
-        'lego_sets_images',
-        { forceUpload: options.forceUpload || false }
-      )
-      
-      return result
-      
-    } catch (error) {
-      console.error('Set image processing failed:', error)
-      errors.value.push(`세트 이미지 처리 실패: ${error.message}`)
-      return null
-    }
-  }
-  
-  /**
-   * 통합 배치 처리 (세트 + 부품 + 이미지)
-   */
-  const batchProcessSet = async (setData, parts, options = {}) => {
-    try {
-      processing.value = true
-      progress.value = 0
-      currentStep.value = '세트 데이터 저장 중...'
-      errors.value = []
-      
       // 1. 세트 정보 저장
       const { data: savedSet, error: setError } = await supabase
         .from('lego_sets')
@@ -262,92 +25,167 @@ export function useBatchProcessing() {
           theme_id: setData.theme_id,
           num_parts: setData.num_parts,
           set_img_url: setData.set_img_url,
-          set_url: setData.set_url,
-          last_modified_dt: setData.last_modified_dt
+          set_url: setData.set_url
         }, { onConflict: 'set_num' })
         .select()
         .single()
       
-      if (setError) throw setError
-      
-      progress.value = 10
-      currentStep.value = '부품 데이터 저장 중...'
-      
-      // 2. 부품 데이터 배치 저장
-      const batchResult = await batchSaveParts(parts, savedSet.id)
-      const savedParts = batchResult.savedParts || []
-      const failedParts = batchResult.failedParts || []
-      
-      progress.value = 60
-      currentStep.value = '이미지 처리 중...'
-      
-      // 3. 이미지 배치 처리 (병렬)
-      const [imageResults, setImageResult] = await Promise.all([
-        batchProcessImages(parts, options),
-        processSetImage(setData, options)
-      ])
-      
-      progress.value = 90
-      currentStep.value = '완료 중...'
-      
-      // 4. WebP URL 업데이트
-      if (setImageResult?.uploadedUrl) {
-        await supabase
-          .from('lego_sets')
-          .update({ webp_image_url: setImageResult.uploadedUrl })
-          .eq('id', savedSet.id)
+      if (setError) {
+        console.error('❌ Failed to save set:', setError)
+        throw setError
       }
+      
+      console.log('✅ Set saved:', savedSet)
+      progress.value = 10
+
+      // 2. 배치 처리: 모든 부품과 색상을 한 번에 저장
+      console.log(`🚀 Starting batch processing for ${parts.length} parts...`)
+      
+      // 중복 체크를 위한 캐시
+      const existingSetParts = new Set()
+      
+      // 2-1. 중복 제거 후 모든 부품 정보를 한 번에 upsert
+      const uniqueParts = new Map()
+      parts.forEach(partData => {
+        const partNum = partData.part.part_num
+        if (!uniqueParts.has(partNum)) {
+          uniqueParts.set(partNum, {
+            part_num: partData.part.part_num,
+            name: partData.part.name,
+            part_cat_id: partData.part.part_cat_id,
+            part_img_url: partData.part.part_img_url,
+            external_ids: partData.part.external_ids
+          })
+        }
+      })
+      
+      const partsToUpsert = Array.from(uniqueParts.values())
+      console.log(`📦 Deduplicated: ${parts.length} → ${partsToUpsert.length} unique parts`)
+      
+      console.log(`📦 Batch upserting ${partsToUpsert.length} parts...`)
+      const { data: savedParts, error: partsError } = await supabase
+        .from('lego_parts')
+        .upsert(partsToUpsert, { onConflict: 'part_num' })
+        .select()
+      
+      if (partsError) {
+        console.error('❌ Batch parts upsert failed:', partsError)
+        throw partsError
+      }
+      console.log(`✅ Batch upserted ${savedParts.length} parts`)
+      progress.value = 30
+      
+      // 2-2. 중복 제거 후 모든 색상 정보를 한 번에 upsert
+      const uniqueColors = new Map()
+      parts.forEach(partData => {
+        const colorId = partData.color.id
+        if (!uniqueColors.has(colorId)) {
+          uniqueColors.set(colorId, {
+            color_id: partData.color.id,
+            name: partData.color.name,
+            rgb: partData.color.rgb,
+            is_trans: partData.color.is_trans
+          })
+        }
+      })
+      
+      const colorsToUpsert = Array.from(uniqueColors.values())
+      console.log(`🎨 Deduplicated: ${parts.length} → ${colorsToUpsert.length} unique colors`)
+      
+      console.log(`🎨 Batch upserting ${colorsToUpsert.length} colors...`)
+      const { data: savedColors, error: colorsError } = await supabase
+        .from('lego_colors')
+        .upsert(colorsToUpsert, { onConflict: 'color_id' })
+        .select()
+      
+      if (colorsError) {
+        console.error('❌ Batch colors upsert failed:', colorsError)
+        throw colorsError
+      }
+      console.log(`✅ Batch upserted ${savedColors.length} colors`)
+      progress.value = 50
+      
+      // ✅ 중복 제거: 같은 (set_id, part_id, color_id) 조합을 병합하고 수량 합산
+      const setPartsMap = new Map()
+      
+      parts.forEach(partData => {
+        const key = `${savedSet.id}_${partData.part.part_num}_${partData.color.id}`
+        
+        if (setPartsMap.has(key)) {
+          // 중복된 경우: 수량 합산
+          const existing = setPartsMap.get(key)
+          existing.quantity += partData.quantity
+          // is_spare: 하나라도 spare가 아니면 false
+          if (!partData.is_spare) {
+            existing.is_spare = false
+          }
+          // element_id, inv_part_id: 우선순위 (null이 아닌 값 선택)
+          if (!existing.element_id && partData.element_id) {
+            existing.element_id = partData.element_id
+          }
+          if (!existing.inv_part_id && partData.inv_part_id) {
+            existing.inv_part_id = partData.inv_part_id
+          }
+        } else {
+          // 새로운 조합
+          setPartsMap.set(key, {
+            set_id: savedSet.id,
+            part_id: partData.part.part_num,
+            color_id: partData.color.id,
+            quantity: partData.quantity,
+            is_spare: partData.is_spare || false,
+            element_id: partData.element_id,
+            inv_part_id: partData.inv_part_id
+          })
+        }
+      })
+      
+      const setPartsToUpsert = Array.from(setPartsMap.values())
+      console.log(`🔗 Deduplicated: ${parts.length} → ${setPartsToUpsert.length} unique relationships`)
+      
+      console.log(`🔗 Batch upserting ${setPartsToUpsert.length} set-part relationships...`)
+      const { data: savedSetParts, error: setPartsError } = await supabase
+        .from('set_parts')
+        .upsert(setPartsToUpsert, { 
+          onConflict: 'set_id,part_id,color_id',
+          ignoreDuplicates: false // 업데이트 허용
+        })
+        .select()
+      
+      if (setPartsError) {
+        console.error('❌ Batch set-parts upsert failed:', setPartsError)
+        throw setPartsError
+      }
+      console.log(`✅ Batch upserted ${savedSetParts.length} set-part relationships`)
       
       progress.value = 100
       currentStep.value = '완료!'
       
       return {
         set: savedSet,
-        savedParts: savedParts.length,
-        failedParts: failedParts.length,
-        processedImages: imageResults.processedImages.length,
-        failedImages: imageResults.failedImages.length,
-        setImage: setImageResult,
-        errors: errors.value
+        parts: parts.map(partData => ({
+          part_num: partData.part.part_num,
+          color: partData.color.name,
+          quantity: partData.quantity
+        })),
+        totalParts: parts.length,
+        insertedRelationships: savedSetParts.length // ✅ upsert 결과로 변경
       }
-      
-    } catch (error) {
-      console.error('Batch process set failed:', error)
-      errors.value.push(error.message)
-      throw error
+
+    } catch (err) {
+      console.error('Batch processing failed:', err)
+      error.value = err.message
+      throw err
     } finally {
-      processing.value = false
+      loading.value = false
     }
-  }
-  
-  /**
-   * 진행률 및 상태 조회
-   */
-  const getProcessingStatus = () => {
-    return {
-      processing: processing.value,
-      progress: progress.value,
-      currentStep: currentStep.value,
-      errors: errors.value
-    }
-  }
-  
-  /**
-   * 처리 상태 초기화
-   */
-  const resetProcessing = () => {
-    processing.value = false
-    progress.value = 0
-    currentStep.value = ''
-    errors.value = []
   }
   
   return {
-    batchProcessSet,
-    batchSaveParts,
-    batchProcessImages,
-    processSetImage,
-    getProcessingStatus,
-    resetProcessing
+    loading,
+    progress,
+    currentStep,
+    error,
+    batchProcessSet
   }
 }

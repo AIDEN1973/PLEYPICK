@@ -1,0 +1,158 @@
+import os, json, glob, hashlib, statistics, uuid
+from datetime import datetime
+
+SSIM_THR = 0.965
+DEFAULT_Q = 0.90
+DEFAULT_RES = 768
+
+def _safe_num(x, default=0.0):
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
+
+def _safe_int(x, default=0):
+    try:
+        return int(x)
+    except Exception:
+        return int(default)
+
+def _hash(s: str) -> str:
+    return hashlib.blake2b(s.encode("utf-8"), digest_size=16).hexdigest()
+
+def _read_json(fp):
+    with open(fp, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def build_ai_meta(dataset_root: str, set_id: str):
+    base = os.path.join(dataset_root, f"dataset_{set_id}")
+    meta_dir = os.path.join(base, "meta")
+    out_path = os.path.join(base, "meta", "ai_meta.jsonl")
+
+    if not os.path.isdir(meta_dir):
+        raise FileNotFoundError(f"meta directory not found: {meta_dir}")
+
+    seen = set()
+    total, written = 0, 0
+
+    with open(out_path, "w", encoding="utf-8") as out:
+        for jf in glob.glob(os.path.join(meta_dir, "**/*.json"), recursive=True):
+            total += 1
+            try:
+                j = _read_json(jf)
+
+                set_id_v = str(j.get("set_id", set_id))
+                element_id = str(j.get("element_id") or j.get("part", {}).get("element_id") or "")
+                part_id = str(j.get("part_id") or j.get("part", {}).get("part_num") or "")
+                color_id = _safe_int(j.get("color_id") or j.get("color", {}).get("id") or 0)
+                render_id = str(j.get("render_id") or uuid.uuid4())
+
+                iq = j.get("image_quality", {})
+                ssim = _safe_num(iq.get("ssim"), 0.0)
+                snr  = _safe_num(iq.get("snr"), 0.0)
+                q    = _safe_num(iq.get("q"), DEFAULT_Q)
+                res  = _safe_int(iq.get("resolution"), DEFAULT_RES)
+
+                if ssim and ssim < SSIM_THR:
+                    continue
+
+                shape_tag = j.get("shape_tag") or j.get("shape", {}).get("tag")
+                stud_count_top = _safe_int(j.get("stud_count_top") or 0)
+                tube_count_bottom = _safe_int(j.get("tube_count_bottom") or 0)
+                center_stud = bool(j.get("center_stud", False))
+                groove = bool(j.get("groove", False))
+                stud_pattern = j.get("stud_pattern") or ""
+                tube_pattern = j.get("tube_pattern") or ""
+                hole_count = _safe_int(j.get("hole_count") or 0)
+                topo_applicable = bool(j.get("topo_applicable", (stud_count_top>0 and tube_count_bottom>0)))
+
+                confusions = list(j.get("confusions") or [])
+                distinguishing_features = list(j.get("distinguishing_features") or [])
+                recognition_hints = j.get("recognition_hints") or ""
+
+                texture_class = j.get("texture_class") or ""
+                is_printed = bool(j.get("is_printed", False))
+                top_color_rgb = j.get("top_color_rgb") or None
+                underside_type = j.get("underside_type") or None
+
+                area_px = _safe_int(j.get("area_px") or j.get("annotation", {}).get("quality", {}).get("area_px") or 0)
+                bbox_ratio = j.get("bbox_ratio") or None
+                orientation = j.get("orientation") or None
+
+                semantic_vector = j.get("semantic_vector") or None
+                clip_text_emb   = j.get("clip_text_emb") or None
+                feature_text_score = _safe_num(j.get("feature_text_score"), 0.0)
+
+                scale_type = j.get("scale_type") or j.get("scale") or "system"
+                meta_source = j.get("meta_source") or j.get("render_source") or "unknown"
+
+                dup_key = _hash(f"{set_id_v}|{element_id}|{part_id}|{color_id}|{render_id}|{ssim:.4f}|{snr:.2f}|{q:.2f}|{res}")
+                if dup_key in seen:
+                    continue
+                seen.add(dup_key)
+
+                rec = {
+                    "set_id": set_id_v,
+                    "element_id": element_id,
+                    "part_id": part_id,
+                    "color_id": color_id,
+                    "render_id": render_id,
+
+                    "shape_tag": shape_tag,
+                    "scale": "system" if scale_type == "system" else str(scale_type),
+                    "stud_count_top": stud_count_top,
+                    "tube_count_bottom": tube_count_bottom,
+                    "center_stud": center_stud,
+                    "groove": groove,
+                    "stud_pattern": stud_pattern,
+                    "tube_pattern": tube_pattern,
+                    "hole_count": hole_count,
+                    "topo_applicable": topo_applicable,
+                    "expected_stud_count": stud_count_top if stud_count_top>0 else 0,
+                    "expected_hole_count": tube_count_bottom if tube_count_bottom>0 else 0,
+
+                    "area_px": area_px,
+                    "bbox_ratio": bbox_ratio,
+                    "orientation": orientation,
+
+                    "confusions": confusions,
+                    "distinguishing_features": distinguishing_features,
+                    "recognition_hints": recognition_hints,
+
+                    "texture_class": texture_class,
+                    "scale_type": scale_type,
+                    "is_printed": is_printed,
+                    "top_color_rgb": top_color_rgb,
+                    "underside_type": underside_type,
+
+                    "semantic_vector": semantic_vector,
+                    "clip_text_emb": clip_text_emb,
+                    "feature_text_score": feature_text_score,
+
+                    "image_quality": {
+                        "ssim": ssim,
+                        "snr": snr,
+                        "q": q,
+                        "resolution": res
+                    },
+                    "meta_source": meta_source,
+                    "created_at": datetime.utcnow().isoformat(timespec="seconds") + "Z"
+                }
+                out.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                written += 1
+
+            except Exception:
+                continue
+
+    return {"total_seen": total, "total_written": written, "out": out_path}
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True, help="dataset root path")
+    parser.add_argument("--set", required=True, help="set id")
+    args = parser.parse_args()
+    stats = build_ai_meta(args.root, args.set)
+    print(json.dumps(stats, ensure_ascii=False))
+
+

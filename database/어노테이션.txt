@@ -1,0 +1,559 @@
+🧱 BrickBox Annotation & JSON Specification v1.6.1 (Enhanced)
+
+Date: 2025-10-11 · Author: BrickBox AI Lab · Schema Base: JSON Schema Draft 2020-12
+Compatibility: 100% backward-compatible with v1.6 (모든 신규 필드는 선택/기본값 제공)
+
+0. 개요 · 목적 · 설계 원칙 (보완 반영)
+
+목적: v1.6에서 제안된 보완 항목(PnP Solver 메타 명시, Occlusion 자동 산출, Depth Map 품질 검증, 성능 로깅 세분화, 보안 메타/정책 분리, Root Cause 불확실성, SSS 재질 물리, JSON-LD Export)을 정식 사양으로 편입하여 QA 자동화·운영 가시성·보안 거버넌스를 강화한다.
+
+핵심 원칙
+
+Precision+3D QA: RMS reprojection, depth validation, occlusion attribution의 정량·자동 검증
+
+Reproducibility: PnP solver 파라미터/랜덤시드/하드웨어/렌즈 모델 완전 기록
+
+Operational Efficiency: Edge-Essential 최소형, 추론 성능 세분 로깅, Auto-Requeue 및 RLS 보안
+
+Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상호운용
+
+1. 데이터 레이아웃 (변경 없음 + 파일 추가 설명)
+/dataset_{SET_ID}/
+├── images/train|val|test/{element_id}/{uuid}.webp
+├── labels/{element_id}/{uuid}.txt
+├── meta/{element_id}/{uuid}.json           # Full Meta (v1.6.1)
+├── meta-e/{element_id}/{uuid}.json         # Essential (v1.6.1-E2)
+├── masks_bin/{element_id}/{uuid}.png
+└── depth/{element_id}/{uuid}.bin           # Z-Depth (RLE + Zstd + Base64)
+
+
+추가 요구: meta/{uuid}.json 내 보안/접근 레벨은 지표용만 기록. 실제 접근제어는 DB 정책 테이블에서 집행(§8).
+
+2. YOLO Segmentation Label (.txt) (유지 + Prompt 메타 확장)
+[prompt_token_id] class xc yc w h x1 y1 … xn yn
+
+
+정밀도: 소수 6자리 이상(float32)
+
+정규화 기준: 프레임(width, height)
+
+확장(선택): prompt_token_id와 함께 prompt_metadata를 JSON에 기록(§3.5)
+
+3. Rendering Meta JSON (v1.6.1 예시 — 보완 필드 포함)
+{
+  "schema_version": "1.6.1",
+  "pair_uid": "uuid-453601-199",
+  "set_id": "76917",
+  "element_id": "453601",
+  "part_id": "4536",
+  "class_map_version": "v2025-10-11-a",
+  "image_size": [640, 640],
+
+  "class_id_mapping": { "4536": 12, "3001": 13, "3068b": 14 },
+  "render_source": "auto_renderer_v5",
+  "pipeline_version": "render_v5.1",
+  "render_hardware": { "gpu": "RTX 4090", "cpu": "Ryzen 9 7950X", "render_engine": "Cycles-X" },
+  "render_attempt_count": 3,
+
+  "domain_context": {
+    "domain_type": "LDraw/Blender",
+    "lod_level": 3,
+    "render_seed": 145623,
+    "complexity_metric": {
+      "occlusion_ratio": 0.42,
+      "visible_surface_ratio": 0.58,
+      "neighbor_parts": 5,
+      "bbox_overlap_max": 0.37,
+      "occluded_by_parts": ["3001", "3068b"],
+      "occluder_contribution": { "3001": 0.25, "3068b": 0.17 }
+    }
+  },
+
+  "annotation": {
+    "bbox_pixel_xyxy": [156, 85, 549, 565],
+    "bbox_norm_xywh": [0.550753, 0.507955, 0.615527, 0.750276],
+    "bbox_norm_xyxy": [0.243, 0.133, 0.857, 0.883],
+    "polygon_precision": 6,
+    "polygon_frame_norm": [[0.243612, 0.191234] /* ... */],
+    "segmentation": {
+      "format": "rle_zstd_base64",
+      "rle_base64": "iVBORw0KG...",
+      "original_size": 409600,
+      "compressed_size": 8432,
+      "compression_ratio": 0.0206
+    },
+    "mask_dilation_px": 3,
+    "mask_dilation_computation": {
+      "method": "auto",
+      "factors": [
+        { "reason": "transparent_material", "contribution": 2 },
+        { "reason": "low_contrast_background", "contribution": 2 }
+      ],
+      "capped_at": 5,
+      "mask_dilation_px_final": 3
+    },
+    "quality": {
+      "area_px": 24836,
+      "perimeter_px": 657.8,
+      "convexity": 0.93,
+      "bbox_fill_ratio": 0.84
+    },
+    "quality_3d": {
+      "pnp_method": "SOLVEPNP_SQPNP",
+      "pnp_iterations": 300,
+      "pnp_confidence": 0.999,
+      "ransac_threshold_px": 2.0,
+      "reprojection_error_rms_px": 1.25,
+      "rotation_error_rad": 0.042,
+      "translation_error_mm": 0.8,
+      "z_depth_variance": 0.0025,
+      "depth_map_validation": {
+        "valid_pixel_ratio": 0.98,
+        "out_of_range_pixels": 12,
+        "edge_smoothness": 0.87,
+        "depth_quality_score": 0.92,
+        "method": "sobel+range+validity"
+      },
+      "depth_map_rle": "eJz7z8...",
+      "depth_compression": "rle_zstd_base64"
+    }
+  },
+
+  "camera": {
+    "lens_mm": 50,
+    "sensor_width_mm": 36,
+    "intrinsics_3x3": [[640,0,320],[0,640,320],[0,0,1]],
+    "distortion_model": "brown_conrady",
+    "distortion_coeffs": { "k1": 0.01, "k2": -0.002, "p1": 0.0005, "p2": -0.0003, "k3": 0.001 },
+    "intrinsics_validation": {
+      "method": "pinhole_model",
+      "valid": false,
+      "original_intrinsics": [[640,0,320],[0,640,320],[0,0,1]],
+      "corrected_intrinsics": [[888.9,0,320],[0,888.9,320],[0,0,1]],
+      "correction_applied": true,
+      "error_px_before": 248.9,
+      "error_px_after": 0.0
+    },
+    "rotation_euler": [1.35, 0.97, 2.84],
+    "rotation_unit": "radian",
+    "focus_distance": 0.6,
+    "aperture_fstop": 5.6
+  },
+
+  "material": {
+    "color_hex": "#FFFFFF",
+    "lego_color_id": 1,
+    "is_transparent": true,
+    "is_reflective": true,
+    "roughness": 0.05,
+    "uv_map_info": {
+      "has_uv": true,
+      "texture_path": "textures/4536_diffuse.png",
+      "uv_resolution": [1024, 1024],
+      "pattern_type": "decal",
+      "coverage_ratio": 0.83,
+      "uv_distortion": 0.04,
+      "seam_visibility": { "visible_seams": 2, "max_seam_gap_px": 1.2, "seam_quality": "acceptable" }
+    },
+    "enable_sss": false,
+    "sss_radius": [1.0, 1.0, 1.0],
+    "sss_scale": 0.1
+  },
+
+  "lighting": {
+    "environment_map": "studio_soft.hdr",
+    "hdr_intensity": 0.6,
+    "ibl_strength": 0.6,
+    "luminance_range": { "min_cd_m2": 0.05, "max_cd_m2": 1200, "normalized_factor": 0.87 },
+    "lighting_setup": "three_point_classic"
+  },
+
+  "image_quality": { "ssim": 0.974, "snr": 38.5, "sharpness": 0.81, "noise_level": 0.12, "low_contrast_metric": 0.07 },
+
+  "integrity": {
+    "image_blake3": "0f3a...",
+    "label_blake3": "94d8...",
+    "json_blake3": "c4b1...",
+    "qa_flag_hierarchy": {
+      "category": "FAIL_QUALITY",
+      "subcategory": "POSE_ERROR",
+      "root_cause": "CAMERA_CALIBRATION_ERROR",
+      "root_cause_pred": ["CAMERA_CALIBRATION_ERROR", "LOW_TEXTURE_CONTRAST", "MASK_INACCURACY"],
+      "root_cause_confidence": 0.71,
+      "uncertainty_score": 0.38,
+      "suggested_rule_id": "RC_RULE_003",
+      "suggested_action": "Re-estimate PnP with distortion coeffs"
+    },
+    "qa_flag": "WARN_UNCERTAIN_ROOT_CAUSE",
+    "security_level": "internal",
+    "access_group_hint": ["qa-team", "ml-core"],
+    "validated_at": "2025-10-14T09:15:00Z"
+  },
+
+  "@context": "https://schema.brickbox.ai/v1.6/context.jsonld"
+}
+
+3.1 PnP Solver 메타 (신규)
+
+quality_3d.pnp_method: SOLVEPNP_SQPNP(기본) / SOLVEPNP_EPNP / SOLVEPNP_ITERATIVE / SOLVEPNP_P3P
+
+pnp_iterations, pnp_confidence, ransac_threshold_px 기록 → 학습/QA/재현성 일치
+
+3.2 Occlusion 자동 산출 (신규)
+
+occlusion_ratio, visible_surface_ratio, occluded_by_parts, occluder_contribution
+
+원리: (i) 파트 단독 렌더 마스크(이상 마스크) vs 실제 마스크 비교, (ii) 타 파트 마스크 중첩 면적 기여도 계산
+
+3.3 Depth Map 품질 검증 (신규)
+
+depth_map_validation: valid_pixel_ratio, out_of_range_pixels, edge_smoothness, depth_quality_score, method
+
+합성 기준: valid_pixel_ratio ≥ 0.95, depth_quality_score ≥ 0.85
+
+3.4 Distortion 모델 (확장)
+
+camera.distortion_model: "brown_conrady" (기본) / "fisheye"
+
+fisheye 선택 시 k4 등 계수 허용
+
+3.5 Prompt 메타 (선택)
+"annotation": {
+  "prompt_metadata": {
+    "prompt_text": "A white LEGO brick 2x4 with studs",
+    "prompt_token_ids": [49406, 320, 2119, 2356],
+    "prompt_embedding_dim": 512,
+    "clip_model": "openai/clip-vit-large-patch14"
+  }
+}
+
+3.6 보안 메타 (표시 전용)
+
+integrity.security_level: "public" | "internal" | "restricted"
+
+integrity.access_group_hint: 접근 그룹 힌트(집행은 DB 정책으로, §8)
+
+4. Essential JSON (v1.6.1-E2, 경량형)
+{
+  "schema_version": "1.6.1-E2",
+  "pair_uid": "uuid-453601-199",
+  "part_id": "4536",
+  "annotation": {
+    "bbox_pixel_xyxy": [156,85,549,565],
+    "bbox_norm_xyxy": [0.243,0.133,0.857,0.883],
+    "segmentation": { "rle_base64": "iVBORw0KG...", "compressed_size": 8432 }
+  },
+  "qa": {
+    "qa_flag": "PASS",
+    "reprojection_rms_px": 1.25
+  },
+  "perf": { "avg_confidence": 0.91, "avg_inference_time_ms": 4.8 },
+  "integrity": { "validated_at": "2025-10-14T09:15:00Z" }
+}
+
+
+목표 용량: 0.3–0.9 KB
+
+Edge 최적화: 즉시 박스 좌표·세그·간단 품질/성능 지표 사용 가능
+
+5. 알고리즘 사양 (참고 구현)
+5.1 PnP Reprojection RMS (OpenCV)
+def reprojection_rms_px(obj3d, img2d, K, dist, method=cv2.SOLVEPNP_SQPNP, iters=300, ransac_thresh=2.0):
+    ok, rvec, tvec, inliers = cv2.solvePnPRansac(
+        np.array(obj3d), np.array(img2d), K, dist,
+        useExtrinsicGuess=False, iterationsCount=iters,
+        reprojectionError=ransac_thresh, flags=method, confidence=0.999
+    )
+    proj,_ = cv2.projectPoints(obj3d, rvec, tvec, K, dist)
+    err = np.linalg.norm(proj.reshape(-1,2) - img2d, axis=1)
+    return float(np.sqrt((err**2).mean()))
+
+5.2 Occlusion 자동 계산
+def compute_occlusion(meta, part_mask, neighbor_masks, ideal_mask):
+    occluded_area = np.sum(ideal_mask & (~part_mask))
+    total_ideal   = np.sum(ideal_mask)
+    occlusion_ratio = 0.0 if total_ideal == 0 else occluded_area / total_ideal
+
+    contrib = {}
+    for pid, m in neighbor_masks.items():
+        overlap = np.sum((~part_mask) & ideal_mask & m)
+        if overlap > 0: contrib[pid] = contrib.get(pid, 0) + overlap
+    total_contrib = sum(contrib.values()) or 1
+    occluder_contribution = {k: v/total_contrib for k, v in contrib.items()}
+
+    visible_surface_ratio = 1.0 - occlusion_ratio
+    return occlusion_ratio, visible_surface_ratio, list(occluder_contribution.keys()), occluder_contribution
+
+5.3 Depth 품질 검증
+def validate_depth_map(depth, zmin, zmax):
+    valid = np.isfinite(depth) & (depth > 0)
+    valid_ratio = np.mean(valid)
+    depth_var = float(np.var(depth[valid])) if np.any(valid) else 1e9
+
+    sobelx = cv2.Sobel(depth.astype(np.float32), cv2.CV_32F, 1, 0)
+    sobely = cv2.Sobel(depth.astype(np.float32), cv2.CV_32F, 0, 1)
+    edge_strength = float(np.mean(np.sqrt(sobelx**2 + sobely**2)))
+    edge_smoothness = 1.0 / (1.0 + edge_strength)
+
+    out_of_range = int(np.sum((depth < zmin) | (depth > zmax)))
+    # 0~1 정규화 종합 점수(가중치 조정 가능)
+    score = 0.4*valid_ratio + 0.3*(1.0/(1.0+depth_var)) + 0.3*edge_smoothness
+    return dict(valid_pixel_ratio=valid_ratio, depth_variance=depth_var,
+                out_of_range_pixels=out_of_range, edge_smoothness=edge_smoothness,
+                depth_quality_score=float(score), method="sobel+range+validity")
+
+5.4 Root Cause 신뢰도/불확실성
+def root_cause_metrics(probs_topk):
+    # probs_topk: 예) [0.71, 0.18, 0.11]
+    import math
+    # 엔트로피를 0~1로 정규화(K=topk)
+    K = len(probs_topk)
+    entropy = -sum(p*math.log(p+1e-12) for p in probs_topk) / math.log(K)
+    confidence = probs_topk[0]
+    warn = (confidence < 0.65) or (entropy >= 0.9)
+    return dict(root_cause_confidence=confidence, uncertainty_score=entropy,
+                qa_flag="WARN_UNCERTAIN_ROOT_CAUSE" if warn else None)
+
+6. 학습/운영 규칙(개정)
+구분	기준	설명
+학습 편입	qa_flag='PASS' AND ssim ≥ 0.96 AND snr ≥ 30 AND reprojection_rms ≤ 1.5 AND depth_quality_score ≥ 0.85	3D/Depth 품질 포함
+난이도 균형	occlusion_ratio 3분위 균등 샘플링	쉬움/보통/어려움 고르게
+특수 재질 가중치	is_transparent OR is_reflective ≥ 25%	대표성 확보
+Auto-Requeue	qa_flag LIKE 'FAIL_%' OR WARN_UNCERTAIN_ROOT_CAUSE	재렌더/재주석 큐 삽입
+SSS 적용	enable_sss=true AND low_contrast_metric ≥ 0.15	선택적, 성능 영향 관리
+7. 모델 성능 로깅(세분화) 및 뷰
+7.1 DDL (신규 테이블)
+CREATE TABLE IF NOT EXISTS inference_results_detailed (
+  id bigserial PRIMARY KEY,
+  pair_uid text NOT NULL,
+  part_id text NOT NULL,
+  model_tag text NOT NULL,
+  model_version text,
+  -- 성능
+  inference_time_ms numeric,
+  preprocessing_time_ms numeric,
+  postprocessing_time_ms numeric,
+  -- 품질
+  confidence numeric,
+  iou_with_ground_truth numeric,
+  bbox_error_px numeric,
+  -- 하드웨어
+  device_type text,          -- 'gpu' | 'cpu' | 'edge'
+  gpu_memory_used_mb int,
+  created_at timestamptz DEFAULT now(),
+  CONSTRAINT fk_pair FOREIGN KEY (pair_uid)
+    REFERENCES synthetic_dataset(pair_uid) ON DELETE CASCADE
+);
+
+CREATE VIEW v_model_performance_detail AS
+SELECT
+  model_tag,
+  COALESCE(device_type, 'unknown') AS device_type,
+  ROUND(AVG(confidence)::numeric, 4) AS avg_conf,
+  ROUND(AVG(iou_with_ground_truth)::numeric, 4) AS avg_iou,
+  ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY inference_time_ms)::numeric, 2) AS p50_ms,
+  ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY inference_time_ms)::numeric, 2) AS p90_ms,
+  ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY inference_time_ms)::numeric, 2) AS p99_ms
+FROM inference_results_detailed
+GROUP BY model_tag, COALESCE(device_type, 'unknown');
+
+7.2 기존 요약 뷰(확장)
+CREATE OR REPLACE VIEW v_qa_summary_extended AS
+SELECT
+  part_id,
+  COUNT(*) AS total,
+  COUNT(*) FILTER (WHERE COALESCE(metadata->'integrity'->>'qa_flag',
+       metadata->'integrity'->'qa_flag_hierarchy'->>'category')='PASS') AS pass,
+  COUNT(*) FILTER (WHERE COALESCE(metadata->'integrity'->>'qa_flag',
+       metadata->'integrity'->'qa_flag_hierarchy'->>'category') LIKE 'FAIL%') AS fail,
+  COUNT(*) FILTER (WHERE metadata->'integrity'->>'qa_flag'='WARN_UNCERTAIN_ROOT_CAUSE') AS warn_uncertain,
+  ROUND(AVG((metadata->'image_quality'->>'ssim')::numeric),4) AS avg_ssim,
+  ROUND(AVG((metadata->'image_quality'->>'snr')::numeric),2) AS avg_snr,
+  ROUND(AVG((metadata->'annotation'->'quality_3d'->>'reprojection_error_rms_px')::numeric),3) AS avg_rms_px,
+  ROUND(AVG((metadata->'annotation'->'quality_3d'->'depth_map_validation'->>'depth_quality_score')::numeric),3) AS avg_depth_quality
+FROM synthetic_dataset GROUP BY part_id;
+
+8. 보안 거버넌스(Access Control Meta & RLS 정책)
+
+원칙: 메타(security_level, access_group_hint)는 표시용. 실제 권한은 정책 테이블+RLS로 집행.
+
+8.1 정책 테이블
+CREATE TABLE IF NOT EXISTS access_groups (
+  id serial PRIMARY KEY,
+  group_name text UNIQUE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS admin_user_groups (
+  admin_user_id uuid NOT NULL REFERENCES admin_users(id),
+  group_id int NOT NULL REFERENCES access_groups(id),
+  PRIMARY KEY (admin_user_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS part_access_policies (
+  part_id text NOT NULL,
+  security_level text NOT NULL CHECK (security_level IN ('public','internal','restricted')),
+  allowed_group_ids int[] NOT NULL DEFAULT '{}',
+  PRIMARY KEY (part_id)
+);
+
+8.2 RLS 활성화 (예: synthetic_dataset)
+ALTER TABLE synthetic_dataset ENABLE ROW LEVEL SECURITY;
+
+-- 간단한 예: restricted는 그룹 포함 사용자만 열람
+CREATE POLICY sd_read_policy ON synthetic_dataset
+FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1 FROM part_access_policies pap
+    WHERE pap.part_id = synthetic_dataset.part_id
+      AND (
+        pap.security_level IN ('public','internal')  -- org-wide 허용
+        OR EXISTS (
+          SELECT 1 FROM admin_user_groups aug
+          WHERE aug.admin_user_id = auth.uid()
+            AND aug.group_id = ANY(pap.allowed_group_ids)
+        )
+      )
+  )
+);
+
+
+주: Supabase 환경에 맞춰 auth.uid()/JWT 클레임 기반으로 조정 가능.
+메타의 security_level과 정책 테이블의 값은 주기적 동기화(트리거/배치) 권장.
+
+9. JSON Schema 요약 (추가/변경 필드)
+9.1 quality_3d (추가)
+{
+  "type": "object",
+  "properties": {
+    "pnp_method": { "type": "string", "enum": ["SOLVEPNP_SQPNP","SOLVEPNP_EPNP","SOLVEPNP_ITERATIVE","SOLVEPNP_P3P"] },
+    "pnp_iterations": { "type": "integer", "minimum": 1 },
+    "pnp_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "ransac_threshold_px": { "type": "number", "minimum": 0 },
+    "reprojection_error_rms_px": { "type": "number", "minimum": 0 },
+    "rotation_error_rad": { "type": "number", "minimum": 0 },
+    "translation_error_mm": { "type": "number", "minimum": 0 },
+    "z_depth_variance": { "type": "number", "minimum": 0 },
+    "depth_map_validation": {
+      "type": "object",
+      "properties": {
+        "valid_pixel_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "out_of_range_pixels": { "type": "integer", "minimum": 0 },
+        "edge_smoothness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "depth_quality_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "method": { "type": "string" }
+      },
+      "required": ["valid_pixel_ratio","depth_quality_score"]
+    }
+  },
+  "required": ["reprojection_error_rms_px"]
+}
+
+9.2 complexity_metric (확장)
+{
+  "type": "object",
+  "properties": {
+    "occlusion_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+    "visible_surface_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+    "neighbor_parts": { "type": "integer", "minimum": 0 },
+    "bbox_overlap_max": { "type": "number", "minimum": 0, "maximum": 1 },
+    "occluded_by_parts": { "type": "array", "items": { "type": "string" } },
+    "occluder_contribution": { "type": "object", "additionalProperties": { "type": "number" } }
+  },
+  "required": ["occlusion_ratio","visible_surface_ratio"]
+}
+
+9.3 camera (확장)
+{
+  "type": "object",
+  "properties": {
+    "distortion_model": { "type": "string", "enum": ["brown_conrady","fisheye"] },
+    "distortion_coeffs": { "type": "object", "additionalProperties": { "type": "number" } }
+  }
+}
+
+9.4 integrity (확장)
+{
+  "type": "object",
+  "properties": {
+    "qa_flag": { "type": "string" },
+    "qa_flag_hierarchy": {
+      "type": "object",
+      "properties": {
+        "root_cause_pred": { "type": "array", "items": { "type": "string" } },
+        "root_cause_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "uncertainty_score": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "security_level": { "type": "string", "enum": ["public","internal","restricted"] },
+    "access_group_hint": { "type": "array", "items": { "type": "string" } }
+  }
+}
+
+10. 마이그레이션 & 호환성
+
+Backward-compatible: v1.6 JSON은 그대로 유효. v1.6.1 신규 필드는 모두 선택이며 기본값/미존재 시 파이프라인이 안전하게 동작.
+
+권장 단계
+
+렌더 파이프라인에 occlusion/depth validation 계산 추가
+
+PnP solver 메타 기록
+
+Essential JSON E2로 Edge 교체
+
+DB 스키마(§7, §8) 적용 → 뷰/정책 점검
+
+11. 테스트 & 검증 체크리스트
+
+ RMS ≤ 1.5 px, DepthScore ≥ 0.85, SSIM ≥ 0.96, SNR ≥ 30 → PASS
+
+ occlusion_ratio 분위 균등 분포(쉬움/보통/어려움)
+
+ Root Cause: confidence ≥ 0.65 또는 uncertainty < 0.9 → 확정, 아니면 WARN_UNCERTAIN
+
+ RLS: restricted 파트가 미인가 사용자에게 차단
+
+ Edge: bbox_norm_xyxy 직사용, 1000 bbox 변환 시간 ≤ 1 ms (장치 의존)
+
+12. 운영 팁 & 권장 파라미터
+
+PnP: SOLVEPNP_SQPNP + ransac_threshold_px=2.0, iterations=300, confidence=0.999
+
+Depth: 소스 z-range 명시(카메라-오브젝트 기준) → out_of_range 픽셀 상시 모니터링
+
+SSS: enable_sss=true는 low_contrast_metric ≥ 0.15 및 투명/반사 재질에 한정
+
+보안: part_access_policies는 CI/CD에 포함, PR 리뷰 필수
+
+13. 결론
+
+v1.6.1은 v1.6의 강점을 유지하면서 (i) 자동화된 3D/Occlusion 검증, (ii) 심화된 Depth 품질, (iii) 세분화된 성능 로깅, (iv) 정책 주도 보안, (v) Root Cause 불확실성 모델링, (vi) 선택적 물리/표준 레이어를 추가했다.
+→ BrickBox는 “렌더링 → 학습 → QA → 배포 → 거버넌스” 전 과정을 재현 가능하고 규칙 기반으로 통제하는 엔터프라이즈급 3D-Vision 데이터 프레임워크로 완성되었다.
+
+부록 A. synthetic_dataset 인덱스 권장
+CREATE INDEX IF NOT EXISTS idx_sd_part ON synthetic_dataset (part_id);
+CREATE INDEX IF NOT EXISTS idx_sd_meta_qa ON synthetic_dataset USING GIN ((metadata->'integrity'));
+CREATE INDEX IF NOT EXISTS idx_sd_meta_3d ON synthetic_dataset USING GIN ((metadata->'annotation'->'quality_3d'));
+
+부록 B. Auto-Requeue 예시 트리거
+CREATE TABLE IF NOT EXISTS render_queue (
+  id bigserial PRIMARY KEY,
+  pair_uid text, part_id text, reason text, created_at timestamptz DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION enqueue_failed_samples()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF (NEW.metadata->'integrity'->>'qa_flag') LIKE 'FAIL%' OR
+     (NEW.metadata->'integrity'->>'qa_flag') = 'WARN_UNCERTAIN_ROOT_CAUSE' THEN
+    INSERT INTO render_queue(pair_uid, part_id, reason)
+    VALUES (NEW.pair_uid, NEW.part_id, COALESCE(NEW.metadata->'integrity'->>'qa_flag','WARN'));
+  END IF;
+  RETURN NEW;
+END; $$;
+
+DROP TRIGGER IF EXISTS trg_sd_autorequeue ON synthetic_dataset;
+CREATE TRIGGER trg_sd_autorequeue
+AFTER INSERT OR UPDATE ON synthetic_dataset
+FOR EACH ROW EXECUTE FUNCTION enqueue_failed_samples();

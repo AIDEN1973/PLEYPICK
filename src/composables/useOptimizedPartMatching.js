@@ -42,8 +42,8 @@ export function useOptimizedPartMatching() {
           color_id,
           quantity,
           is_spare,
-          lego_parts!inner(name, part_cat_id),
-          lego_colors!inner(name, rgb)
+          lego_parts(name, part_cat_id),
+          lego_colors(name, rgb)
         `)
         .eq('set_id', setData.id)
       

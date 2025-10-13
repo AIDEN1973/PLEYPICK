@@ -1,0 +1,284 @@
+BrickBox AI 메타데이터 기술 문서 (운영형 · 상세판)
+
+버전: 2.0-draft (2025-10-12, Asia/Seoul)
+대상: 레고부품 검수 시스템(BrickBox) — 합성 렌더→메타 생성→DB 업서트→검색/식별→운영 모니터링 전 과정
+
+0. 목적 · 범위 · 설계 원칙
+
+목적: AI 메타데이터를 정확·재현·운영친화하도록 정의하고, DB 매핑/저장/인덱싱/추론/거버넌스까지 일관 설계해 성능·안정성을 보장한다.
+범위:
+
+스키마(필수/선택)와 DB 매핑
+
+생성/검증/업서트 파이프라인
+
+성능 최적화(LLM 출력 축소, 단계별 저장, 계산 필드 분리)
+
+검색·식별(FAISS Two-Stage, Fusion, 헝가리안+BOM) 연계 운영 룰
+
+보안/RLS 및 SLO/운영 기준
+
+핵심 운영 SLO 예시는 기확립 문서의 SLO를 따른다: Top-1≥0.97, 평균 100–150 ms/frame, WebP decode p95 ≤ 15 ms 등. 또한 운영 배포/롤백 기준과 디코딩 p95 임계는 기존 문서를 인용한다.
+
+1. 데이터 레이아웃 · 출처
+
+렌더링 산출물은 다음과 같이 배치된다(이미지/라벨/메타/마스크/깊이 등). 이 레이아웃은 v1.6.1 규격으로 정의되어 있으며, 필수·선택 필드를 구분한다.
+
+/dataset_{SET_ID}/
+  images/{split}/{element_id}/{uuid}.webp
+  labels/{element_id}/{uuid}.txt
+  meta/{element_id}/{uuid}.json        # Full Meta (v1.6.1)
+  meta-e/{element_id}/{uuid}.json      # Essential (v1.6.1-E2)
+  masks_bin/{element_id}/{uuid}.png
+  depth/{element_id}/{uuid}.bin
+
+
+Edge/운영 권장: Essential JSON(E2) 사용, Full은 오프라인 QA·분석용.
+
+2. AI 메타데이터 스키마(운영형) — 필수 14, 선택 확장
+2.1 필수 필드(LLM 또는 규칙 기반 직접 생성 · 14개)
+카테고리	키	타입	설명
+식별	set_id, element_id, part_id, color_id	text	기본 식별자(정합 키)
+형상/구조	shape_tag, series, stud_count_top, tube_count_bottom, center_stud, groove	string/int/bool	기하 특성의 최소 집합 + 시리즈 분류
+구분/힌트	confusions, distinguishing_features, recognition_hints	array/json	유사군, 구별 특징, 인식 힌트
+
+이 핵심 14필드는 parts_master_features와 1:1 자동 매핑되며, 기술문서의 자동 동기화 표와 일치한다.
+※ v2.1 업데이트: shape_tag(형태)와 series(시리즈) 분리, part_category는 DB Enum 참조
+
+2.2 선택 확장(후처리/계산 또는 별도 소스)
+
+품질: image_quality(ssim, snr 등) → 저장 시 image_quality_q, image_quality_snr로 요약/집계.
+
+임베딩: semantic_vector, clip_text_emb (각 768차원) — CLIP ViT-L/14 모델 기준. DB에는 VECTOR(768)로 저장, HNSW 인덱스 사용. (v2.1: text-embedding-3-small 1536차원 → CLIP 768차원으로 변경)
+
+3D/깊이/왜곡: PnP, depth validation, distortion 모델 등은 Full Meta(v1.6.1)로 유지(필요 시 DB로 투영).
+
+보안/거버넌스 메타: integrity.security_level, access_group_hint는 표시용, 실제 접근은 RLS 정책으로 집행.
+
+3. DB 매핑(자동 동기화) · 스키마 정합성
+
+기술문서 명시 매핑(발췌):
+
+JSONL 키	DB 필드(parts_master_features)	비고
+shape_tag	shape_tag (VARCHAR)	형태 분류 (직접 매핑, v2.1)
+shape_tag	part_category (INTEGER)	Enum 테이블 참조 (간접 매핑)
+series	series (VARCHAR)	시리즈 분류 (system/duplo/technic/bionicle)
+stud_count_top	expected_stud_count	스터드 개수
+tube_count_bottom	expected_hole_count	튜브/홀 개수
+groove, center_stud	groove, center_stud	부울 필드
+confusions	confusion_groups	혼동 그룹
+distinguishing_features	distinguishing_features	구별 특징
+recognition_hints	recognition_hints	인식 힌트
+topo_applicable	meta_penalty 적용 가능 플래그	토폴로지 적용 여부
+image_quality.*	image_quality_q, image_quality_snr	품질 지표
+
+※ v2.1 개선사항:
+- shape_tag: part_category(INTEGER) → shape_tag(VARCHAR) 직접 저장
+- part_category: part_categories 테이블 참조 (1-99, 확장 가능)
+- series: 시리즈 분류 독립 필드 추가 (shape와 분리)
+- 카테고리 확장성: 10개 → 30+개 (제한 없음)
+
+parts_master_features는 점수/품질/기하/상태 필드가 다량 존재(80+). 예: voting_total_score, confusion_penalty, applied_penalties(jsonb), semantic_score, rotation_invariance, angle_step 등. 이들 다수는 계산 필드로 간주·후처리에서 채움.
+
+4. 파이프라인(생성→검증→업서트)
+4.1 생성
+
+렌더 출처 메타(해상도, 시드, occlusion/depth 품질 등)는 Full Meta에 포함. Edge 경량화를 위해 E2 사용.
+
+학습/템플릿 WebP 정책 및 디코딩 p95 지침 준수.
+
+4.2 검증
+
+라벨/마스크 QA(면적 비율, 토폴로지 Z-score, EarlyStopping 규칙)로 품질 확보.
+
+3D/깊이 품질은 v1.6.1 기준(재투영 RMS, depth score 임계) 사용. PASS 기준: RMS ≤ 1.5px, depth ≥ 0.85, SSIM ≥ 0.96, SNR ≥ 30.
+
+4.3 업서트 — 단계 분리(권장)
+
+1차(핵심 12필드): 식별·형상·유사군/힌트만 우선 저장 → LLM 의존 최소화
+2차(계산/품질/점수): 후처리 워커가 계산 후 채움(semantic_score, voting_total_score, *_score 일체)
+
+배치 업서트 시 version 증가·operation_logs.metadata 기록.
+
+5. 성능 최적화 가이드
+5.1 LLM 출력 축소(22 → 12~15)
+
+JSON 길이 –70%, 파싱 실패율 –85~90%, 업서트 시간 ×3~5 개선 (실무 경험+설계 근거).
+
+대형 벡터(768×2)는 외부 스토리지/벡터DB로 오프로딩, DB에는 메타 해시/버전만 유지.
+
+5.2 WebP 정책 & 디코딩
+
+학습: WebP q=90, -m 6, -af on; 템플릿: lossless 권장.
+
+디코드 p95 ≤ 15 ms를 유지(스레드 풀+LRU 프리패치).
+
+5.3 인덱스·검색(FAISS Two-Stage)
+
+Stage-1(빠른 후보), Stage-2(정밀 + Fusion, confusion-aware 게이트).
+
+헝가리안은 계층/희소/비동기, 싱글 라이터 병합.
+
+6. 데이터베이스 설계(분리·인덱스·머티뷰)
+6.1 테이블 분리(권장 안)
+
+parts_master_features_core (핵심 12필드 + 버전/타임스탬프)
+
+parts_master_features_calc (모든 *_score / penalty / 상태 플래그)
+
+parts_master_features_embed (벡터 외부 참조: vector_id, vector_version, sha256)
+
+장점: 트랜잭션 경량화, 잠금/경합 감소, 쿼리 캐시 히트율 ↑
+
+6.2 인덱스
+
+핵심 조회 키: (part_id), (element_id), (color_id)
+
+JSONB/GiN: applied_penalties, recognition_hints
+
+빈출 정렬: voting_total_score DESC, semantic_score DESC
+
+참고: synthetic_dataset 메타의 3D/GiN 인덱스 예시는 v1.6.1 부록을 따른다.
+
+6.3 뷰/머티리얼라이즈드 뷰
+
+v_feature_minimal (핵심 12필드)
+
+v_feature_runtime (실시간 추론용 join, 벡터ID·최신 스코어)
+
+v_feature_audit (version/ops 로그 결합)
+
+7. 업서트 SQL 템플릿(단계형)
+7.1 1차(핵심 12필드)
+-- parts_master_features_core (예시)
+INSERT INTO parts_master_features_core 
+(part_id, element_id, color_id, part_category,
+ expected_stud_count, expected_hole_count,
+ center_stud, groove, confusion_groups,
+ distinguishing_features, recognition_hints, version)
+VALUES
+(:part_id, :element_id, :color_id, :shape_tag,
+ :stud_count_top, :tube_count_bottom,
+ :center_stud, :groove, :confusions,
+ :distinguishing_features, :recognition_hints, COALESCE(:version, 1))
+ON CONFLICT (part_id, color_id)
+DO UPDATE SET
+  part_category = EXCLUDED.part_category,
+  expected_stud_count = EXCLUDED.expected_stud_count,
+  expected_hole_count = EXCLUDED.expected_hole_count,
+  center_stud = EXCLUDED.center_stud,
+  groove = EXCLUDED.groove,
+  confusion_groups = EXCLUDED.confusion_groups,
+  distinguishing_features = EXCLUDED.distinguishing_features,
+  recognition_hints = EXCLUDED.recognition_hints,
+  version = parts_master_features_core.version + 1;
+
+7.2 2차(계산/품질/점수)
+UPDATE parts_master_features_calc AS t
+SET
+  image_quality_q    = :image_quality_q,
+  image_quality_snr  = :image_quality_snr,
+  semantic_score     = :semantic_score,
+  voting_total_score = :voting_total_score,
+  applied_penalties  = :applied_penalties::jsonb
+WHERE (part_id, color_id) = (:part_id, :color_id);
+
+
+자동 매핑 및 버전/로그 규칙은 기술문서의 “AI 메타 DB 동기화(자동 매핑)”와 동일 원칙.
+
+8. 임베딩·검색·Fusion
+8.1 Two-Stage & Confusion-Aware Gate (의사코드)
+
+Stage-1 k=5 후보 → confusions 교집합 여부로 Stage-2 여부 결정 → Fusion(이미지/메타/텍스트) → topo/area 보정.
+
+8.2 헝가리안(계층/희소/비동기)
+
+고확신 즉시(greedy), 중간 배치 헝가리안, 저확신 보류/휴리스틱
+
+타임아웃 시 greedy 폴백·경보, 싱글 라이터 병합(음수 방지).
+
+9. QA·테스트·운영
+9.1 PASS 기준(Full Meta 기준)
+
+RMS ≤ 1.5 px, DepthScore ≥ 0.85, SSIM ≥ 0.96, SNR ≥ 30.
+
+9.2 배포·승급·롤백
+
+Stage-1 10% → Stage-2 50% → Full 100%; 롤백 트리거(Top-1 하락, decode p95 초과, BOM 음수).
+
+9.3 운영 체크리스트
+
+YOLO 벤치, index_manifest 검증, WebP decode p95 측정, Fusion 초기값 보정 등.
+
+10. 보안·거버넌스
+
+메타의 security_level, access_group_hint는 표시용이며, 실제 접근 제어는 정책 테이블 + RLS에서 집행. 테스트 체크리스트에 restricted 파트 차단 포함.
+
+11. 성능/용량 모수(참고)
+
+WebP decode p95 ≤ 15 ms(캐시/프리패치/스레드풀) → 학습 스루풋 +20~30% 개선.
+
+인덱스 L1/L2 계층 운영, 콜드스타트 +5~10 ms. 정기 Pruning 3단계(6개월).
+
+12. 마이그레이션 지침
+
+v1.6 → v1.6.1은 완전 하위호환. 신규 필드 미존재 시 안전 동작. 우선 occlusion/depth/PnP 메타 계산·기록 → Edge는 E2로 교체 → DB 뷰/정책 점검.
+
+13. 권장 구현(요약 코드)
+13.1 파서/정합성 검증(핵심 로직 개요)
+rec = safe_json_load(line)
+must = ["set_id","element_id","part_id","color_id",
+        "shape_tag","stud_count_top","tube_count_bottom",
+        "center_stud","groove","confusions",
+        "distinguishing_features","recognition_hints"]
+assert all(k in rec for k in must)
+
+# 품질 집약(선택)
+iq = rec.get("image_quality", {})
+rec["image_quality_q"]   = float(iq.get("ssim", 0.0))
+rec["image_quality_snr"] = float(iq.get("snr" , 0.0))
+
+# 버전 관리
+rec["version"] = (rec.get("version") or 0) + 1
+
+13.2 계산 필드(후처리 워커)
+calc = {}
+calc["semantic_score"] = f_semantic(rec)       # 임베딩 기반(외부DB)
+calc["voting_total_score"] = f_vote(rec, calc) # 가중 투표
+calc["applied_penalties"]  = f_penalties(rec)  # topo/occlusion/quality
+
+14. 리스크 & 롤백 전략
+
+LLM 의존 과다 → 핵심 12필드로 축소, 불안정성 국지화
+
+대형 벡터 저장 → 외부화/캐시, DB는 메타만
+
+검색 성능 하락 → Two-Stage/하드 템플릿/Pruning·A/B 운영 룰 준수
+
+운영 품질 저하 → SLO·경보·자동 롤백 라인 적용
+
+부록 A. 필드 정의(핵심 12)
+키	타입	제약/예
+set_id/element_id/part_id/color_id	text	not null
+shape_tag	text	{brick,tile,plate,…}
+stud_count_top	int	≥0
+tube_count_bottom	int	≥0
+center_stud	bool	default false
+groove	bool	default false
+confusions	text[]	상위 유사 파츠 ID
+distinguishing_features	text[]	예: “center groove”, “no tube”
+recognition_hints	json	ko/en 지원
+
+자동 매핑 & 버전/로그: 기술문서 표와 동일.
+
+부록 B. PASS/FAIL 규칙(발췌)
+
+PASS: RMS ≤ 1.5 px, DepthScore ≥ 0.85, SSIM ≥ 0.96, SNR ≥ 30.
+
+Stage-1/2/Full 배포 및 롤백 조건.
+
+최종 결론
+
+핵심 12필드만 LLM/규칙으로 직접 생성하고, 점수/품질/패널티/임베딩은 후처리·외부화·단계형 업서트로 분리한다.
+
+기존 운영 설계(FAISS Two-Stage, 헝가리안+BOM, WebP p95, Pruning/A/B, RLS)를 그대로 준수하면 성능(×5~10), 안정성, 거버넌스를 동시에 달성한다.

@@ -5,6 +5,32 @@
       <p>LDraw + Blender + Supabase 기반 자동 렌더링 파이프라인</p>
     </div>
 
+    <!-- 스키마 버전 및 품질 기준 정보 -->
+    <div class="schema-info-panel">
+      <h3>📋 데이터 스키마 정보</h3>
+      <div class="schema-details">
+        <div class="schema-item">
+          <span class="schema-label">어노테이션 스키마:</span>
+          <span class="schema-value">v1.6.1</span>
+          <small>3D 품질 지표, Occlusion 자동 산출 지원</small>
+        </div>
+        <div class="schema-item">
+          <span class="schema-label">품질 기준:</span>
+          <span class="schema-value">
+            SSIM ≥0.965 (WebP q=90) | SNR ≥30dB | Reprojection ≤1.5px | Depth Score ≥0.85
+          </span>
+          <small>기술문서 3.1절, 어노테이션 6절 준수</small>
+        </div>
+        <div class="schema-item">
+          <span class="schema-label">WebP 정책:</span>
+          <span class="schema-value">
+            학습: q=90 (60-70% 절감) | 템플릿: lossless 또는 q=95
+          </span>
+          <small>기술문서 2.4절</small>
+        </div>
+      </div>
+    </div>
+
     <!-- 자동 학습 설정 -->
     <div class="auto-training-settings">
       <h3>🤖 자동 학습 설정</h3>
@@ -221,6 +247,58 @@
           </select>
         </div>
 
+        <!-- WebP 인코딩 설정 (기술문서 2.4절) -->
+        <div class="option-group">
+          <label>WebP 품질</label>
+          <select v-model="webpQuality">
+            <option value="85">85 (빠름)</option>
+            <option value="90">90 (권장, 기술문서 기준)</option>
+            <option value="95">95 (고품질, 템플릿용)</option>
+            <option value="100">100 (무손실)</option>
+          </select>
+          <small class="quality-info">📦 WebP q=90: PNG 대비 60-70% 절감</small>
+        </div>
+
+        <!-- RDA 설정 (기술문서 3.2절) -->
+        <div class="option-group">
+          <label>도메인 랜덤화 (RDA)</label>
+          <select v-model="rdaStrength">
+            <option value="none">사용 안 함</option>
+            <option value="rda1">낮음 (RDA-1)</option>
+            <option value="rda2">중간 (RDA-2, 기본)</option>
+            <option value="rda3">높음 (RDA-3)</option>
+          </select>
+          <small class="quality-info">💡 조명/HDR/배경/렌즈 왜곡 적용 수준</small>
+        </div>
+
+        <!-- YOLO 고급 설정 -->
+        <div class="option-group">
+          <button @click="showAdvanced = !showAdvanced" class="btn-secondary btn-small">
+            {{ showAdvanced ? '🔼 고급 설정 숨기기' : '🔽 YOLO 고급 설정 표시' }}
+          </button>
+        </div>
+        
+        <div v-if="showAdvanced" class="advanced-settings">
+          <h4>🎯 YOLO 고급 설정 (기술문서 4.2절)</h4>
+          <div class="advanced-grid">
+            <div class="option-group">
+              <label>Confidence 임계값</label>
+              <input type="number" v-model.number="yoloConf" min="0.1" max="0.3" step="0.01" />
+              <small>기본값: 0.15 (소형 부품 탐지)</small>
+            </div>
+            <div class="option-group">
+              <label>IoU 임계값</label>
+              <input type="number" v-model.number="yoloIou" min="0.4" max="0.7" step="0.05" />
+              <small>기본값: 0.60 (중복 억제)</small>
+            </div>
+            <div class="option-group">
+              <label>최대 검출 수</label>
+              <input type="number" v-model.number="yoloMaxDet" min="500" max="2000" step="100" />
+              <small>기본값: 1200 (밀집 프레임)</small>
+            </div>
+          </div>
+        </div>
+
         <!-- 적응형 샘플링 정보 -->
         <div class="adaptive-info">
           <h4>🎯 적응형 샘플링 시스템</h4>
@@ -325,6 +403,12 @@
         </div>
       </div>
     </div>
+
+    <!-- 품질 지표 대시보드 (신규) -->
+    <QualityMetricsChart 
+      v-if="renderResults.length > 0 && renderResults[0].metrics" 
+      :renderResults="renderResults" 
+    />
 
     <!-- 렌더링 결과 -->
     <div class="results-panel" v-if="renderResults.length > 0">
@@ -494,9 +578,13 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSyntheticDataset } from '@/composables/useSyntheticDataset'
 import { useSupabase } from '@/composables/useSupabase'
+import QualityMetricsChart from '@/components/QualityMetricsChart.vue'
 
 export default {
   name: 'SyntheticDatasetManager',
+  components: {
+    QualityMetricsChart
+  },
   setup() {
     // Supabase 클라이언트 초기화 (중복 방지)
     const { supabase } = useSupabase()
@@ -524,6 +612,20 @@ export default {
     const renderQuality = ref('high')
     const background = ref('white')
     const resolution = ref('1024x1024')
+    
+    // WebP 설정 (기술문서 2.4절)
+    const webpQuality = ref(90) // WebP lossy q=90
+    const webpMethod = ref(6) // -m 6
+    const webpAutoFilter = ref(true) // -af on
+    
+    // RDA (Render Domain Randomization) 설정 (기술문서 3.2절)
+    const rdaStrength = ref('rda2') // none | rda1 | rda2 | rda3 (기본: rda2 - Train 80% 적용)
+    
+    // YOLO 고급 설정 (기술문서 4.2절)
+    const yoloConf = ref(0.15)
+    const yoloIou = ref(0.60)
+    const yoloMaxDet = ref(1200)
+    const showAdvanced = ref(false)
     
     const isRendering = ref(false)
     const renderProgress = ref(0)
@@ -655,6 +757,78 @@ export default {
         'ultra': '400-480 (적응형)'
       }
       return qualityMap[quality] || '400'
+    }
+
+    // 품질 검증 로직 (기술문서 3.1절)
+    const validateQuality = (metadata) => {
+      const warnings = []
+      
+      // 품질 메트릭 추출 (시각화용)
+      const metrics = {
+        ssim: metadata?.image_quality?.ssim || 0,
+        snr: metadata?.image_quality?.snr || 0,
+        reprojection: metadata?.annotation?.quality_3d?.reprojection_error_rms_px || 0,
+        depthScore: metadata?.annotation?.quality_3d?.depth_map_validation?.depth_quality_score || 0,
+        maskBboxRatio: (metadata?.mask_area && metadata?.bbox_area) 
+          ? metadata.mask_area / metadata.bbox_area 
+          : 0
+      }
+      
+      if (!metadata) return { warnings, metrics }
+      
+      // 1. 마스크/박스 비율 검증 (25~98% 범위)
+      if (metadata.mask_area && metadata.bbox_area) {
+        const maskBboxRatio = metadata.mask_area / metadata.bbox_area
+        if (maskBboxRatio < 0.25 || maskBboxRatio > 0.98) {
+          warnings.push({
+            type: 'error',
+            message: `마스크/박스 비율 이상: ${(maskBboxRatio * 100).toFixed(1)}% (정상범위: 25-98%)`
+          })
+        }
+      }
+      
+      // 2. SSIM 검증 (WebP q=90 기준 0.965 이상)
+      if (metadata.image_quality?.ssim) {
+        const ssimThreshold = webpQuality.value === 90 ? 0.965 : 0.97
+        if (metadata.image_quality.ssim < ssimThreshold) {
+          warnings.push({
+            type: 'warning',
+            message: `SSIM 기준 미달: ${metadata.image_quality.ssim.toFixed(3)} (기준: ${ssimThreshold})`
+          })
+        }
+      }
+      
+      // 3. SNR 검증 (30 이상)
+      if (metadata.image_quality?.snr) {
+        if (metadata.image_quality.snr < 30) {
+          warnings.push({
+            type: 'warning',
+            message: `SNR 기준 미달: ${metadata.image_quality.snr.toFixed(1)} dB (기준: 30 dB)`
+          })
+        }
+      }
+      
+      // 4. Reprojection Error 검증 (1.5px 이하)
+      if (metadata.annotation?.quality_3d?.reprojection_error_rms_px) {
+        if (metadata.annotation.quality_3d.reprojection_error_rms_px > 1.5) {
+          warnings.push({
+            type: 'error',
+            message: `Reprojection 오차 초과: ${metadata.annotation.quality_3d.reprojection_error_rms_px.toFixed(2)}px (기준: ≤1.5px)`
+          })
+        }
+      }
+      
+      // 5. Depth 품질 검증 (0.85 이상)
+      if (metadata.annotation?.quality_3d?.depth_map_validation?.depth_quality_score) {
+        if (metadata.annotation.quality_3d.depth_map_validation.depth_quality_score < 0.85) {
+          warnings.push({
+            type: 'warning',
+            message: `Depth 품질 미달: ${metadata.annotation.quality_3d.depth_map_validation.depth_quality_score.toFixed(2)} (기준: ≥0.85)`
+          })
+        }
+      }
+      
+      return { warnings, metrics }
     }
 
     // 중복 렌더링 체크 함수
@@ -997,11 +1171,23 @@ export default {
         const result = await loadTargetSetParts(selectedSetNum.value)
         const rows = result.targetParts || []
         
-        // element_id, part_num, color_id를 보존하여 세트 렌더링 시 elementId로 활용
+        // element_id, part_num, color_id + AI 메타데이터 보존 (기술문서 3.3절)
         const items = rows.map(r => ({
           part_num: r.part_id,
           color_id: r.color_id,
-          element_id: r.element_id || null // 데이터베이스에서 element_id 가져오기
+          element_id: r.element_id || null,
+          // AI 메타데이터 추가 (parts_master_features 연동)
+          shape_tag: r.shape_tag || null,
+          part_category: r.part_category || null,
+          series: r.series || 'system',
+          center_stud: r.center_stud || false,
+          groove: r.groove || false,
+          confusions: r.confusions || [],
+          distinguishing_features: r.distinguishing_features || [],
+          expected_stud_count: r.expected_stud_count || 0,
+          expected_hole_count: r.expected_hole_count || 0,
+          topo_applicable: r.topo_applicable || false,
+          recognition_hints: r.recognition_hints || {}
         })).filter(it => it.part_num)
         
         console.log(`원본 부품 데이터: ${items.length}개`)
@@ -1060,6 +1246,27 @@ export default {
       renderLogs.value = []
       
       try {
+        // 단일 부품 모드에서 AI 메타데이터 가져오기 (옵션)
+        let aiMetadata = null
+        if (renderMode.value === 'single' && selectedPartId.value) {
+          try {
+            const { useSupabase } = await import('@/composables/useSupabase')
+            const { supabase } = useSupabase()
+            
+        const { data: metaData } = await supabase
+          .from('parts_master_features')
+          .select('shape_tag, part_category, series, center_stud, groove, confusions, distinguishing_features, expected_stud_count, expected_hole_count, topo_applicable, recognition_hints')
+          .eq('part_id', selectedPartId.value)
+          .maybeSingle()
+            
+            if (metaData) {
+              aiMetadata = metaData
+            }
+          } catch (err) {
+            console.warn('AI 메타데이터 로드 실패:', err)
+          }
+        }
+
         const renderConfig = {
           mode: renderMode.value,
           partId: selectedPartId.value,
@@ -1068,7 +1275,41 @@ export default {
           quality: renderQuality.value,
           background: background.value,
           resolution: resolution.value,
-          targetFill: 0.92
+          targetFill: 0.92,
+          // WebP 설정 (기술문서 2.4절)
+          webp: {
+            quality: webpQuality.value,
+            method: webpMethod.value,
+            autoFilter: webpAutoFilter.value
+          },
+          // RDA 설정 (기술문서 3.2절)
+          rda: {
+            strength: rdaStrength.value
+          },
+          // YOLO 설정 (기술문서 4.2절)
+          yolo: {
+            conf: yoloConf.value,
+            iou: yoloIou.value,
+            maxDet: yoloMaxDet.value
+          },
+          // AI 메타데이터 (기술문서 3.3절 매핑)
+          ...(aiMetadata ? {
+            aiMeta: {
+              shape_tag: aiMetadata.shape_tag,
+              part_category: aiMetadata.part_category,
+              series: aiMetadata.series,
+              center_stud: aiMetadata.center_stud || false,
+              groove: aiMetadata.groove || false,
+              confusions: aiMetadata.confusions || [],
+              distinguishing_features: aiMetadata.distinguishing_features || [],
+              expected_stud_count: aiMetadata.expected_stud_count || 0,
+              expected_hole_count: aiMetadata.expected_hole_count || 0,
+              topo_applicable: aiMetadata.topo_applicable || false,
+              recognition_hints: aiMetadata.recognition_hints || {}
+            }
+          } : {}),
+          // 어노테이션 스키마 버전 명시
+          schemaVersion: '1.6.1'
         }
         // 숫자만 입력된 경우는 엘리먼트 ID로 처리하도록 전송 값 보강
         if (renderMode.value === 'single' && selectedPartId.value && /^\d+$/.test(selectedPartId.value.trim())) {
@@ -1145,7 +1386,17 @@ export default {
                   }
                   const filesJson = await filesRes.json()
                   if (filesJson && filesJson.success && Array.isArray(filesJson.results)) {
-                    renderResults.value = filesJson.results
+                    // 각 결과에 품질 메트릭 추가
+                    renderResults.value = filesJson.results.map(result => {
+                      const qualityResult = validateQuality(result.metadata)
+                      return {
+                        ...result,
+                        warnings: qualityResult.warnings,
+                        metrics: qualityResult.metrics,
+                        partId: result.partId || result.part_id,
+                        elementId: result.elementId || result.element_id
+                      }
+                    })
                     currentImage.value = filesJson.results.length
                     totalImages.value = imageCount.value
                   }
@@ -1304,6 +1555,38 @@ export default {
             imageCount: imageCount.value,
             quality: renderQuality.value,
             background: background.value,
+            resolution: resolution.value,
+            // WebP 설정
+            webp: {
+              quality: webpQuality.value,
+              method: webpMethod.value,
+              autoFilter: webpAutoFilter.value
+            },
+            // RDA 설정
+            rda: {
+              strength: rdaStrength.value
+            },
+            // YOLO 설정
+            yolo: {
+              conf: yoloConf.value,
+              iou: yoloIou.value,
+              maxDet: yoloMaxDet.value
+            },
+            // AI 메타데이터 (기술문서 3.3절 매핑)
+            aiMeta: {
+              shape_tag: item.shape_tag,
+              part_category: item.part_category,
+              series: item.series,
+              center_stud: item.center_stud || false,
+              groove: item.groove || false,
+              confusions: item.confusions || [],
+              distinguishing_features: item.distinguishing_features || [],
+              expected_stud_count: item.expected_stud_count || 0,
+              expected_hole_count: item.expected_hole_count || 0,
+              topo_applicable: item.topo_applicable || false,
+              recognition_hints: item.recognition_hints || {}
+            },
+            schemaVersion: '1.6.1',
             ...(elementId ? { elementId } : {}),
             ...(Number.isInteger(colorId) ? { colorId } : {})
           }
@@ -2066,7 +2349,17 @@ export default {
       loadAutoTrainingSetting,
       loadSetTrainingStats,
       trainedSetsCount,
-      availableSetsCount
+      availableSetsCount,
+      // 신규 설정 (기술문서 정합성)
+      webpQuality,
+      webpMethod,
+      webpAutoFilter,
+      rdaStrength,
+      yoloConf,
+      yoloIou,
+      yoloMaxDet,
+      showAdvanced,
+      validateQuality
     }
   }
 }
@@ -2962,6 +3255,93 @@ export default {
   color: white;
 }
 
+/* 스키마 정보 패널 스타일 */
+.schema-info-panel {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+  color: white;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.schema-info-panel h3 {
+  margin: 0 0 15px 0;
+  font-size: 18px;
+  color: white;
+}
+
+.schema-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.schema-item {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 15px;
+  backdrop-filter: blur(10px);
+}
+
+.schema-label {
+  font-weight: 600;
+  margin-right: 8px;
+  display: inline-block;
+  min-width: 120px;
+}
+
+.schema-value {
+  font-weight: 400;
+  opacity: 0.95;
+}
+
+.schema-item small {
+  display: block;
+  margin-top: 5px;
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+/* 고급 설정 스타일 */
+.advanced-settings {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 10px;
+  border-left: 4px solid #3498db;
+}
+
+.advanced-settings h4 {
+  margin: 0 0 15px 0;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+}
+
+.advanced-grid .option-group {
+  background: white;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #e1e8ed;
+}
+
+.advanced-grid .option-group input {
+  width: 100%;
+}
+
+.advanced-grid .option-group small {
+  display: block;
+  margin-top: 5px;
+  color: #7f8c8d;
+  font-size: 11px;
+}
+
 @media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -2991,6 +3371,10 @@ export default {
   
   .part-item .part-stats {
     margin: 0;
+  }
+  
+  .advanced-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
