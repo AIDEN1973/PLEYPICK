@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     optimizeDeps: {
-      include: ['localforage', 'p-limit'],
+      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs'],
       exclude: []
     },
     define: {
