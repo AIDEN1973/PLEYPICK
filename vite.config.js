@@ -12,6 +12,10 @@ export default defineConfig(({ mode }) => {
         '@': resolve(__dirname, 'src')
       }
     },
+    optimizeDeps: {
+      include: ['localforage', 'p-limit'],
+      exclude: []
+    },
     define: {
       __VUE_OPTIONS_API__: true,
       __VUE_PROD_DEVTOOLS__: false,
@@ -19,6 +23,21 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       proxy: {
+        '/api/upload/proxy-image': {
+          target: 'http://localhost:3004',
+          changeOrigin: true,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('webp proxy error', err);
+            });
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log('Sending WebP Proxy Request:', req.method, req.url);
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('Received WebP Proxy Response:', proxyRes.statusCode, req.url);
+            });
+          },
+        },
         '/api/proxy': {
           target: 'https://cdn.rebrickable.com',
           changeOrigin: true,
@@ -40,6 +59,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/upload/, ''),
           configure: (proxy, _options) => {
+            console.log('Configuring /api/upload proxy');
             proxy.on('error', (err, _req, _res) => {
               console.log('upload proxy error', err);
             });
