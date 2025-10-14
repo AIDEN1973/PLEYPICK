@@ -1,0 +1,68 @@
+{
+  "timestamp": "2025-10-14T14:20:54.214095",
+  "syntax": {
+    "scripts/fusion_identifier.py": "PASS",
+    "scripts/embedding_worker.py": "PASS",
+    "scripts/qa_worker.py": "PASS",
+    "scripts/retrain_trigger.py": "PASS",
+    "scripts/operation_logger.py": "PASS",
+    "scripts/queue_manager.py": "PASS",
+    "scripts/performance_monitor.py": "PASS",
+    "scripts/automated_pipeline.py": "PASS"
+  },
+  "imports": {
+    "fusion_identifier": "PASS",
+    "embedding_worker": "PASS",
+    "qa_worker": "PASS",
+    "retrain_trigger": "PASS",
+    "operation_logger": "PASS",
+    "queue_manager": "PASS",
+    "performance_monitor": "PASS",
+    "automated_pipeline": "PASS"
+  },
+  "classes": {
+    "FusionIdentifier": "PASS",
+    "EmbeddingWorker": "PASS",
+    "QAWorker": "PASS",
+    "RetrainTriggerManager": "PASS",
+    "OperationLogger": "PASS",
+    "QueueManager": "PASS"
+  },
+  "methods": {
+    "FusionIdentifier": {
+      "load_embeddings_from_db": "PASS",
+      "two_stage_search": "PASS",
+      "hungarian_matching": "PASS",
+      "apply_bom_constraints": "PASS",
+      "_save_faiss_indexes": "PASS"
+    },
+    "EmbeddingWorker": {
+      "process_pending_embeddings": "PASS",
+      "_extract_image_path": "PASS"
+    },
+    "QAWorker": {
+      "_load_quality_thresholds": "PASS"
+    },
+    "RetrainTriggerManager": {
+      "evaluate_all_triggers": "PASS",
+      "send_slack_notification": "PASS",
+      "evaluate_all_triggers_with_notification": "PASS"
+    },
+    "OperationLogger": {
+      "get_performance_metrics": "PASS",
+      "get_qa_quality_metrics": "PASS"
+    },
+    "QueueManager": {
+      "create_task": "PASS",
+      "_create_task_redis": "PASS",
+      "_create_task_file": "PASS",
+      "_ensure_queue_files": "PASS"
+    }
+  },
+  "database": {
+    "qa_logs": "PASS",
+    "parts_master_features": "PASS",
+    "part_access_policies": "PASS"
+  },
+  "overall_status": "PASS"
+}

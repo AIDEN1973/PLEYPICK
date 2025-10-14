@@ -1,0 +1,12 @@
+Windows Registry Editor Version 5.00
+
+; BrickBox: Folder context menu → "BrickBox 업로드"
+
+[HKEY_CLASSES_ROOT\Directory\shell\BrickBoxUpload]
+@="BrickBox 업로드"
+"Icon"="C:\\cursor\\brickbox\\dist\\BrickBoxUploader.exe,0"
+
+[HKEY_CLASSES_ROOT\Directory\shell\BrickBoxUpload\command]
+@="cmd /c start \"\" \"C:\\cursor\\brickbox\\BrickBoxUploader_Launcher.bat\" \"%1\""
+
+
