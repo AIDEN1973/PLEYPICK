@@ -648,7 +648,7 @@ async function startBlenderRendering(job) {
 // 🔧 Auto Port Selection Logic
 // ================================
 
-const DEFAULT_PORT = parseInt(process.env.PORT || '3004', 10);
+const DEFAULT_PORT = parseInt(process.env.SYNTHETIC_PORT || '3007', 10);
 const MAX_PORT = 3100;
 
 /**

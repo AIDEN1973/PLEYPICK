@@ -17,6 +17,7 @@ import AutomatedTrainingDashboard from './views/AutomatedTrainingDashboard.vue'
 import StoreManagementDashboard from './views/StoreManagementDashboard.vue'
 import MonitoringDashboard from './views/MonitoringDashboard.vue'
 import ModelMonitoringDashboard from './views/ModelMonitoringDashboard.vue'
+import SystemMonitoringDashboard from './views/SystemMonitoringDashboard.vue'
 import MetadataManagement from './views/MetadataManagement.vue'
 
 const routes = [
@@ -36,6 +37,7 @@ const routes = [
   { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard },
   { path: '/monitoring', name: 'MonitoringDashboard', component: MonitoringDashboard },
   { path: '/model-monitoring', name: 'ModelMonitoringDashboard', component: ModelMonitoringDashboard },
+  { path: '/system-monitoring', name: 'SystemMonitoringDashboard', component: SystemMonitoringDashboard },
   { path: '/metadata-management', name: 'MetadataManagement', component: MetadataManagement }
 ]
 

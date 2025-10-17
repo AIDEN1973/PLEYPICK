@@ -149,8 +149,8 @@
               </span>
             </td>
             <td class="dimension">
-              <span v-if="item.embedding_dimension" class="dim-badge">
-                {{ item.embedding_dimension }}
+              <span v-if="item.vector_dimensions" class="dim-badge">
+                {{ item.vector_dimensions }}
               </span>
               <span v-else class="dim-badge empty">-</span>
             </td>
@@ -276,8 +276,10 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
+import { useWorkerHealth } from '../composables/useWorkerHealth'
 
 const { supabase } = useSupabase()
+const { checkWorkerHealth } = useWorkerHealth()
 
 // 상태
 const loading = ref(false)
@@ -379,11 +381,18 @@ const loadData = async () => {
     if (error) throw error
     items.value = data || []
 
-    // 워커 상태 추정 (pending 항목이 변경되는지 확인)
-    if (stats.value.pending > 0) {
-      workerStatus.value = 'running'
-    } else {
-      workerStatus.value = 'unknown'
+    // 워커 상태 실제 체크
+    try {
+      const healthResult = await checkWorkerHealth()
+      workerStatus.value = healthResult.status
+    } catch (error) {
+      console.error('워커 상태 체크 실패:', error)
+      // 폴백: pending 항목이 있으면 running으로 추정
+      if (stats.value.pending > 0) {
+        workerStatus.value = 'running'
+      } else {
+        workerStatus.value = 'unknown'
+      }
     }
   } catch (error) {
     console.error('데이터 로드 실패:', error)
@@ -398,13 +407,27 @@ const generateEmbedding = async (ids) => {
   
   generating.value = true
   try {
-    const { data, error } = await supabase.rpc('request_embedding_generation', {
-      part_ids: ids
-    })
+    console.log('[DEBUG] generateEmbedding 호출:', ids)
     
-    if (error) throw error
+    // 실제 임베딩 생성: clip_text_emb를 null로 설정하여 워커가 처리하도록 함
+    const { error } = await supabase
+      .from('parts_master_features')
+      .update({ 
+        clip_text_emb: null,
+        semantic_vector: null,
+        embedding_status: 'pending',
+        updated_at: new Date().toISOString()
+      })
+      .in('id', ids)
     
-    alert(`${data.length}개 항목의 임베딩 생성이 요청되었습니다.\n워커가 자동으로 처리합니다.`)
+    if (error) {
+      console.error('[ERROR] 업데이트 실패:', error)
+      throw error
+    }
+    
+    console.log('[SUCCESS] 업데이트 완료:', ids.length, '개')
+    
+    alert(`${ids.length}개 항목의 임베딩 생성이 요청되었습니다.\n워커가 자동으로 처리합니다.`)
     selectedIds.value = []
     await loadData()
   } catch (error) {
@@ -418,18 +441,31 @@ const generateEmbedding = async (ids) => {
 const retryFailed = async () => {
   generating.value = true
   try {
-    const { data, error } = await supabase.rpc('retry_failed_embeddings')
+    console.log('[DEBUG] retryFailed 호출')
     
-    if (error) throw error
+    // 실패한 임베딩들을 다시 처리하도록 설정
+    const { error } = await supabase
+      .from('parts_master_features')
+      .update({ 
+        clip_text_emb: null,
+        semantic_vector: null,
+        embedding_status: 'pending',
+        updated_at: new Date().toISOString()
+      })
+      .eq('embedding_status', 'failed')
     
-    if (data && data.length > 0) {
-      alert(data[0].message)
+    if (error) {
+      console.error('[ERROR] 업데이트 실패:', error)
+      throw error
     }
     
+    console.log('[SUCCESS] 재시도 요청 완료')
+    
+    alert('실패한 임베딩들의 재시도가 요청되었습니다.\n워커가 자동으로 처리합니다.')
     await loadData()
   } catch (error) {
     console.error('재시도 실패:', error)
-    alert('재시도에 실패했습니다')
+    alert('재시도에 실패했습니다: ' + error.message)
   } finally {
     generating.value = false
   }
@@ -438,18 +474,31 @@ const retryFailed = async () => {
 const generateMissing = async () => {
   generating.value = true
   try {
-    const { data, error } = await supabase.rpc('request_missing_embeddings')
+    console.log('[DEBUG] generateMissing 호출')
     
-    if (error) throw error
+    // 없음 임베딩들을 처리하도록 설정
+    const { error } = await supabase
+      .from('parts_master_features')
+      .update({ 
+        clip_text_emb: null,
+        semantic_vector: null,
+        embedding_status: 'pending',
+        updated_at: new Date().toISOString()
+      })
+      .or('embedding_status.is.null,embedding_status.eq.missing')
     
-    if (data && data.length > 0) {
-      alert(data[0].message)
+    if (error) {
+      console.error('[ERROR] 업데이트 실패:', error)
+      throw error
     }
     
+    console.log('[SUCCESS] 없음 항목 생성 요청 완료')
+    
+    alert('없음 임베딩들의 생성이 요청되었습니다.\n워커가 자동으로 처리합니다.')
     await loadData()
   } catch (error) {
     console.error('생성 요청 실패:', error)
-    alert('생성 요청에 실패했습니다')
+    alert('생성 요청에 실패했습니다: ' + error.message)
   } finally {
     generating.value = false
   }
@@ -475,6 +524,9 @@ const handleSearch = () => {
 const getStatusLabel = (status) => {
   const labels = {
     completed: '✅ 완료',
+    semantic_ready: '✅ 완료',
+    clip_ready: '✅ 완료',
+    text_ready: '🔄 대기',
     pending: '🔄 대기',
     failed: '❌ 실패',
     null: '⭕ 없음',
@@ -510,9 +562,21 @@ watch(filteredItems, () => {
   selectedIds.value = []
 })
 
+// 워커 상태 체크 함수
+const checkWorkerStatus = async () => {
+  try {
+    const healthResult = await checkWorkerHealth()
+    workerStatus.value = healthResult.status
+  } catch (error) {
+    console.error('워커 상태 체크 실패:', error)
+    workerStatus.value = 'unknown'
+  }
+}
+
 // 마운트
 onMounted(() => {
   loadData()
+  checkWorkerStatus()
   
   // 주기적으로 상태 갱신 (30초마다)
   setInterval(() => {
@@ -520,6 +584,11 @@ onMounted(() => {
       loadData()
     }
   }, 30000)
+  
+  // 주기적으로 워커 상태 체크 (10초마다)
+  setInterval(() => {
+    checkWorkerStatus()
+  }, 10000)
 })
 </script>
 

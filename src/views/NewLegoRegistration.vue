@@ -1337,6 +1337,49 @@ export default {
       URL.revokeObjectURL(url)
     }
 
+    // 기본 이미지 로드 함수
+    const getDefaultPartImage = async () => {
+      try {
+        // Supabase에서 기본 부품 이미지 로드
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('image_url, webp_image_url')
+          .eq('part_num', '3001') // 기본 부품 (2x4 브릭)
+          .single()
+        
+        if (error) throw error
+        
+        return data.webp_image_url || data.image_url || getDefaultPartImage()
+        
+      } catch (error) {
+        console.error('기본 부품 이미지 로드 실패:', error)
+        return getDefaultPartImage()
+      }
+    }
+
+    // 실제 이미지 로드 함수
+    const getRealPartImage = async (partId) => {
+      try {
+        if (!partId) return getDefaultPartImage()
+        
+        // Supabase에서 실제 부품 이미지 로드
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('image_url, webp_image_url')
+          .eq('part_id', partId)
+          .single()
+        
+        if (error) throw error
+        
+        // WebP 우선, 일반 이미지 폴백
+        return data.webp_image_url || data.image_url || getDefaultPartImage()
+        
+      } catch (error) {
+        console.error('실제 부품 이미지 로드 실패:', error)
+        return getDefaultPartImage()
+      }
+    }
+
     const handleImageError = (event) => {
       // 미니피규어 이미지 오류 처리
       if (event.target.closest('.minifig-card')) {
@@ -1347,7 +1390,9 @@ export default {
         }
       } else {
         // 일반 부품 이미지 오류 처리
-        event.target.src = '/placeholder-image.png'
+        getRealPartImage(part.part_id).then(imageUrl => {
+          event.target.src = imageUrl
+        })
       }
     }
 

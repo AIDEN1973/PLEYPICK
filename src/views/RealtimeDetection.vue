@@ -87,10 +87,10 @@
           <h3>🔎 단일 부품 디텍션 테스트</h3>
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <input v-model="expectedPartId" placeholder="확인할 부품 ID (예: 3001)" style="padding:8px; border:1px solid #ddd; border-radius:6px;" />
-            <button @click="testCurrentFrame" :disabled="!cameraActive || !expectedPartId" class="capture-btn">현재 프레임 테스트</button>
+            <button @click="analyzeCurrentFrame" :disabled="!cameraActive || !expectedPartId" class="capture-btn">현재 프레임 분석</button>
             <label class="camera-toggle-btn" style="cursor:pointer;">
               이미지 업로드
-              <input type="file" accept="image/*" @change="onUploadImageTest" style="display:none;" />
+              <input type="file" accept="image/*" @change="onUploadImageAnalysis" style="display:none;" />
             </label>
             <span v-if="singleTest.status" :style="{ color: singleTest.status==='성공' ? '#27ae60' : '#e74c3c', fontWeight:'600' }">
               {{ singleTest.status }}
@@ -617,7 +617,7 @@ const nextCapture = () => {
 }
 
 // 단일 테스트 공통 로직
-const runSinglePartTest = async (imageData) => {
+const runSinglePartAnalysis = async (imageData) => {
   singleTest.status = ''
   singleTest.confidence = null
   singleTest.foundPartId = null
@@ -648,18 +648,18 @@ const runSinglePartTest = async (imageData) => {
       singleTest.foundPartId = best
     }
   } catch (e) {
-    console.error('runSinglePartTest failed:', e)
+    console.error('runSinglePartAnalysis failed:', e)
     singleTest.status = '오류'
   }
 }
 
-const testCurrentFrame = async () => {
+const analyzeCurrentFrame = async () => {
   const data = getCurrentFrameDataUrl()
   if (!data) return
-  await runSinglePartTest(data)
+  await runSinglePartAnalysis(data)
 }
 
-const onUploadImageTest = async (evt) => {
+const onUploadImageAnalysis = async (evt) => {
   try {
     const file = evt?.target?.files?.[0]
     if (!file) return
@@ -667,12 +667,12 @@ const onUploadImageTest = async (evt) => {
     reader.onload = async (e) => {
       const dataUrl = e?.target?.result
       if (typeof dataUrl === 'string') {
-        await runSinglePartTest(dataUrl)
+        await runSinglePartAnalysis(dataUrl)
       }
     }
     reader.readAsDataURL(file)
   } catch (e) {
-    console.error('onUploadImageTest failed:', e)
+    console.error('onUploadImageAnalysis failed:', e)
   } finally {
     if (evt?.target) evt.target.value = ''
   }

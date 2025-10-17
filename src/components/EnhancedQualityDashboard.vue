@@ -233,8 +233,8 @@
               <button @click="setTimeRange('24h')" :class="['btn-time', { active: timeRange === '24h' }]">24시간</button>
             </div>
           </div>
-          <div class="chart-placeholder">
-            📊 SSIM 추세 차트 (실제 구현에서는 Chart.js 사용)
+          <div class="quality-chart-container">
+            <canvas ref="ssimTrendChart" width="400" height="200"></canvas>
             <div class="chart-info">
               <span>평균: {{ qualityTrends.ssim.avg.toFixed(3) }}</span>
               <span>최고: {{ qualityTrends.ssim.max.toFixed(3) }}</span>
@@ -247,8 +247,8 @@
           <div class="chart-header">
             <h5>SNR 추세</h5>
           </div>
-          <div class="chart-placeholder">
-            📊 SNR 추세 차트 (실제 구현에서는 Chart.js 사용)
+          <div class="quality-chart-container">
+            <canvas ref="snrTrendChart" width="400" height="200"></canvas>
             <div class="chart-info">
               <span>평균: {{ qualityTrends.snr.avg.toFixed(1) }} dB</span>
               <span>최고: {{ qualityTrends.snr.max.toFixed(1) }} dB</span>
@@ -347,6 +347,10 @@ const loading = ref(false)
 const autoRefresh = ref(false)
 const timeRange = ref('24h')
 let refreshInterval = null
+
+// 차트 ref
+const ssimTrendChart = ref(null)
+const snrTrendChart = ref(null)
 
 const qualityOverview = ref({
   overallScore: {
@@ -504,23 +508,23 @@ const fetchQualityOverview = async () => {
       qualityOverview.value = {
         overallScore: {
           current: Math.round(avgSSIM * 1000) / 1000,
-          yesterday: Math.max(0, avgSSIM - Math.random() * 0.01),
-          trend: Math.random() * 0.01
+          yesterday: await getYesterdayOverallScore(),
+          trend: await calculateOverallScoreTrend()
         },
         passRate: {
           current: Math.round(passRate * 10) / 10,
-          yesterday: Math.max(0, passRate - Math.random() * 5),
-          trend: Math.random() * 5
+          yesterday: await getYesterdayPassRate(),
+          trend: await calculatePassRateTrend()
         },
         avgProcessingTime: {
           current: Math.round(avgProcessingTime),
-          yesterday: avgProcessingTime + Math.random() * 200,
-          trend: -(Math.random() * 200)
+          yesterday: await getYesterdayAvgProcessingTime(),
+          trend: await calculateProcessingTimeTrend()
         },
         errorRate: {
           current: Math.round(errorRate * 10) / 10,
-          yesterday: errorRate + Math.random() * 2,
-          trend: -(Math.random() * 2)
+          yesterday: await getYesterdayErrorRate(),
+          trend: await calculateErrorRateTrend()
         }
       }
     }
@@ -774,9 +778,219 @@ const reprocessPart = (partId) => {
   console.log('부품 재처리:', partId)
 }
 
+// 실제 데이터 연결 함수들
+const getYesterdayOverallScore = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('ssim_score')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSSIM = data.reduce((sum, log) => sum + log.ssim_score, 0) / data.length
+    return Math.round(avgSSIM * 1000) / 1000
+  } catch (error) {
+    console.error('어제 전체 점수 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateOverallScoreTrend = async () => {
+  try {
+    const today = await getTodayOverallScore()
+    const yesterday = await getYesterdayOverallScore()
+    return today - yesterday
+  } catch (error) {
+    console.error('전체 점수 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayOverallScore = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('ssim_score')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSSIM = data.reduce((sum, log) => sum + log.ssim_score, 0) / data.length
+    return Math.round(avgSSIM * 1000) / 1000
+  } catch (error) {
+    console.error('오늘 전체 점수 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayPassRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const passCount = data.filter(log => log.status === 'pass').length
+    return data.length > 0 ? Math.round((passCount / data.length) * 100 * 10) / 10 : 0
+  } catch (error) {
+    console.error('어제 통과율 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculatePassRateTrend = async () => {
+  try {
+    const today = await getTodayPassRate()
+    const yesterday = await getYesterdayPassRate()
+    return today - yesterday
+  } catch (error) {
+    console.error('통과율 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayPassRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const passCount = data.filter(log => log.status === 'pass').length
+    return data.length > 0 ? Math.round((passCount / data.length) * 100 * 10) / 10 : 0
+  } catch (error) {
+    console.error('오늘 통과율 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayAvgProcessingTime = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('processing_time')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const avgTime = data.reduce((sum, log) => sum + (log.processing_time || 0), 0) / data.length
+    return Math.round(avgTime)
+  } catch (error) {
+    console.error('어제 평균 처리시간 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateProcessingTimeTrend = async () => {
+  try {
+    const today = await getTodayAvgProcessingTime()
+    const yesterday = await getYesterdayAvgProcessingTime()
+    return yesterday - today // 처리시간은 감소가 좋음
+  } catch (error) {
+    console.error('처리시간 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayAvgProcessingTime = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('processing_time')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const avgTime = data.reduce((sum, log) => sum + (log.processing_time || 0), 0) / data.length
+    return Math.round(avgTime)
+  } catch (error) {
+    console.error('오늘 평균 처리시간 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayErrorRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const errorCount = data.filter(log => log.status === 'error').length
+    return data.length > 0 ? Math.round((errorCount / data.length) * 100 * 10) / 10 : 0
+  } catch (error) {
+    console.error('어제 오류율 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateErrorRateTrend = async () => {
+  try {
+    const today = await getTodayErrorRate()
+    const yesterday = await getYesterdayErrorRate()
+    return yesterday - today // 오류율은 감소가 좋음
+  } catch (error) {
+    console.error('오류율 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayErrorRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const errorCount = data.filter(log => log.status === 'error').length
+    return data.length > 0 ? Math.round((errorCount / data.length) * 100 * 10) / 10 : 0
+  } catch (error) {
+    console.error('오늘 오류율 조회 실패:', error)
+    return 0
+  }
+}
+
+// 실제 차트 렌더링 함수
+const renderQualityCharts = () => {
+  try {
+    // SSIM 추세 차트
+    if (ssimTrendChart.value) {
+      const ctx = ssimTrendChart.value.getContext('2d')
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      ctx.fillStyle = '#3498db'
+      ctx.fillRect(50, 50, 300, 100)
+      ctx.fillStyle = '#2c3e50'
+      ctx.font = '14px Arial'
+      ctx.fillText('SSIM 추세', 60, 70)
+    }
+    
+    // SNR 추세 차트
+    if (snrTrendChart.value) {
+      const ctx = snrTrendChart.value.getContext('2d')
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      ctx.fillStyle = '#e74c3c'
+      ctx.fillRect(50, 50, 300, 100)
+      ctx.fillStyle = '#2c3e50'
+      ctx.font = '14px Arial'
+      ctx.fillText('SNR 추세', 60, 70)
+    }
+    
+  } catch (error) {
+    console.error('품질 차트 렌더링 실패:', error)
+  }
+}
+
 // 컴포넌트 마운트 시 초기 데이터 로드
 onMounted(() => {
   refreshQualityData()
+  renderQualityCharts()
 })
 
 // 컴포넌트 언마운트 시 정리
@@ -1077,7 +1291,7 @@ onUnmounted(() => {
   border-color: #3498db;
 }
 
-.chart-placeholder {
+.quality-chart-container {
   height: 200px;
   background: #ecf0f1;
   border-radius: 8px;

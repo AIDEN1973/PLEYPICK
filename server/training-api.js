@@ -23,7 +23,7 @@ io.on('connection', (socket) => {
   console.log('🔌 socket connected', socket.id)
 })
 
-const PORT = process.env.TRAINING_API_PORT || 3002
+const PORT = process.env.API_PORT || 3005
 
 // CORS 설정
 app.use(cors())

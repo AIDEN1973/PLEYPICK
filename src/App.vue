@@ -20,6 +20,7 @@
           <router-link to="/automated-training" class="nav-link">🧠 AI 학습</router-link>
           <router-link to="/monitoring" class="nav-link">📊 모니터링</router-link>
           <router-link to="/model-monitoring" class="nav-link">🤖 모델 모니터링</router-link>
+          <router-link to="/system-monitoring" class="nav-link">🔍 시스템 모니터링</router-link>
         </div>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>
@@ -136,5 +137,28 @@ body {
   padding: 2rem;
   max-width: 1200px;
   margin: 0 auto;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+  .navbar {
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  
+  .nav-links {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .lego-menu {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  
+  .main-content {
+    padding: 1rem;
+  }
 }
 </style>

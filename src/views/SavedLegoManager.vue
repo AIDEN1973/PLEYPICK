@@ -266,11 +266,11 @@
                         <p class="tooltip-hint">💡 클릭하여 닫기</p>
                         <div v-if="part.metadata" class="metadata-details">
                           <p><strong>형태:</strong> {{ getSmartShape(part.metadata, part.lego_parts?.name) }}</p>
-                          <p><strong>기능:</strong> {{ getDisplayValue(part.metadata.function_tag || part.metadata.function) }}</p>
-                          <p><strong>연결방식:</strong> {{ getDisplayValue(part.metadata.connection) }}</p>
+                          <p><strong>기능:</strong> {{ getDisplayValue(part.metadata.feature_json?.function || part.metadata.feature_json?.function_tag) }}</p>
+                          <p><strong>연결방식:</strong> {{ getDisplayValue(part.metadata.feature_json?.connection) }}</p>
                           <p><strong>스케일:</strong> {{ getSmartScale(part.metadata, part.lego_parts?.name) }}</p>
-                          <p><strong>중심 스터드:</strong> {{ part.metadata.center_stud ? '✅ 있음' : '❌ 없음' }}</p>
-                          <p><strong>홈:</strong> {{ part.metadata.groove ? '✅ 있음' : '❌ 없음' }}</p>
+                          <p><strong>중심 스터드:</strong> {{ part.metadata.feature_json?.center_stud ? '✅ 있음' : '❌ 없음' }}</p>
+                          <p><strong>홈:</strong> {{ part.metadata.feature_json?.groove ? '✅ 있음' : '❌ 없음' }}</p>
                           <p><strong>신뢰도:</strong> {{ Math.round((part.metadata.confidence || 0) * 100) }}%</p>
                           <!-- 디버깅용: 실제 메타데이터 구조 확인 -->
                           <details style="margin-top: 10px; font-size: 0.8rem; color: #ccc;">
@@ -280,29 +280,29 @@
                             </div>
                             <pre style="white-space: pre-wrap; word-break: break-all;">{{ JSON.stringify(part.metadata, null, 2) }}</pre>
                           </details>
-                          <div v-if="part.metadata.recognition_hints" class="recognition-hints">
+                          <div v-if="part.metadata.feature_json?.recognition_hints" class="recognition-hints">
                             <p><strong>인식 힌트:</strong></p>
                             <ul>
-                              <li v-if="part.metadata.recognition_hints.top_view">
-                                <strong>위에서:</strong> {{ part.metadata.recognition_hints.top_view }}
+                              <li v-if="part.metadata.feature_json.recognition_hints.top_view">
+                                <strong>위에서:</strong> {{ part.metadata.feature_json.recognition_hints.top_view }}
                               </li>
-                              <li v-if="part.metadata.recognition_hints.side_view">
-                                <strong>옆에서:</strong> {{ part.metadata.recognition_hints.side_view }}
+                              <li v-if="part.metadata.feature_json.recognition_hints.side_view">
+                                <strong>옆에서:</strong> {{ part.metadata.feature_json.recognition_hints.side_view }}
                               </li>
-                              <li v-if="part.metadata.recognition_hints.unique_features">
-                                <strong>고유 특징:</strong> {{ part.metadata.recognition_hints.unique_features.join(', ') }}
+                              <li v-if="part.metadata.feature_json.recognition_hints.unique_features">
+                                <strong>고유 특징:</strong> {{ part.metadata.feature_json.recognition_hints.unique_features.join(', ') }}
                               </li>
                             </ul>
                           </div>
-                          <div v-if="part.metadata.similar_parts && part.metadata.similar_parts.length > 0" class="similar-parts">
-                            <p><strong>유사 부품:</strong> {{ part.metadata.similar_parts.join(', ') }}</p>
+                          <div v-if="part.metadata.feature_json?.similar_parts && part.metadata.feature_json.similar_parts.length > 0" class="similar-parts">
+                            <p><strong>유사 부품:</strong> {{ part.metadata.feature_json.similar_parts.join(', ') }}</p>
                           </div>
-                          <div v-if="part.metadata.distinguishing_features && part.metadata.distinguishing_features.length > 0" class="distinguishing-features">
-                            <p><strong>구별 특징:</strong> {{ part.metadata.distinguishing_features.join(', ') }}</p>
+                          <div v-if="part.metadata.feature_json?.distinguishing_features && part.metadata.feature_json.distinguishing_features.length > 0" class="distinguishing-features">
+                            <p><strong>구별 특징:</strong> {{ part.metadata.feature_json.distinguishing_features.join(', ') }}</p>
                           </div>
-                          <div v-if="part.metadata.feature_text" class="feature-text">
+                          <div v-if="part.metadata.feature_json?.feature_text" class="feature-text">
                             <p><strong>특징 설명:</strong></p>
-                            <p class="feature-description">{{ part.metadata.feature_text }}</p>
+                            <p class="feature-description">{{ part.metadata.feature_json.feature_text }}</p>
                           </div>
                         </div>
                         <div v-else class="no-metadata">
@@ -758,8 +758,8 @@ export default {
         return `/api/upload/proxy-image?url=${encodeURIComponent(part.lego_parts.part_img_url)}`
       }
       
-      // 3. 플레이스홀더 이미지
-      return '/placeholder-image.png'
+      // 3. 실제 이미지 로드 시도
+      return getRealSetImage(set.set_num)
     }
 
     // LLM 분석 메타데이터 조회
@@ -839,13 +839,26 @@ export default {
               ? JSON.parse(data.feature_json) 
               : data.feature_json
             
+            // feature_json의 구조를 올바르게 매핑
             processedMeta = {
-              ...featureData,
-              feature_text: data.feature_text,
+              feature_json: {
+                function: featureData.function || featureData.function_tag,
+                connection: featureData.connection,
+                shape_tag: featureData.shape_tag,
+                center_stud: featureData.center_stud,
+                groove: featureData.groove,
+                area_px: featureData.area_px,
+                // feature_json 내부의 데이터 우선 사용
+                recognition_hints: featureData.recognition_hints || data.recognition_hints,
+                similar_parts: featureData.similar_parts || data.similar_parts,
+                distinguishing_features: featureData.distinguishing_features || data.distinguishing_features,
+                feature_text: featureData.feature_text || data.feature_text
+              },
+              feature_text: featureData.feature_text || data.feature_text,
               confidence: data.confidence,
-              recognition_hints: data.recognition_hints,
-              similar_parts: data.similar_parts,
-              distinguishing_features: data.distinguishing_features,
+              recognition_hints: featureData.recognition_hints || data.recognition_hints,
+              similar_parts: featureData.similar_parts || data.similar_parts,
+              distinguishing_features: featureData.distinguishing_features || data.distinguishing_features,
               has_stud: data.has_stud,
               groove: data.groove,
               center_stud: data.center_stud
@@ -853,6 +866,13 @@ export default {
           } catch (parseError) {
             console.warn(`Failed to parse feature_json for ${partNum}:`, parseError)
             processedMeta = {
+              feature_json: {
+                function: 'unknown',
+                connection: 'unknown',
+                shape_tag: 'unknown',
+                center_stud: false,
+                groove: false
+              },
               feature_text: data.feature_text,
               confidence: data.confidence,
               recognition_hints: data.recognition_hints,
@@ -866,6 +886,13 @@ export default {
         } else {
           // feature_json이 없으면 기본 메타데이터만 사용
           processedMeta = {
+            feature_json: {
+              function: 'unknown',
+              connection: 'unknown',
+              shape_tag: 'unknown',
+              center_stud: false,
+              groove: false
+            },
             feature_text: data.feature_text,
             confidence: data.confidence,
             recognition_hints: data.recognition_hints,
@@ -1045,11 +1072,15 @@ export default {
         } else if (img.src === set.set_img_url) {
           // 원본 이미지도 실패 시 플레이스홀더
           console.log(`🔄 원본 이미지도 실패, 플레이스홀더 사용: ${set.set_num}`)
-          img.src = '/placeholder-image.png'
+          getRealSetImage(set.set_num).then(imageUrl => {
+            img.src = imageUrl
+          })
         } else {
           // 알 수 없는 이미지 실패 시 플레이스홀더
           console.log(`🔄 알 수 없는 이미지 실패, 플레이스홀더 사용: ${set.set_num}`)
-          img.src = '/placeholder-image.png'
+          getRealSetImage(set.set_num).then(imageUrl => {
+            img.src = imageUrl
+          })
         }
         return
       }
@@ -1066,7 +1097,9 @@ export default {
       } else {
         // 모든 이미지 로드 실패 시 플레이스홀더
         console.log(`🔄 모든 이미지 실패, 플레이스홀더 사용`)
-        img.src = '/placeholder-image.png'
+        getRealSetImage(set.set_num).then(imageUrl => {
+          img.src = imageUrl
+        })
       }
     }
 
@@ -1085,6 +1118,7 @@ export default {
       
       // 영문 값을 한글로 변환
       const translations = {
+        // 기본 형태
         'plate': '플레이트',
         'brick': '브릭',
         'tile': '타일',
@@ -1108,7 +1142,20 @@ export default {
         'figure': '피규어',
         'minifig': '미니피규어',
         'plant': '식물',
-        'vehicle': '차량'
+        'vehicle': '차량',
+        // 추가 형태
+        'animal_figure': '동물 피규어',
+        'unknown': '정보 없음',
+        // 기능
+        'building_block': '건축 블록',
+        'decoration': '장식',
+        'functional': '기능적',
+        'structural': '구조적',
+        // 연결방식
+        'stud_connection': '스터드 연결',
+        'integrated': '통합형',
+        'clip_connection': '클립 연결',
+        'hinge_connection': '힌지 연결'
       }
       
       const lowercaseValue = value.toLowerCase()
@@ -1127,11 +1174,15 @@ export default {
       if (partName && partName.toLowerCase().includes('duplo')) {
         return '듀플로'
       }
-      return getDisplayValue(metadata.scale_type || metadata.scale)
+      return getDisplayValue(metadata.feature_json?.scale_type || metadata.feature_json?.scale)
     }
     
     const getSmartShape = (metadata, partName) => {
-      const rawShape = metadata.shape_tag || metadata.shape
+      // 여러 경로에서 형태 정보 추출
+      const rawShape = metadata.feature_json?.shape_tag || 
+                      metadata.feature_json?.shape || 
+                      metadata.shape_tag || 
+                      metadata.shape
       
       // "duplo"는 스케일이므로 형태로 사용하지 않음
       if (rawShape && rawShape.toLowerCase() === 'duplo') {
@@ -1146,6 +1197,49 @@ export default {
       }
       
       return getDisplayValue(rawShape, 'shape')
+    }
+
+    // 기본 세트 이미지 로드 함수
+    const getDefaultSetImage = async () => {
+      try {
+        // Supabase에서 기본 세트 이미지 로드
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('set_img_url, webp_image_url')
+          .eq('set_num', '76917') // 기본 세트 (스피드 챔피언)
+          .single()
+        
+        if (error) throw error
+        
+        return data.webp_image_url || data.set_img_url || getDefaultSetImage()
+        
+      } catch (error) {
+        console.error('기본 세트 이미지 로드 실패:', error)
+        return getDefaultSetImage()
+      }
+    }
+
+    // 실제 이미지 로드 함수
+    const getRealSetImage = async (setNum) => {
+      try {
+        if (!setNum) return getDefaultSetImage()
+        
+        // Supabase에서 실제 세트 이미지 로드
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('set_img_url, webp_image_url')
+          .eq('set_num', setNum)
+          .single()
+        
+        if (error) throw error
+        
+        // WebP 우선, 일반 이미지 폴백
+        return data.webp_image_url || data.set_img_url || getDefaultSetImage()
+        
+      } catch (error) {
+        console.error('실제 세트 이미지 로드 실패:', error)
+        return getDefaultSetImage()
+      }
     }
 
     onMounted(async () => {

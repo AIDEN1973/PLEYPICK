@@ -220,11 +220,11 @@
           </div>
           <div class="detail-row">
             <strong>Feature Text:</strong>
-            <p class="detail-text">{{ selectedItem?.feature_text }}</p>
+            <p class="detail-text">{{ selectedItem?.feature_json?.feature_text || selectedItem?.feature_text }}</p>
           </div>
           <div class="detail-row">
             <strong>Recognition Hints:</strong>
-            <pre class="detail-json">{{ JSON.stringify(selectedItem?.recognition_hints, null, 2) }}</pre>
+            <pre class="detail-json">{{ JSON.stringify(selectedItem?.feature_json?.recognition_hints, null, 2) }}</pre>
           </div>
           <div class="detail-row">
             <strong>Feature JSON:</strong>
@@ -239,8 +239,10 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
+import { useBackgroundLLMAnalysis } from '../composables/useBackgroundLLMAnalysis'
 
 const { supabase } = useSupabase()
+const { startBackgroundAnalysis } = useBackgroundLLMAnalysis()
 
 // 상태
 const loading = ref(false)
@@ -338,18 +340,50 @@ const generateMetadata = async (ids) => {
   
   generating.value = true
   try {
-    const { data, error } = await supabase.rpc('request_metadata_generation', {
-      part_ids: ids
-    })
+    console.log('[DEBUG] generateMetadata 호출:', ids)
     
-    if (error) throw error
+    // 선택된 항목들의 상세 정보 가져오기
+    const { data: partsData, error: fetchError } = await supabase
+      .from('parts_master_features')
+      .select('id, part_id, part_name, color_id')
+      .in('id', ids)
     
-    alert(`${ids.length}개 항목의 메타데이터 생성이 요청되었습니다`)
+    if (fetchError) {
+      console.error('[ERROR] 데이터 조회 실패:', fetchError)
+      throw fetchError
+    }
+    
+    console.log('[INFO] 백그라운드 LLM 분석 시작:', partsData.length, '개 항목')
+    
+    // ✅ 백그라운드 큐 방식으로 변경
+    const setData = {
+      set_num: 'metadata-management',
+      name: '메타데이터 생성',
+      id: 'metadata-' + Date.now()
+    }
+    
+    // 부품 데이터를 백그라운드 분석 형식으로 변환
+    const partsForAnalysis = partsData.map(part => ({
+      part: {
+        part_num: part.part_id,
+        name: part.part_name
+      },
+      color: {
+        id: part.color_id
+      }
+    }))
+    
+    // 백그라운드 분석 시작
+    const taskId = await startBackgroundAnalysis(setData, partsForAnalysis)
+    
+    console.log(`📋 백그라운드 작업 시작: ${taskId}`)
+    
+    alert(`백그라운드에서 LLM 분석을 시작합니다!\n작업 ID: ${taskId}\n처리 항목: ${partsData.length}개`)
     selectedIds.value = []
     await loadData()
   } catch (error) {
     console.error('생성 요청 실패:', error)
-    alert('생성 요청에 실패했습니다')
+    alert('생성 요청에 실패했습니다: ' + error.message)
   } finally {
     generating.value = false
   }
@@ -365,7 +399,18 @@ const retryErrors = async () => {
     return
   }
   
+  generating.value = true
+  try {
+    console.log('[DEBUG] retryErrors 호출:', errorIds)
+    
+    // generateMetadata 함수 재사용
   await generateMetadata(errorIds)
+  } catch (error) {
+    console.error('재시도 실패:', error)
+    alert('재시도에 실패했습니다: ' + error.message)
+  } finally {
+    generating.value = false
+  }
 }
 
 const generateMissing = async () => {
@@ -378,7 +423,18 @@ const generateMissing = async () => {
     return
   }
   
+  generating.value = true
+  try {
+    console.log('[DEBUG] generateMissing 호출:', missingIds)
+    
+    // generateMetadata 함수 재사용
   await generateMetadata(missingIds)
+  } catch (error) {
+    console.error('생성 요청 실패:', error)
+    alert('생성 요청에 실패했습니다: ' + error.message)
+  } finally {
+    generating.value = false
+  }
 }
 
 const viewMetadata = (item) => {

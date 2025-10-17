@@ -567,10 +567,13 @@ ${config.requirements}`
       }
     }
 
-    // 프리셋 로드
+    // 프리셋 로드 (LLM 설정만 변경, 프롬프트는 표준 유지)
     const loadPreset = (preset) => {
-      Object.assign(config, preset.config)
-      successMessage.value = `${preset.name} 프리셋을 불러왔습니다.`
+      // ✅ 프롬프트는 표준 유지, LLM 설정만 변경
+      config.llm = { ...config.llm, ...preset.config.llm }
+      config.validation = { ...config.validation, ...preset.config.validation }
+      
+      successMessage.value = `${preset.name} 프리셋의 LLM 설정을 불러왔습니다. (프롬프트는 표준 유지)`
       setTimeout(() => { successMessage.value = '' }, 3000)
     }
 
@@ -602,13 +605,19 @@ ${config.requirements}`
       }
     }
 
-    // 프리셋 로드
+    // 프리셋 로드 (06a13fe 레거시 프리셋 제외)
     const loadPresetsFromDB = async () => {
       try {
         const { data, error } = await supabase
           .from('metadata_prompt_presets')
           .select('*')
           .eq('is_public', true)
+          .not('name', 'ilike', '%06a13fe%')
+          .not('name', 'ilike', '%초기 비전%')
+          .not('name', 'ilike', '%legacy%')
+          .not('description', 'ilike', '%06a13fe%')
+          .not('description', 'ilike', '%초기 비전%')
+          .not('description', 'ilike', '%비전 테스트%')
           .order('created_at', { ascending: false })
         
         if (error) throw error

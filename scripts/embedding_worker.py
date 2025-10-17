@@ -207,10 +207,25 @@ def process_batch(model, supabase, items: List[Dict]) -> Dict[str, int]:
     
     return stats
 
+def update_heartbeat(supabase):
+    """워커 하트비트 업데이트"""
+    try:
+        supabase.table('embedding_worker_status').upsert({
+            'worker_name': 'embedding_worker',
+            'last_heartbeat': datetime.now().isoformat(),
+            'status': 'running',
+            'updated_at': datetime.now().isoformat()
+        }).execute()
+    except Exception as e:
+        print(f"[WARNING] 하트비트 업데이트 실패: {e}")
+
 def worker_loop(model, supabase):
     """메인 워커 루프"""
     total_stats = {'success': 0, 'failed': 0, 'iterations': 0}
     idle_count = 0
+    
+    # 초기 하트비트 업데이트
+    update_heartbeat(supabase)
     
     while not shutdown_flag:
         try:
@@ -238,6 +253,9 @@ def worker_loop(model, supabase):
                     print(f"\n[{datetime.now().strftime('%H:%M:%S')}] [IDLE] 대기 중... (큐 비어있음)")
                 elif idle_count % 6 == 0:  # 1분마다
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] [IDLE] 계속 대기 중...")
+            
+            # 하트비트 업데이트 (매 루프마다)
+            update_heartbeat(supabase)
             
             # 대기
             if not shutdown_flag:

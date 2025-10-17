@@ -819,13 +819,58 @@ const saveSetToMasterPartsDB = async () => {
   }
 }
 
+// 기본 부품 이미지 로드 함수
+const getDefaultPartImage = async () => {
+  try {
+    // Supabase에서 기본 부품 이미지 로드
+    const { data, error } = await supabase
+      .from('parts_master_features')
+      .select('image_url, webp_image_url')
+      .eq('part_num', '3001') // 기본 부품 (2x4 브릭)
+      .single()
+    
+    if (error) throw error
+    
+    return data.webp_image_url || data.image_url || getDefaultPartImage()
+    
+  } catch (error) {
+    console.error('기본 부품 이미지 로드 실패:', error)
+    return getDefaultPartImage()
+  }
+}
+
+// 실제 이미지 로드 함수
+const getRealPartImage = async (partId) => {
+  try {
+    if (!partId) return getDefaultPartImage()
+    
+    // Supabase에서 실제 부품 이미지 로드
+    const { data, error } = await supabase
+      .from('parts_master_features')
+      .select('image_url, webp_image_url')
+      .eq('part_id', partId)
+      .single()
+    
+    if (error) throw error
+    
+    // WebP 우선, 일반 이미지 폴백
+    return data.webp_image_url || data.image_url || getDefaultPartImage()
+    
+  } catch (error) {
+    console.error('실제 부품 이미지 로드 실패:', error)
+    return getDefaultPartImage()
+  }
+}
+
 // 이미지 로딩 에러 처리 (NewLegoRegistration.vue와 동일한 로직)
 const handleImageError = (event) => {
   console.error('이미지 로딩 실패:', event.target.src)
   
-  // NewLegoRegistration.vue와 동일하게 플레이스홀더 이미지로 대체
-  event.target.src = '/placeholder-image.png'
-  event.target.alt = '이미지를 불러올 수 없습니다'
+  // 실제 이미지로 대체
+  getRealPartImage(record.part_id).then(imageUrl => {
+    event.target.src = imageUrl
+    event.target.alt = '이미지를 불러올 수 없습니다'
+  })
 }
 
 // 부품 이미지 URL 가져오기 (NewLegoRegistration.vue와 동일한 로직)

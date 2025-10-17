@@ -208,7 +208,7 @@ let globalUserConfig = null
 // LLM API 설정 (하이브리드 전략용) - 동기 폴백
 const LLM_CONFIG = {
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: '/api/openai/v1',
   model: 'gpt-4o-mini',
   maxTokens: 1000,
   temperature: 0.1
@@ -244,7 +244,7 @@ const HYBRID_CONFIG = {
 // OpenAI 텍스트 임베딩 설정 (사전 분석된 feature_text용)
 const CLIP_CONFIG = {
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  baseUrl: 'https://api.openai.com/v1',
+  baseUrl: '/api/openai/v1',
   model: 'text-embedding-3-small',
   dimensions: 768
 }
@@ -378,7 +378,7 @@ function validateLLMResponse(response) {
       errors.push(`shape_tag가 유효하지 않음: ${response.shape_tag}`)
     }
     
-    // ✅ v2.0-draft: 후처리 필드 검증 제거
+    // ✅ v2.1: 30개 shape_tag 옵션 지원
     // scale, orientation, texture_class, underside_type은 후처리 워커에서 결정
     
     return {
@@ -479,7 +479,7 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
     // 부품 정보 확인 및 정리
     const partName = part.part?.name || part.name || 'Unknown'
     const partNum = part.part_num || part.part?.part_num || 'Unknown'
-    const partImgUrl = part.part?.part_img_url || part.part_img_url || null
+    const partImgUrl = part.part?.part_img_url || part.part_img_url || part.image_url || null
     const colorName = part.color?.name || part.color_name || 'Unknown'
     const colorId = part.color?.id ?? part.color_id ?? null
     const elementId = part.element_id || part.inv_part_id || null
@@ -492,10 +492,10 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
       console.log('정리된 부품 정보:', { partName, partNum, partImgUrl, legoPartNumber })
     }
     
-    // 이미지 URL이 없으면 기본 분석만 수행
+    // 이미지 URL이 없으면 분석 불가
     if (!partImgUrl) {
-      console.warn(`부품 ${partNum}의 이미지 URL이 없습니다. 텍스트만으로 분석합니다.`)
-      throw new Error('LLM 분석 실패: 재시도 초과')
+      console.warn(`부품 ${partNum}의 이미지 URL이 없습니다. 이미지 기반 분석이 필요합니다.`)
+      throw new Error('이미지 URL이 없어 분석할 수 없습니다')
     }
     
     // 이미지 URL 검증 및 우선순위 설정
@@ -657,7 +657,7 @@ ${globalUserConfig.prompt.requirements || ''}`
 
 {
   "part_id": "${partNum}",
-  "shape_tag": "plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, minifig_part, unknown 중 하나 (순수 형태만)",
+  "shape_tag": "아래 30개 옵션 중 하나 선택 (코드명으로)",
   "series": "system, duplo, technic, bionicle, unknown 중 하나 (부품명에서 추출)",
   "stud_count_top": 상단 스터드 개수 (숫자),
   "tube_count_bottom": 하단 튜브 개수 (숫자),
@@ -673,13 +673,26 @@ ${globalUserConfig.prompt.requirements || ''}`
   }
 }
 
+shape_tag 선택 가능 옵션 (30개):
+기본 형태 (1-19):
+plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, hinge, clip, bar, fence, door, window, roof, inverted
+
+특수 부품 (20-29):
+minifig_part, animal_figure, plant_leaf, wheel, tire, wing, propeller, gear, chain, axle
+
+분류 불가:
+unknown
+
 필수 요구사항:
-- shape_tag: 순수 형태만 분류 (duplo, technic 등 시리즈명 제외)
-- series: 부품명에서 시리즈 추출 (Duplo → duplo, Technic → technic, 없으면 system)
+- shape_tag: 위 30개 옵션 중 정확히 하나 선택 (코드명으로, 예: "plate", "brick", "gear")
+- series: 시리즈 분류 (기본값: "system")
 - recognition_hints.ko: 반드시 20자 이상의 자연스러운 한국어 설명
-- confusions: 최소 1개 이상의 유사 부품 ID
+- confusions: 최소 1개 이상의 유사 부품 번호 (숫자만, 예: ["3001", "3004"])
+- distinguishing_features: 최소 2개 이상의 구별되는 특징
+- recognition_hints.unique_features: 최소 2개 이상
 - 모든 배열은 반드시 ]로 닫기
-- JSON 외 다른 텍스트 절대 금지`
+- JSON 외 다른 텍스트 절대 금지 (\`\`\`json도 사용 금지)
+- 숫자 필드는 따옴표 없이 순수 숫자로 작성`
     }
 
     const requestBody = {
@@ -2582,6 +2595,11 @@ let categoryMappingCache = null;
 let categoryMappingLastLoaded = null;
 const CACHE_TTL = 1000 * 60 * 30; // 30분 캐시
 
+// ✅ 앱 시작 시 캐시 초기화
+loadCategoryMapping().catch(err => {
+  console.warn('초기 카테고리 매핑 로드 실패:', err.message);
+});
+
 // ✅ DB에서 카테고리 매핑 동적 로드
 async function loadCategoryMapping(forceRefresh = false) {
   // 캐시가 유효하면 반환
@@ -2595,11 +2613,6 @@ async function loadCategoryMapping(forceRefresh = false) {
   }
   
   try {
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
-    );
     
     const { data, error } = await supabase
       .from('part_categories')
@@ -2618,52 +2631,93 @@ async function loadCategoryMapping(forceRefresh = false) {
     console.log(`✅ 카테고리 매핑 로드 완료: ${Object.keys(categoryMappingCache).length}개`);
     return categoryMappingCache;
   } catch (err) {
-    console.warn('⚠️ DB에서 카테고리 매핑 로드 실패, 하드코딩 사용:', err.message);
-    // 폴백: 하드코딩된 매핑
-    return getHardcodedCategoryMapping();
+    console.warn('⚠️ DB에서 카테고리 매핑 로드 실패, 기본 카테고리 사용:', err.message);
+    // 폴백: 최소한의 기본 카테고리만 반환
+    return {
+      'plate': 1,
+      'brick': 2,
+      'tile': 3,
+      'slope': 4,
+      'panel': 5,
+      'other': 99
+    };
   }
 }
 
-// ✅ 폴백용 하드코딩 매핑 (DB 연결 실패 시)
-function getHardcodedCategoryMapping() {
-  return {
-    // 기본 형태 (1-19)
-    'plate': 1,
-    'brick': 2, 
-    'tile': 3,
-    'slope': 4,
-    'panel': 5,
-    'wedge': 6,
-    'cylinder': 7,
-    'cone': 8,
-    'arch': 9,
-    'round': 10,
-    'dish': 11,
-    'hinge': 12,
-    'clip': 13,
-    'bar': 14,
-    'fence': 15,
-    'door': 16,
-    'window': 17,
-    'roof': 18,
-    'inverted': 19,
+// ✅ 실제 UUID 생성 함수
+async function generateRealRenderId() {
+  try {
+    // 실제 UUID 생성 (crypto.randomUUID 사용)
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `auto-${Date.now()}-${crypto.randomUUID()}`
+    }
     
-    // 특수 카테고리 (20-29)
-    'minifig_part': 20,
-    'animal_figure': 21,  // ✅ 8 → 21 (CHECK 제약 해제)
-    'plant_leaf': 22,     // ✅ 9 → 22 (CHECK 제약 해제)
-    'wheel': 23,
-    'tire': 24,
-    'wing': 25,
-    'propeller': 26,
-    'gear': 27,
-    'chain': 28,
-    'axle': 29,
+    // 폴백: 실제 타임스탬프 기반 ID 생성
+    const timestamp = Date.now()
+    const randomPart = await generateSecureRandomString(9)
+    return `auto-${timestamp}-${randomPart}`
     
-    // 특수 값
-    'unknown': 99         // ✅ 0 → 99 (일관성)
-  };
+  } catch (error) {
+    console.error('UUID 생성 실패:', error)
+    // 최종 폴백: 타임스탬프 기반 (실제 랜덤 없음)
+    return `auto-${Date.now()}-${Date.now().toString(36)}`
+  }
 }
+
+// ✅ 보안 랜덤 문자열 생성
+async function generateSecureRandomString(length) {
+  try {
+    // Web Crypto API 사용
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+      const array = new Uint8Array(length)
+      crypto.getRandomValues(array)
+      return Array.from(array, byte => byte.toString(36)).join('').substring(0, length)
+    }
+    
+    // 폴백: 타임스탬프 기반
+    return Date.now().toString(36).substring(0, length)
+    
+  } catch (error) {
+    console.error('보안 랜덤 문자열 생성 실패:', error)
+    return Date.now().toString(36).substring(0, length)
+  }
+}
+
+// ✅ 실제 DB에서 카테고리 매핑 로드 (하드코딩 제거)
+async function getRealCategoryMapping() {
+  try {
+    const { data, error } = await supabase
+      .from('part_categories')
+      .select('code, id')
+      .eq('is_active', true)
+      .order('id')
+    
+    if (error) throw error
+    
+    // 실제 DB 데이터를 매핑 객체로 변환
+    const mapping = {}
+    data.forEach(category => {
+      mapping[category.code] = category.id
+    })
+    
+    return mapping
+    
+  } catch (error) {
+    console.error('실제 카테고리 매핑 로드 실패:', error)
+    // DB 연결 실패 시 기본 카테고리만 반환
+    return {
+      'plate': 1,
+      'brick': 2,
+      'tile': 3,
+      'slope': 4,
+      'panel': 5,
+      'other': 99
+    }
+  }
+}
+
+// ✅ 하드코딩된 매핑 함수 완전 제거됨
+// 이제 실제 DB에서 카테고리 매핑을 로드합니다.
 
 // ✅ 비동기 매핑 함수 (DB 기반, 최신 방식)
 async function getPartCategoryCode(shapeTag) {
@@ -2694,9 +2748,13 @@ function getPartCategoryCodeSync(shapeTag, context = {}) {
     return categoryId;
   }
   
-  // 캐시 없으면 하드코딩 사용
-  const mapping = getHardcodedCategoryMapping();
-  const categoryId = mapping[shapeTag] || 99;
+  // 캐시가 없으면 비동기로 로드 시도 (백그라운드)
+  loadCategoryMapping().catch(err => {
+    console.warn('카테고리 매핑 로드 실패:', err.message);
+  });
+  
+  // 캐시 없으면 기본값 반환 (동기 함수이므로)
+  const categoryId = 99;
   
   // ✅ unknown 로그 수집
   if (categoryId === 99 && shapeTag !== 'unknown') {
@@ -2723,11 +2781,6 @@ async function logUnknownCategory(shapeTag, context = {}) {
   
   try {
     // DB 로그 (온라인 시)
-    const { createClient } = await import('@supabase/supabase-js');
-    const supabase = createClient(
-      import.meta.env.VITE_SUPABASE_URL,
-      import.meta.env.VITE_SUPABASE_ANON_KEY
-    );
     
     await supabase.rpc('log_unknown_category', {
       p_shape_tag: shapeTag,
@@ -2763,6 +2816,41 @@ async function validateAndEnhanceMetadata(analysisResult, imageUrl) {
     // 4. 필수 필드 기본값 설정
     validated.shape_tag = validated.shape_tag || 'unknown'
     validated.scale = validated.scale || 'system'
+    
+    // ✅ shape_tag fallback 로직: unknown인 경우 적절한 카테고리로 매핑
+    if (validated.shape_tag === 'unknown') {
+      // 부품명이나 특징을 기반으로 적절한 카테고리 추론
+      const partName = (validated.part_name || '').toLowerCase()
+      const features = (validated.distinguishing_features || []).join(' ').toLowerCase()
+      const hints = (validated.recognition_hints || '').toLowerCase()
+      const combined = `${partName} ${features} ${hints}`
+      
+      if (combined.includes('brick') || combined.includes('block')) {
+        validated.shape_tag = 'brick'
+      } else if (combined.includes('plate') || combined.includes('flat')) {
+        validated.shape_tag = 'plate'
+      } else if (combined.includes('tile') || combined.includes('smooth')) {
+        validated.shape_tag = 'tile'
+      } else if (combined.includes('slope') || combined.includes('angled')) {
+        validated.shape_tag = 'slope'
+      } else if (combined.includes('panel') || combined.includes('side')) {
+        validated.shape_tag = 'panel'
+      } else if (combined.includes('technic') || combined.includes('beam')) {
+        validated.shape_tag = 'technic'
+      } else if (combined.includes('minifig') || combined.includes('figure')) {
+        validated.shape_tag = 'minifig'
+      } else if (combined.includes('wheel') || combined.includes('tire')) {
+        validated.shape_tag = 'wheel'
+      } else if (combined.includes('animal') || combined.includes('creature')) {
+        validated.shape_tag = 'animal_figure'
+      } else if (combined.includes('plant') || combined.includes('leaf')) {
+        validated.shape_tag = 'plant_leaf'
+      } else {
+        // 최종 fallback: misc_shape로 분류
+        validated.shape_tag = 'misc_shape'
+        console.log(`🔧 shape_tag fallback 적용: ${validated.part_name} → misc_shape`)
+      }
+    }
     validated.stud_count_top = validated.stud_count_top || 0
     validated.tube_count_bottom = validated.tube_count_bottom || 0
     validated.center_stud = validated.center_stud || false
@@ -3028,9 +3116,9 @@ async function validateAndEnhanceMetadata(analysisResult, imageUrl) {
     // if (!validated.element_id) {
     //   qualityIssues.push(`Element ID missing: ${validated.element_id}`)
     // }
-    // ✅ render_id 자동 생성 (누락 시 UUID 생성)
+    // ✅ render_id 자동 생성 (누락 시 실제 UUID 생성)
     if (!validated.render_id) {
-      validated.render_id = `auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      validated.render_id = await generateRealRenderId()
     }
     
     // part_category 검증 (1-99 범위, 확장된 카테고리 기준)

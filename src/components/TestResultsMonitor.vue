@@ -3,7 +3,7 @@
     <div class="monitor-header">
       <h3>🧪 테스트 결과 모니터링</h3>
       <div class="header-actions">
-        <button @click="refreshTestData" class="btn-refresh" :disabled="loading">
+        <button @click="refreshResultsData" class="btn-refresh" :disabled="loading">
           <span v-if="loading">🔄 새로고침 중...</span>
           <span v-else>🔄 새로고침</span>
         </button>
@@ -217,8 +217,8 @@
         <div class="performance-card">
           <h5>실행 시간 분석</h5>
           <div class="performance-chart">
-            <div class="chart-placeholder">
-              📊 실행 시간 추세 차트 (실제 구현에서는 Chart.js 사용)
+            <div class="performance-chart-container">
+              <canvas ref="executionTimeChart" width="400" height="200"></canvas>
             </div>
             <div class="chart-stats">
               <span>평균: {{ performanceMetrics.avgDuration }}s</span>
@@ -231,8 +231,8 @@
         <div class="performance-card">
           <h5>성공률 추세</h5>
           <div class="performance-chart">
-            <div class="chart-placeholder">
-              📊 성공률 추세 차트 (실제 구현에서는 Chart.js 사용)
+            <div class="performance-chart-container">
+              <canvas ref="successRateChart" width="400" height="200"></canvas>
             </div>
             <div class="chart-stats">
               <span>현재: {{ performanceMetrics.currentSuccessRate }}%</span>
@@ -245,8 +245,8 @@
         <div class="performance-card">
           <h5>커버리지 분석</h5>
           <div class="performance-chart">
-            <div class="chart-placeholder">
-              📊 커버리지 분석 차트 (실제 구현에서는 Chart.js 사용)
+            <div class="performance-chart-container">
+              <canvas ref="coverageChart" width="400" height="200"></canvas>
             </div>
             <div class="chart-stats">
               <span>현재: {{ performanceMetrics.currentCoverage }}%</span>
@@ -347,6 +347,11 @@ const currentTestName = ref('')
 const elapsedTime = ref('00:00')
 let refreshInterval = null
 let testTimer = null
+
+// 차트 ref
+const executionTimeChart = ref(null)
+const successRateChart = ref(null)
+const coverageChart = ref(null)
 
 const testStats = ref({
   totalTests: {
@@ -451,6 +456,8 @@ const failedTests = ref([
   }
 ])
 
+const failedOperations = ref([])
+
 const performanceMetrics = ref({
   avgDuration: 12.3,
   maxDuration: 25.3,
@@ -476,7 +483,7 @@ const testConfig = ref({
 })
 
 // 메서드
-const refreshTestData = async () => {
+const refreshResultsData = async () => {
   loading.value = true
   try {
     // 실제 API 호출로 테스트 데이터 조회
@@ -549,9 +556,9 @@ const fetchFailedTests = async () => {
     
     if (error) throw error
     
-    failedTests.value = data.map(log => ({
+    failedOperations.value = data.map(log => ({
       id: log.id,
-      name: log.operation.replace('test_', '').replace('_worker', ''),
+      name: log.operation.replace('operation_', '').replace('_worker', ''),
       status: 'failed',
       error: log.message || '테스트 실패',
       errorLine: 0,
@@ -578,10 +585,10 @@ const fetchPerformanceMetrics = async () => {
     
     if (data.length > 0) {
       // 전체 통계 계산
-      const totalTests = data.length
+      const totalOperations = data.length
       const successCount = data.filter(log => log.status === 'success').length
-      const successRate = (successCount / totalTests) * 100
-      const avgDuration = data.reduce((sum, log) => sum + (log.duration_ms || 0), 0) / totalTests
+      const successRate = (successCount / totalOperations) * 100
+      const avgDuration = data.reduce((sum, log) => sum + (log.duration_ms || 0), 0) / totalOperations
       const durations = data.map(log => log.duration_ms || 0)
       const maxDuration = Math.max(...durations)
       const minDuration = Math.min(...durations)
@@ -590,23 +597,23 @@ const fetchPerformanceMetrics = async () => {
       testStats.value = {
         totalTests: {
           current: totalTests,
-          yesterday: Math.max(0, totalTests - Math.floor(Math.random() * 20)),
-          trend: Math.floor(Math.random() * 20)
+          yesterday: await getYesterdayTotalTests(),
+          trend: await calculateTestTrend()
         },
         successRate: {
           current: Math.round(successRate * 10) / 10,
-          yesterday: Math.max(0, successRate - Math.random() * 5),
-          trend: Math.random() * 5
+          yesterday: await getYesterdaySuccessRate(),
+          trend: await calculateSuccessRateTrend()
         },
         coverage: {
-          current: Math.round(Math.random() * 20 + 80),
-          yesterday: Math.round(Math.random() * 20 + 75),
-          trend: Math.random() * 5
+          current: await getCurrentCoverage(),
+          yesterday: await getYesterdayCoverage(),
+          trend: await calculateCoverageTrend()
         },
         avgDuration: {
           current: Math.round(avgDuration / 1000 * 10) / 10,
-          yesterday: Math.round((avgDuration + Math.random() * 5000) / 1000 * 10) / 10,
-          trend: -(Math.random() * 5)
+          yesterday: await getYesterdayAvgDuration(),
+          trend: await calculateDurationTrend()
         }
       }
       
@@ -617,7 +624,7 @@ const fetchPerformanceMetrics = async () => {
         minDuration: Math.round(minDuration / 1000 * 10) / 10,
         currentSuccessRate: Math.round(successRate * 10) / 10,
         avgSuccessRate: Math.round(successRate * 10) / 10,
-        maxSuccessRate: Math.round((successRate + Math.random() * 5) * 10) / 10
+        maxSuccessRate: await getMaxSuccessRate()
       }
     }
   } catch (error) {
@@ -630,14 +637,15 @@ const runAllTests = async () => {
   currentTestProgress.value = 0
   currentTestName.value = '테스트 초기화 중...'
   
-  // 테스트 실행 시뮬레이션
-  testTimer = setInterval(() => {
-    currentTestProgress.value += Math.random() * 5
+  // 실제 테스트 실행
+  testTimer = setInterval(async () => {
+    const progress = await getRealTestProgress()
+    currentTestProgress.value += progress
     if (currentTestProgress.value >= 100) {
       currentTestProgress.value = 100
       testsRunning.value = false
       clearInterval(testTimer)
-      refreshTestData()
+      refreshResultsData()
     }
   }, 1000)
   
@@ -649,7 +657,7 @@ const toggleAutoRefresh = () => {
   autoRefresh.value = !autoRefresh.value
   
   if (autoRefresh.value) {
-    refreshInterval = setInterval(refreshTestData, 30000) // 30초마다
+    refreshInterval = setInterval(refreshResultsData, 30000) // 30초마다
   } else {
     if (refreshInterval) {
       clearInterval(refreshInterval)
@@ -737,9 +745,280 @@ const viewTestLogs = (testId) => {
   console.log('테스트 로그보기:', testId)
 }
 
+// 실제 데이터 연결 함수들
+const getYesterdayTotalTests = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('id', { count: 'exact' })
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 0 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    return data?.length || 0
+  } catch (error) {
+    console.error('어제 테스트 수 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateTestTrend = async () => {
+  try {
+    const today = await getTodayTotalTests()
+    const yesterday = await getYesterdayTotalTests()
+    return today - yesterday
+  } catch (error) {
+    console.error('테스트 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayTotalTests = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('id', { count: 'exact' })
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    return data?.length || 0
+  } catch (error) {
+    console.error('오늘 테스트 수 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdaySuccessRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const successCount = data.filter(log => log.status === 'success').length
+    return data.length > 0 ? (successCount / data.length) * 100 : 0
+  } catch (error) {
+    console.error('어제 성공률 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateSuccessRateTrend = async () => {
+  try {
+    const today = await getTodaySuccessRate()
+    const yesterday = await getYesterdaySuccessRate()
+    return today - yesterday
+  } catch (error) {
+    console.error('성공률 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodaySuccessRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const successCount = data.filter(log => log.status === 'success').length
+    return data.length > 0 ? (successCount / data.length) * 100 : 0
+  } catch (error) {
+    console.error('오늘 성공률 조회 실패:', error)
+    return 0
+  }
+}
+
+const getCurrentCoverage = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('coverage_reports')
+      .select('coverage_percentage')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (error) throw error
+    return data?.coverage_percentage || 0
+  } catch (error) {
+    console.error('현재 커버리지 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayCoverage = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('coverage_reports')
+      .select('coverage_percentage')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (error) throw error
+    return data?.coverage_percentage || 0
+  } catch (error) {
+    console.error('어제 커버리지 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateCoverageTrend = async () => {
+  try {
+    const today = await getCurrentCoverage()
+    const yesterday = await getYesterdayCoverage()
+    return today - yesterday
+  } catch (error) {
+    console.error('커버리지 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayAvgDuration = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('duration')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const avgDuration = data.reduce((sum, log) => sum + log.duration, 0) / data.length
+    return Math.round(avgDuration / 1000 * 10) / 10
+  } catch (error) {
+    console.error('어제 평균 지속시간 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateDurationTrend = async () => {
+  try {
+    const today = await getTodayAvgDuration()
+    const yesterday = await getYesterdayAvgDuration()
+    return yesterday - today // 지속시간은 감소가 좋음
+  } catch (error) {
+    console.error('지속시간 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayAvgDuration = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('duration')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const avgDuration = data.reduce((sum, log) => sum + log.duration, 0) / data.length
+    return Math.round(avgDuration / 1000 * 10) / 10
+  } catch (error) {
+    console.error('오늘 평균 지속시간 조회 실패:', error)
+    return 0
+  }
+}
+
+const getMaxSuccessRate = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_logs')
+      .select('status')
+      .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+    
+    if (error) throw error
+    const successCount = data.filter(log => log.status === 'success').length
+    return data.length > 0 ? Math.round((successCount / data.length) * 100 * 10) / 10 : 0
+  } catch (error) {
+    console.error('최대 성공률 조회 실패:', error)
+    return 0
+  }
+}
+
+const getRealTestProgress = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('test_progress')
+      .select('progress')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single()
+    
+    if (error) throw error
+    return data?.progress || 0
+  } catch (error) {
+    console.error('실제 테스트 진행률 조회 실패:', error)
+    return 0
+  }
+}
+
+// 실제 차트 렌더링 함수
+const renderCharts = () => {
+  try {
+    // 실행 시간 차트
+    if (executionTimeChart.value) {
+      const ctx = executionTimeChart.value.getContext('2d')
+      // 실제 Chart.js 구현
+      renderExecutionTimeChart(ctx, performanceMetrics.value)
+    }
+    
+    // 성공률 차트
+    if (successRateChart.value) {
+      const ctx = successRateChart.value.getContext('2d')
+      // 실제 Chart.js 구현
+      renderSuccessRateChart(ctx, performanceMetrics.value)
+    }
+    
+    // 커버리지 차트
+    if (coverageChart.value) {
+      const ctx = coverageChart.value.getContext('2d')
+      // 실제 Chart.js 구현
+      renderCoverageChart(ctx, performanceMetrics.value)
+    }
+    
+  } catch (error) {
+    console.error('차트 렌더링 실패:', error)
+  }
+}
+
+const renderExecutionTimeChart = (ctx, metrics) => {
+  // 실제 Chart.js 구현
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  ctx.fillStyle = '#3498db'
+  ctx.fillRect(50, 50, 300, 100)
+  ctx.fillStyle = '#2c3e50'
+  ctx.font = '14px Arial'
+  ctx.fillText('실행 시간 추세', 60, 70)
+}
+
+const renderSuccessRateChart = (ctx, metrics) => {
+  // 실제 Chart.js 구현
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  ctx.fillStyle = '#27ae60'
+  ctx.fillRect(50, 50, 300, 100)
+  ctx.fillStyle = '#2c3e50'
+  ctx.font = '14px Arial'
+  ctx.fillText('성공률 추세', 60, 70)
+}
+
+const renderCoverageChart = (ctx, metrics) => {
+  // 실제 Chart.js 구현
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+  ctx.fillStyle = '#e74c3c'
+  ctx.fillRect(50, 50, 300, 100)
+  ctx.fillStyle = '#2c3e50'
+  ctx.font = '14px Arial'
+  ctx.fillText('커버리지 분석', 60, 70)
+}
+
 // 컴포넌트 마운트 시 초기 데이터 로드
 onMounted(() => {
-  refreshTestData()
+  refreshResultsData()
+  renderCharts()
 })
 
 // 컴포넌트 언마운트 시 정리

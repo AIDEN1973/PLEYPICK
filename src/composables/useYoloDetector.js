@@ -11,6 +11,16 @@ export function useYoloDetector() {
     return typeof navigator !== 'undefined' && 'gpu' in navigator
   }
 
+  const isWebGL2Available = () => {
+    try {
+      const canvas = document.createElement('canvas')
+      const gl = canvas.getContext('webgl2')
+      return !!gl
+    } catch (e) {
+      return false
+    }
+  }
+
   const init = async (options = {}) => {
     if (session) return
     modelPath = options.modelPath || modelPath
@@ -24,8 +34,17 @@ export function useYoloDetector() {
       ort.env.logLevel = 'error' // 경고 로그 숨기기
     } catch (_) {}
 
-    // 현재 환경에서는 WASM 고정 (WebGPU 미지원 환경에서 경고 제거)
-    executionProviders = ['wasm']
+    // GPU 지원 우선순위: WebGPU > WebGL > WASM
+    if (isWebGPUAvailable()) {
+      executionProviders = ['webgpu', 'webgl', 'wasm']
+      console.log('🚀 WebGPU 지원 - 고성능 GPU 추론 활성화')
+    } else if (isWebGL2Available()) {
+      executionProviders = ['webgl', 'wasm']
+      console.log('🎮 WebGL2 지원 - GPU 가속 추론 활성화')
+    } else {
+      executionProviders = ['wasm']
+      console.log('⚠️ CPU 모드 - GPU 가속 불가능')
+    }
 
     // 모델 바이트를 직접 로드 (SPA 리다이렉트/MIME 문제 회피)
     const loadModelBytes = async () => {
@@ -109,10 +128,10 @@ export function useYoloDetector() {
     }
     
     // 정규화 확인
-    const sampleR = float32Data[0]
-    const sampleG = float32Data[numPixels]
-    const sampleB = float32Data[2 * numPixels]
-    console.log('🔧 정규화 샘플:', { R: sampleR, G: sampleG, B: sampleB })
+    const pixelR = float32Data[0]
+    const pixelG = float32Data[numPixels]
+    const pixelB = float32Data[2 * numPixels]
+    console.log('🔧 정규화 픽셀:', { R: pixelR, G: pixelG, B: pixelB })
     
     return new ort.Tensor('float32', float32Data, [1, 3, H, W])
   }

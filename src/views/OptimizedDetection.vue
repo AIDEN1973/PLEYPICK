@@ -375,7 +375,7 @@ export default {
         
         await cachePartImages(partIds.slice(0, cacheCount))
         
-        // Mock 제거: 실제 경로만 허용 (빈 결과로 진행)
+        // 실제 경로만 허용 (빈 결과로 진행)
         const { matches, missingSlots } = performBOMMatching([], metadataInfo.value.partsMetadata)
         
         const processingTime = Date.now() - startTime

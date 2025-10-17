@@ -173,6 +173,58 @@ function initialize() {
 // ============================================
 
 /**
+ * shape_tag 텍스트 기반 추론
+ */
+function inferShapeTagFromText(featureText, distinguishingFeatures, partName = '') {
+  const text = (featureText || '').toLowerCase()
+  const features = (distinguishingFeatures || []).join(' ').toLowerCase()
+  const name = (partName || '').toLowerCase()
+  const combined = `${text} ${features} ${name}`
+
+  // 동물 피규어 감지
+  if (combined.includes('동물') || combined.includes('animal') || 
+      combined.includes('호랑이') || combined.includes('펭귄') || 
+      combined.includes('figure') || combined.includes('피규어')) {
+    return 'animal_figure'
+  }
+  
+  // 브릭/블록 감지
+  if (combined.includes('브릭') || combined.includes('brick') || 
+      combined.includes('블록') || combined.includes('block') ||
+      combined.includes('2x2') || combined.includes('2x4')) {
+    return 'brick'
+  }
+  
+  // 플레이트 감지
+  if (combined.includes('플레이트') || combined.includes('plate') ||
+      combined.includes('평평') || combined.includes('flat')) {
+    return 'plate'
+  }
+  
+  // 타일 감지
+  if (combined.includes('타일') || combined.includes('tile') ||
+      combined.includes('얇은')) {
+    return 'tile'
+  }
+  
+  // 슬로프 감지
+  if (combined.includes('경사') || combined.includes('slope') ||
+      combined.includes('기울')) {
+    return 'slope'
+  }
+  
+  // 미니피그 부품 감지
+  if (combined.includes('미니피그') || combined.includes('minifig') ||
+      combined.includes('머리') || combined.includes('몸통') ||
+      combined.includes('다리') || combined.includes('헬멧')) {
+    return 'minifig_part'
+  }
+  
+  // 기본값: 브릭으로 분류
+  return 'brick'
+}
+
+/**
  * function 추론
  */
 function inferFunction(shapeTag, partName = '') {
@@ -288,14 +340,27 @@ function inferDetailedShape(shapeTag, distinguishingFeatures = []) {
  */
 async function fetchPendingItems(supabase, limit = BATCH_SIZE) {
   try {
+    console.log('[DEBUG] 큐 조회 시작...')
+    
     // ✅ JSON 필드를 텍스트로 변환하여 비교 (->> 연산자 사용)
     const { data, error } = await supabase
       .from('parts_master_features')
-      .select('id, part_id, color_id, part_name, shape_tag, distinguishing_features, bbox_ratio, feature_json')
+      .select('id, part_id, color_id, part_name, shape_tag, feature_text, distinguishing_features, bbox_ratio, feature_json')
       .or(`feature_json->>function.eq.unknown,feature_json->>connection.eq.unknown`)
       .limit(limit)
 
     if (error) throw error
+    
+    console.log(`[DEBUG] 큐 조회 완료: ${data?.length || 0}개 항목`)
+    if (data && data.length > 0) {
+      console.log('[DEBUG] 샘플 데이터:', {
+        id: data[0].id,
+        part_id: data[0].part_id,
+        shape_tag: data[0].shape_tag,
+        feature_json: data[0].feature_json
+      })
+    }
+    
     return data || []
   } catch (err) {
     console.error('[ERROR] 큐 조회 실패:', err.message)
@@ -315,11 +380,22 @@ async function updateMetadata(supabase, items) {
       const bboxRatio = item.bbox_ratio || [0.8, 0.8]
       const distinguishingFeatures = item.distinguishing_features || []
       
+      // shape_tag가 unknown인 경우 텍스트 기반 추론
+      let actualShapeTag = item.shape_tag
+      if (actualShapeTag === 'unknown') {
+        actualShapeTag = inferShapeTagFromText(
+          item.feature_text,  // 테이블 컬럼에서 직접 가져오기
+          item.distinguishing_features,  // 테이블 컬럼에서 직접 가져오기
+          item.part_name
+        )
+        console.log(`[INFER] ${item.part_id}: unknown → ${actualShapeTag}`)
+      }
+      
       // 추론
-      const functionValue = inferFunction(item.shape_tag, item.part_name)
-      const connectionValue = inferConnection(item.shape_tag, item.part_name)
+      const functionValue = inferFunction(actualShapeTag, item.part_name)
+      const connectionValue = inferConnection(actualShapeTag, item.part_name)
       const areaPx = calculateAreaPx(bboxRatio)
-      const shape = inferDetailedShape(item.shape_tag, distinguishingFeatures)
+      const shape = inferDetailedShape(actualShapeTag, distinguishingFeatures)
 
       // feature_json 업데이트
       const featureJson = typeof item.feature_json === 'string' 
@@ -329,6 +405,7 @@ async function updateMetadata(supabase, items) {
       featureJson.function = functionValue
       featureJson.connection = connectionValue
       featureJson.area_px = areaPx
+      featureJson.shape_tag = actualShapeTag  // 추론된 shape_tag 업데이트
       if (shape) featureJson.shape = shape
 
       // ✅ 개별 update (part_id 보존)
@@ -336,7 +413,8 @@ async function updateMetadata(supabase, items) {
         .from('parts_master_features')
         .update({
           feature_json: featureJson,
-          area_px: areaPx
+          area_px: areaPx,
+          shape_tag: actualShapeTag  // DB의 shape_tag 컬럼도 업데이트
         })
         .eq('id', item.id)
 

@@ -1891,7 +1891,7 @@ export default {
           {
             id: 1,
             partId: selectedPartId.value || '',
-            imageUrl: '/api/placeholder/part_placeholder.png',
+            imageUrl: await getRealPartImage(selectedPartId.value),
             colorName: '빨강',
             angle: '45°',
             resolution: '640x640'
@@ -2260,6 +2260,49 @@ export default {
           type: 'error', 
           message: `부품 ${partId} (${elementId}) 재시도 실패: ${error.message}` 
         })
+      }
+    }
+
+    // 기본 부품 이미지 로드 함수
+    const getDefaultPartImage = async () => {
+      try {
+        // Supabase에서 기본 부품 이미지 로드
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('image_url, webp_image_url')
+          .eq('part_num', '3001') // 기본 부품 (2x4 브릭)
+          .single()
+        
+        if (error) throw error
+        
+        return data.webp_image_url || data.image_url || getDefaultPartImage()
+        
+      } catch (error) {
+        console.error('기본 부품 이미지 로드 실패:', error)
+        return getDefaultPartImage()
+      }
+    }
+
+    // 실제 이미지 로드 함수
+    const getRealPartImage = async (partId) => {
+      try {
+        if (!partId) return getDefaultPartImage()
+        
+        // Supabase에서 실제 부품 이미지 로드
+        const { data, error } = await supabase
+          .from('parts_master_features')
+          .select('image_url, webp_image_url')
+          .eq('part_num', partId)
+          .single()
+        
+        if (error) throw error
+        
+        // WebP 우선, 일반 이미지 폴백
+        return data.webp_image_url || data.image_url || getDefaultPartImage()
+        
+      } catch (error) {
+        console.error('실제 부품 이미지 로드 실패:', error)
+        return getDefaultPartImage()
       }
     }
 

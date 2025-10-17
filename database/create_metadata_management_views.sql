@@ -24,8 +24,16 @@ SELECT
   pmf.created_at,
   pmf.updated_at,
   CASE 
-    WHEN pmf.feature_json IS NOT NULL AND pmf.feature_text IS NOT NULL THEN 'completed'
-    WHEN pmf.feature_json IS NULL AND pmf.feature_text IS NULL THEN 'missing'
+    WHEN pmf.feature_json IS NOT NULL 
+         AND pmf.feature_json->>'function' IS NOT NULL 
+         AND pmf.feature_json->>'function' != 'unknown'
+         AND pmf.feature_json->>'connection' IS NOT NULL 
+         AND pmf.feature_json->>'connection' != 'unknown' THEN 'completed'
+    WHEN pmf.feature_json IS NULL THEN 'missing'
+    WHEN pmf.feature_json->>'function' = 'unknown' OR pmf.feature_json->>'connection' = 'unknown' THEN 'missing'
+    WHEN pmf.feature_json IS NOT NULL 
+         AND pmf.feature_text IS NOT NULL 
+         AND pmf.feature_text != '' THEN 'completed'
     ELSE 'error'
   END as metadata_status
 FROM parts_master_features pmf
@@ -40,6 +48,7 @@ SELECT
   pmf.part_name,
   pmf.color_id,
   lc.name as color_name,
+  lc.rgb as color_rgb,
   pmf.clip_text_emb,
   pmf.feature_text,
   pmf.confidence,
@@ -66,19 +75,38 @@ DROP FUNCTION IF EXISTS request_embedding_generation(INTEGER[]);
 DROP FUNCTION IF EXISTS retry_failed_embeddings();
 DROP FUNCTION IF EXISTS request_missing_embeddings();
 
--- 5. 메타데이터 통계 RPC 함수
-CREATE FUNCTION get_metadata_stats()
+-- 5. 메타데이터 통계 RPC 함수 (수정됨)
+CREATE OR REPLACE FUNCTION get_metadata_stats()
 RETURNS JSON AS $$
 DECLARE
   result JSON;
 BEGIN
   SELECT json_build_object(
     'total', COUNT(*),
-    'completed', COUNT(*) FILTER (WHERE feature_json IS NOT NULL AND feature_text IS NOT NULL),
-    'missing', COUNT(*) FILTER (WHERE feature_json IS NULL AND feature_text IS NULL),
-    'error', COUNT(*) FILTER (WHERE (feature_json IS NOT NULL AND feature_text IS NULL) OR (feature_json IS NULL AND feature_text IS NOT NULL)),
+    'completed', COUNT(*) FILTER (
+      WHERE feature_json IS NOT NULL 
+        AND feature_json->>'function' IS NOT NULL 
+        AND feature_json->>'function' != 'unknown'
+        AND feature_json->>'connection' IS NOT NULL 
+        AND feature_json->>'connection' != 'unknown'
+    ),
+    'missing', COUNT(*) FILTER (
+      WHERE feature_json IS NULL 
+        OR feature_json->>'function' = 'unknown' 
+        OR feature_json->>'connection' = 'unknown'
+    ),
+    'error', COUNT(*) FILTER (
+      WHERE feature_json IS NOT NULL 
+        AND feature_json->>'function' IS NULL
+    ),
     'completion_rate', ROUND(
-      COUNT(*) FILTER (WHERE feature_json IS NOT NULL AND feature_text IS NOT NULL)::NUMERIC / 
+      COUNT(*) FILTER (
+        WHERE feature_json IS NOT NULL 
+          AND feature_json->>'function' IS NOT NULL 
+          AND feature_json->>'function' != 'unknown'
+          AND feature_json->>'connection' IS NOT NULL 
+          AND feature_json->>'connection' != 'unknown'
+      )::NUMERIC / 
       NULLIF(COUNT(*), 0) * 100, 2
     )
   ) INTO result
@@ -110,17 +138,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 7. 메타데이터 생성 요청 RPC 함수
-CREATE FUNCTION request_metadata_generation(part_ids INTEGER[])
+-- 7. 메타데이터 생성 요청 RPC 함수 (실제 작동)
+CREATE OR REPLACE FUNCTION request_metadata_generation(part_ids INTEGER[])
 RETURNS JSON AS $$
 DECLARE
   result JSON;
   updated_count INTEGER;
 BEGIN
-  -- 실제로는 워커 큐에 추가하는 로직이 필요
-  -- 여기서는 간단히 updated_at만 갱신
+  -- 실제 메타데이터 생성: feature_json에 unknown 값을 설정하여 워커가 처리하도록 함
   UPDATE parts_master_features
-  SET updated_at = NOW()
+  SET 
+    feature_json = '{"function": "unknown", "connection": "unknown"}',
+    feature_text = NULL,
+    updated_at = NOW()
   WHERE id = ANY(part_ids);
   
   GET DIAGNOSTICS updated_count = ROW_COUNT;
@@ -128,24 +158,27 @@ BEGIN
   SELECT json_build_object(
     'success', true,
     'count', updated_count,
-    'message', updated_count || '개 항목을 메타데이터 생성 큐에 추가했습니다.'
+    'message', updated_count || '개 항목의 메타데이터 생성을 요청했습니다. 워커가 자동으로 처리합니다.'
   ) INTO result;
   
   RETURN result;
 END;
 $$ LANGUAGE plpgsql;
 
--- 8. 임베딩 생성 요청 RPC 함수
-CREATE FUNCTION request_embedding_generation(part_ids INTEGER[])
+-- 8. 임베딩 생성 요청 RPC 함수 (실제 작동)
+CREATE OR REPLACE FUNCTION request_embedding_generation(part_ids INTEGER[])
 RETURNS JSON AS $$
 DECLARE
   result JSON;
   updated_count INTEGER;
 BEGIN
-  -- 실제로는 임베딩 워커 큐에 추가하는 로직이 필요
-  -- 여기서는 간단히 updated_at만 갱신
+  -- 실제 임베딩 생성: clip_text_emb를 null로 설정하여 워커가 처리하도록 함
   UPDATE parts_master_features
-  SET updated_at = NOW()
+  SET 
+    clip_text_emb = NULL,
+    semantic_vector = NULL,
+    embedding_status = 'pending',
+    updated_at = NOW()
   WHERE id = ANY(part_ids)
     AND feature_text IS NOT NULL;
   
@@ -154,61 +187,65 @@ BEGIN
   SELECT json_build_object(
     'success', true,
     'count', updated_count,
-    'message', updated_count || '개 항목을 임베딩 생성 큐에 추가했습니다.'
+    'message', updated_count || '개 항목의 임베딩 생성을 요청했습니다. 워커가 자동으로 처리합니다.'
   ) INTO result;
   
   RETURN result;
 END;
 $$ LANGUAGE plpgsql;
 
--- 9. 실패 임베딩 재시도 RPC 함수
-CREATE FUNCTION retry_failed_embeddings()
+-- 9. 실패 임베딩 재시도 RPC 함수 (실제 작동)
+CREATE OR REPLACE FUNCTION retry_failed_embeddings()
 RETURNS JSON AS $$
 DECLARE
   result JSON;
   retry_count INTEGER;
 BEGIN
-  -- feature_text는 있지만 임베딩이 없는 항목들
+  -- 실패한 임베딩들을 다시 처리하도록 설정
   UPDATE parts_master_features
-  SET updated_at = NOW()
-  WHERE feature_text IS NOT NULL
-    AND clip_text_emb IS NULL;
+  SET 
+    clip_text_emb = NULL,
+    semantic_vector = NULL,
+    embedding_status = 'pending',
+    updated_at = NOW()
+  WHERE embedding_status = 'failed'
+    OR (feature_text IS NOT NULL AND clip_text_emb IS NULL);
   
   GET DIAGNOSTICS retry_count = ROW_COUNT;
   
   SELECT json_build_object(
     'success', true,
     'count', retry_count,
-    'message', retry_count || '개 실패 항목을 재시도 큐에 추가했습니다.'
+    'message', retry_count || '개 실패 항목의 재시도를 요청했습니다. 워커가 자동으로 처리합니다.'
   ) INTO result;
   
   RETURN result;
 END;
 $$ LANGUAGE plpgsql;
 
--- 10. 미생성 임베딩 요청 RPC 함수
-CREATE FUNCTION request_missing_embeddings()
+-- 10. 미생성 임베딩 요청 RPC 함수 (실제 작동)
+CREATE OR REPLACE FUNCTION request_missing_embeddings()
 RETURNS JSON AS $$
 DECLARE
   result JSON;
   missing_count INTEGER;
 BEGIN
-  -- feature_text는 있지만 임베딩이 없는 모든 항목
-  SELECT COUNT(*) INTO missing_count
-  FROM parts_master_features
-  WHERE feature_text IS NOT NULL
-    AND clip_text_emb IS NULL;
-  
-  -- 큐에 추가 (실제로는 워커 트리거)
+  -- 없음 임베딩들을 처리하도록 설정
   UPDATE parts_master_features
-  SET updated_at = NOW()
+  SET 
+    clip_text_emb = NULL,
+    semantic_vector = NULL,
+    embedding_status = 'pending',
+    updated_at = NOW()
   WHERE feature_text IS NOT NULL
-    AND clip_text_emb IS NULL;
+    AND (clip_text_emb IS NULL OR embedding_status IS NULL OR embedding_status = 'missing');
+  
+  GET DIAGNOSTICS missing_count = ROW_COUNT;
   
   SELECT json_build_object(
     'success', true,
     'count', missing_count,
-    'message', missing_count || '개 미생성 항목을 임베딩 큐에 추가했습니다.'
+    'message', missing_count || '개 없음 항목의 임베딩 생성을 요청했습니다. 워커가 자동으로 처리합니다.'
   ) INTO result;
   
   RETURN result;

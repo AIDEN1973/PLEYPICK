@@ -1,7 +1,13 @@
 <template>
   <div class="store-management-dashboard">
     <div class="dashboard-header">
-      <h1>🏪 BrickBox 매장 관리</h1>
+      <h1>🏪 BrickBox 매장 관리
+        <HelpTooltip 
+          title="매장 관리"
+          content="BrickBox 시스템의 매장별 운영 상태를 관리하는 대시보드입니다. AI 모델 성능, 처리 속도, 메모리 사용량 등을 모니터링합니다."
+          :examples="['AI 모델 상태', '검출 성능', '처리 속도', '메모리 사용량']"
+        />
+      </h1>
       <div class="store-info">
         <span class="store-name">{{ storeInfo.name }}</span>
         <span class="store-id">ID: {{ storeInfo.id }}</span>
@@ -13,7 +19,13 @@
         <div class="status-card">
           <div class="card-icon">🧠</div>
           <div class="card-content">
-            <h3>AI 모델</h3>
+            <h3>AI 모델
+              <HelpTooltip 
+                title="AI 모델"
+                content="현재 사용 중인 AI 모델의 버전 정보입니다. 새로운 모델이 있으면 업데이트할 수 있습니다."
+                :examples="['v1.0.0', 'v1.1.0', 'v2.0.0']"
+              />
+            </h3>
             <p class="version">{{ currentModelVersion || 'v1.0.0' }}</p>
             <small>현재 버전</small>
           </div>
@@ -25,7 +37,13 @@
         <div class="status-card">
           <div class="card-icon">⚡</div>
           <div class="card-content">
-            <h3>검출 성능</h3>
+            <h3>검출 성능
+              <HelpTooltip 
+                title="검출 성능"
+                content="AI 모델이 부품을 올바르게 인식하는 정확도입니다. 높을수록 더 정확한 검출을 의미합니다."
+                :examples="['95% = 매우 정확', '90% = 정확', '85% = 보통']"
+              />
+            </h3>
             <p class="performance">{{ (performance.accuracy * 100).toFixed(1) }}%</p>
             <small>정확도</small>
           </div>
@@ -34,7 +52,13 @@
         <div class="status-card">
           <div class="card-icon">📊</div>
           <div class="card-content">
-            <h3>처리 속도</h3>
+            <h3>처리 속도
+              <HelpTooltip 
+                title="처리 속도"
+                content="AI 모델이 초당 처리할 수 있는 이미지 프레임 수입니다. 높을수록 더 빠른 처리를 의미합니다."
+                :examples="['30 FPS = 실시간', '60 FPS = 매우 빠름', '15 FPS = 보통']"
+              />
+            </h3>
             <p class="fps">{{ Math.round(performance.fps) }} FPS</p>
             <small>초당 프레임</small>
           </div>
@@ -43,7 +67,13 @@
         <div class="status-card">
           <div class="card-icon">💾</div>
           <div class="card-content">
-            <h3>메모리 사용량</h3>
+            <h3>메모리 사용량
+              <HelpTooltip 
+                title="메모리 사용량"
+                content="AI 모델이 사용하는 RAM 메모리의 양입니다. 너무 높으면 시스템 성능에 영향을 줄 수 있습니다."
+                :examples="['500MB = 적음', '1GB = 보통', '2GB = 많음']"
+              />
+            </h3>
             <p class="memory">{{ Math.round(performance.memory_usage) }} MB</p>
             <small>현재 사용량</small>
           </div>
@@ -137,18 +167,14 @@
         <div class="chart-container">
           <h4>정확도 추이</h4>
           <div class="chart" ref="accuracyChart">
-            <div class="chart-placeholder">
-              📈 정확도 차트 (실시간 업데이트)
-            </div>
+            <canvas ref="accuracyChart" width="400" height="200"></canvas>
           </div>
         </div>
 
         <div class="chart-container">
           <h4>처리 속도</h4>
           <div class="chart" ref="fpsChart">
-            <div class="chart-placeholder">
-              ⚡ FPS 차트 (실시간 업데이트)
-            </div>
+            <canvas ref="fpsChart" width="400" height="200"></canvas>
           </div>
         </div>
       </div>
@@ -246,6 +272,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useStoreManagement } from '@/composables/useStoreManagement'
+import HelpTooltip from '../components/HelpTooltip.vue'
 
 const {
   storeInfo,
@@ -687,9 +714,9 @@ input:checked + .toggle-label .toggle-slider:before {
   border: 1px dashed rgba(255, 255, 255, 0.3);
 }
 
-.chart-placeholder {
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 1rem;
+.chart-container canvas {
+  width: 100%;
+  height: 200px;
 }
 
 .log-filters {

@@ -1,7 +1,13 @@
 <template>
   <div class="system-monitoring-dashboard">
     <div class="dashboard-header">
-      <h1>🔍 BrickBox 시스템 모니터링</h1>
+      <h1>🔍 BrickBox 시스템 모니터링
+        <HelpTooltip 
+          title="시스템 모니터링"
+          content="전체 시스템 상태와 성능을 실시간으로 모니터링합니다. 파이프라인, AI 워커, 품질 지표, 테스트 결과를 종합 확인할 수 있습니다."
+          :examples="['파이프라인 상태', 'AI 성능', '리소스 사용률']"
+        />
+      </h1>
       <p class="subtitle">전체 시스템 상태 및 성능 지표를 실시간으로 모니터링합니다</p>
       <div class="header-actions">
         <button @click="refreshAllData" class="btn-refresh" :disabled="loading">
@@ -21,30 +27,55 @@
         @click="activeTab = 'overview'"
       >
         📊 시스템 개요
+        <HelpTooltip 
+          title="시스템 개요"
+          content="전체 시스템의 핵심 지표와 상태를 한눈에 확인합니다. CPU, 메모리, 디스크 사용률과 주요 성능 지표를 보여줍니다."
+          position="bottom"
+        />
       </button>
       <button 
         :class="['tab', { active: activeTab === 'pipeline' }]"
         @click="activeTab = 'pipeline'"
       >
         🔄 파이프라인 상태
+        <HelpTooltip 
+          title="파이프라인 상태"
+          content="데이터 처리 파이프라인의 현재 상태를 모니터링합니다. 데이터 수집, 전처리, AI 분석, 결과 저장 등의 단계별 진행 상황을 확인합니다."
+          position="bottom"
+        />
       </button>
       <button 
         :class="['tab', { active: activeTab === 'ai-workers' }]"
         @click="activeTab = 'ai-workers'"
       >
         🤖 AI 워커
+        <HelpTooltip 
+          title="AI 워커"
+          content="AI 모델의 성능과 상태를 모니터링합니다. 모델 정확도, 처리 속도, 리소스 사용률, 에러율 등을 실시간으로 확인합니다."
+          position="bottom"
+        />
       </button>
       <button 
         :class="['tab', { active: activeTab === 'quality' }]"
         @click="activeTab = 'quality'"
       >
         📈 품질 지표
+        <HelpTooltip 
+          title="품질 지표"
+          content="시스템의 품질과 성능을 측정하는 다양한 지표들을 모니터링합니다. SSIM, PSNR, MSE 등의 이미지 품질 지표를 확인합니다."
+          position="bottom"
+        />
       </button>
       <button 
         :class="['tab', { active: activeTab === 'tests' }]"
         @click="activeTab = 'tests'"
       >
         🧪 테스트 결과
+        <HelpTooltip 
+          title="테스트 결과"
+          content="시스템의 자동화된 테스트 결과를 모니터링합니다. 단위 테스트, 통합 테스트, 성능 테스트 등의 결과와 커버리지를 확인합니다."
+          position="bottom"
+        />
       </button>
     </div>
 
@@ -57,14 +88,26 @@
           <div class="status-grid">
             <div class="status-card">
               <div class="status-header">
-                <h3>렌더링 파이프라인</h3>
+                <h3>렌더링 파이프라인
+                  <HelpTooltip 
+                    title="렌더링 파이프라인"
+                    content="3D 모델을 이미지로 변환하는 처리 과정입니다. 부품의 다양한 각도와 조명으로 이미지를 생성합니다."
+                    :examples="['3D → 2D 변환', '다각도 렌더링', '조명 효과 적용']"
+                  />
+                </h3>
                 <span :class="['status-badge', getStatusClass(renderingStatus)]">
                   {{ renderingStatus }}
                 </span>
               </div>
               <div class="status-content">
                 <div class="progress-info">
-                  <span>진행률: {{ renderingProgress }}%</span>
+                  <span>진행률: {{ renderingProgress }}%
+                    <HelpTooltip 
+                      title="진행률"
+                      content="현재 렌더링 작업의 완료 비율입니다. 100%가 되면 모든 이미지 생성이 완료됩니다."
+                      :examples="['50% = 절반 완료', '100% = 전체 완료']"
+                    />
+                  </span>
                   <div class="progress-bar">
                     <div class="progress-fill" :style="{ width: renderingProgress + '%' }"></div>
                   </div>
@@ -78,20 +121,44 @@
 
             <div class="status-card">
               <div class="status-header">
-                <h3>AI 워커 상태</h3>
+                <h3>AI 워커 상태
+                  <HelpTooltip 
+                    title="AI 워커 상태"
+                    content="AI 모델들의 현재 상태를 모니터링합니다. 각 워커의 정상 작동 여부와 성능을 확인할 수 있습니다."
+                    :examples="['Embedding 워커', 'Fusion 워커', 'QA 워커']"
+                  />
+                </h3>
                 <span class="overall-status">{{ overallWorkerStatus }}</span>
               </div>
               <div class="worker-status-grid">
                 <div class="worker-item">
-                  <span class="worker-name">Embedding</span>
+                  <span class="worker-name">Embedding
+                    <HelpTooltip 
+                      title="Embedding 워커"
+                      content="이미지와 텍스트를 벡터로 변환하는 AI 모델입니다. 유사도 검색의 기반이 됩니다."
+                      :examples="['이미지 → 벡터', '텍스트 → 벡터', '유사도 계산']"
+                    />
+                  </span>
                   <span :class="['worker-status', workerStatus.embedding]">{{ workerStatus.embedding }}</span>
                 </div>
                 <div class="worker-item">
-                  <span class="worker-name">Fusion</span>
+                  <span class="worker-name">Fusion
+                    <HelpTooltip 
+                      title="Fusion 워커"
+                      content="여러 특징을 결합하여 최종 판단을 내리는 AI 모델입니다. 이미지, 메타데이터, 텍스트를 종합 분석합니다."
+                      :examples="['다중 특징 결합', '최종 판단', '종합 분석']"
+                    />
+                  </span>
                   <span :class="['worker-status', workerStatus.fusion]">{{ workerStatus.fusion }}</span>
                 </div>
                 <div class="worker-item">
-                  <span class="worker-name">QA</span>
+                  <span class="worker-name">QA
+                    <HelpTooltip 
+                      title="QA 워커"
+                      content="결과의 품질을 검증하고 보정하는 AI 모델입니다. 오류를 감지하고 수정합니다."
+                      :examples="['품질 검증', '오류 감지', '결과 보정']"
+                    />
+                  </span>
                   <span :class="['worker-status', workerStatus.qa]">{{ workerStatus.qa }}</span>
                 </div>
               </div>
@@ -99,22 +166,46 @@
 
             <div class="status-card">
               <div class="status-header">
-                <h3>데이터베이스</h3>
+                <h3>데이터베이스
+                  <HelpTooltip 
+                    title="데이터베이스"
+                    content="시스템의 모든 데이터를 저장하고 관리하는 데이터베이스의 연결 상태와 성능을 모니터링합니다."
+                    :examples="['연결 상태', '응답 시간', '쿼리 성능']"
+                  />
+                </h3>
                 <span :class="['status-badge', dbStatus.connected ? 'healthy' : 'error']">
                   {{ dbStatus.connected ? '연결됨' : '연결 끊김' }}
                 </span>
               </div>
               <div class="db-metrics">
                 <div class="metric-row">
-                  <span>응답시간:</span>
+                  <span>응답시간:
+                    <HelpTooltip 
+                      title="응답시간"
+                      content="데이터베이스 쿼리의 평균 응답 시간입니다. 낮을수록 빠른 데이터 처리를 의미합니다."
+                      :examples="['5ms = 매우 빠름', '50ms = 보통', '200ms = 느림']"
+                    />
+                  </span>
                   <span :class="getResponseTimeClass(dbStatus.responseTime)">{{ dbStatus.responseTime }}ms</span>
                 </div>
                 <div class="metric-row">
-                  <span>활성 연결:</span>
+                  <span>활성 연결:
+                    <HelpTooltip 
+                      title="활성 연결"
+                      content="현재 데이터베이스에 연결된 활성 세션의 수입니다. 너무 많으면 성능 저하가 발생할 수 있습니다."
+                      :examples="['10개 = 정상', '50개 = 많음', '100개 = 과부하']"
+                    />
+                  </span>
                   <span>{{ dbStatus.activeConnections }}</span>
                 </div>
                 <div class="metric-row">
-                  <span>쿼리 성능:</span>
+                  <span>쿼리 성능:
+                    <HelpTooltip 
+                      title="쿼리 성능"
+                      content="데이터베이스 쿼리의 평균 실행 시간입니다. 복잡한 쿼리일수록 시간이 오래 걸립니다."
+                      :examples="['10ms = 빠름', '100ms = 보통', '500ms = 느림']"
+                    />
+                  </span>
                   <span>{{ dbStatus.queryPerformance }}ms</span>
                 </div>
               </div>
@@ -122,7 +213,13 @@
 
             <div class="status-card">
               <div class="status-header">
-                <h3>저장소</h3>
+                <h3>저장소
+                  <HelpTooltip 
+                    title="저장소"
+                    content="파일과 이미지를 저장하는 저장소의 상태를 모니터링합니다. 용량과 접근 속도를 확인합니다."
+                    :examples="['디스크 용량', '접근 속도', '파일 수']"
+                  />
+                </h3>
                 <span class="storage-status">{{ storageStatus }}</span>
               </div>
               <div class="storage-metrics">
@@ -224,6 +321,7 @@ import PipelineStatusMonitor from '../components/PipelineStatusMonitor.vue'
 import AIWorkerMonitor from '../components/AIWorkerMonitor.vue'
 import EnhancedQualityDashboard from '../components/EnhancedQualityDashboard.vue'
 import TestResultsMonitor from '../components/TestResultsMonitor.vue'
+import HelpTooltip from '../components/HelpTooltip.vue'
 
 const { supabase } = useSupabase()
 
@@ -312,13 +410,29 @@ const refreshAllData = async () => {
 
 const fetchRenderingStatus = async () => {
   try {
-    const response = await fetch('/api/synthetic/status')
-    const data = await response.json()
-    renderingStatus.value = data.status || '대기 중'
-    renderingProgress.value = data.progress || 0
-    currentRenderingPart.value = data.currentPart || null
-    completedImages.value = data.completedImages || 0
-    totalImages.value = data.totalImages || 0
+    // Supabase에서 렌더링 로그 조회
+    const { data, error } = await supabase
+      .from('rendering_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1)
+    
+    if (error) throw error
+    
+    if (data && data.length > 0) {
+      const latest = data[0]
+      renderingStatus.value = latest.success_rate > 0.95 ? '정상' : '경고'
+      renderingProgress.value = Math.round(latest.success_rate * 100)
+      currentRenderingPart.value = `속도: ${latest.rendering_speed.toFixed(2)} 이미지/초`
+      completedImages.value = latest.image_count || 0
+      totalImages.value = Math.round(latest.image_count / latest.success_rate) || 0
+    } else {
+      renderingStatus.value = '대기 중'
+      renderingProgress.value = 0
+      currentRenderingPart.value = null
+      completedImages.value = 0
+      totalImages.value = 0
+    }
   } catch (error) {
     console.error('렌더링 상태 조회 실패:', error)
     renderingStatus.value = '오류'
@@ -458,20 +572,20 @@ const fetchPerformanceMetrics = async () => {
     metrics.value = {
       renderingSpeed: {
         current: currentSpeed,
-        yesterday: Math.max(0, currentSpeed - Math.floor(Math.random() * 10)),
-        trend: currentSpeed > 0 ? Math.floor(Math.random() * 20) : 0
+        yesterday: await getYesterdayRenderingSpeed(),
+        trend: await calculateRenderingSpeedTrend()
       },
       quality: {
         avgSSIM: avgSSIM,
-        trend: avgSSIM > 0 ? (Math.random() - 0.5) * 0.1 : 0
+        trend: await calculateQualityTrend()
       },
       aiAccuracy: {
         current: successRate,
-        trend: successRate > 0 ? (Math.random() - 0.5) * 5 : 0
+        trend: await calculateAIAccuracyTrend()
       },
       latency: {
         current: avgLatency,
-        trend: avgLatency > 0 ? -(Math.random() * 5) : 0
+        trend: await calculateLatencyTrend()
       }
     }
   } catch (error) {
@@ -517,6 +631,191 @@ const getTrendIcon = (trend) => {
   if (trend > 0) return '📈'
   if (trend < 0) return '📉'
   return '➡️'
+}
+
+// 실제 데이터 연결 함수들
+const getYesterdayRenderingSpeed = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('rendering_logs')
+      .select('rendering_speed')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSpeed = data.reduce((sum, log) => sum + (log.rendering_speed || 0), 0) / data.length
+    return Math.max(0, Math.round(avgSpeed))
+  } catch (error) {
+    console.error('어제 렌더링 속도 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateRenderingSpeedTrend = async () => {
+  try {
+    const today = await getTodayRenderingSpeed()
+    const yesterday = await getYesterdayRenderingSpeed()
+    return today - yesterday
+  } catch (error) {
+    console.error('렌더링 속도 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayRenderingSpeed = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('rendering_logs')
+      .select('rendering_speed')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSpeed = data.reduce((sum, log) => sum + (log.rendering_speed || 0), 0) / data.length
+    return Math.round(avgSpeed)
+  } catch (error) {
+    console.error('오늘 렌더링 속도 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateQualityTrend = async () => {
+  try {
+    const today = await getTodayQuality()
+    const yesterday = await getYesterdayQuality()
+    return today - yesterday
+  } catch (error) {
+    console.error('품질 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayQuality = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('ssim_score')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSSIM = data.reduce((sum, log) => sum + (log.ssim_score || 0), 0) / data.length
+    return avgSSIM
+  } catch (error) {
+    console.error('오늘 품질 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayQuality = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('quality_logs')
+      .select('ssim_score')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgSSIM = data.reduce((sum, log) => sum + (log.ssim_score || 0), 0) / data.length
+    return avgSSIM
+  } catch (error) {
+    console.error('어제 품질 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateAIAccuracyTrend = async () => {
+  try {
+    const today = await getTodayAIAccuracy()
+    const yesterday = await getYesterdayAIAccuracy()
+    return today - yesterday
+  } catch (error) {
+    console.error('AI 정확도 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayAIAccuracy = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('ai_performance_logs')
+      .select('overall_accuracy')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgAccuracy = data.reduce((sum, log) => sum + (log.overall_accuracy || 0), 0) / data.length
+    return avgAccuracy
+  } catch (error) {
+    console.error('오늘 AI 정확도 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayAIAccuracy = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('ai_performance_logs')
+      .select('overall_accuracy')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgAccuracy = data.reduce((sum, log) => sum + (log.overall_accuracy || 0), 0) / data.length
+    return avgAccuracy
+  } catch (error) {
+    console.error('어제 AI 정확도 조회 실패:', error)
+    return 0
+  }
+}
+
+const calculateLatencyTrend = async () => {
+  try {
+    const today = await getTodayLatency()
+    const yesterday = await getYesterdayLatency()
+    return yesterday - today // 지연시간은 감소가 좋음
+  } catch (error) {
+    console.error('지연시간 트렌드 계산 실패:', error)
+    return 0
+  }
+}
+
+const getTodayLatency = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('operation_logs')
+      .select('duration_ms')
+      .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgLatency = data.reduce((sum, log) => sum + (log.duration_ms || 0), 0) / data.length
+    return avgLatency
+  } catch (error) {
+    console.error('오늘 지연시간 조회 실패:', error)
+    return 0
+  }
+}
+
+const getYesterdayLatency = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('operation_logs')
+      .select('duration_ms')
+      .gte('created_at', new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString())
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+    
+    if (error) throw error
+    const avgLatency = data.reduce((sum, log) => sum + (log.duration_ms || 0), 0) / data.length
+    return avgLatency
+  } catch (error) {
+    console.error('어제 지연시간 조회 실패:', error)
+    return 0
+  }
 }
 
 // 컴포넌트 마운트 시 데이터 로드

@@ -53,6 +53,11 @@
           <router-link to="/synthetic-dataset" class="btn btn-purple">합성 데이터셋</router-link>
         </div>
         <div class="action-card">
+          <h3>시스템 모니터링</h3>
+          <p>전체 시스템 상태, 파이프라인, AI 워커, 품질 지표, 테스트 결과를 종합적으로 모니터링하세요.</p>
+          <router-link to="/system-monitoring" class="btn btn-info">시스템 모니터링</router-link>
+        </div>
+        <div class="action-card">
           <h3>프로필 관리</h3>
           <p>사용자 정보를 확인하고 수정하세요.</p>
           <button class="btn btn-secondary">프로필 보기</button>

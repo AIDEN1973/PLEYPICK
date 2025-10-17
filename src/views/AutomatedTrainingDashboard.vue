@@ -2,13 +2,25 @@
   <div class="automated-training-dashboard">
     <!-- 헤더 -->
     <div class="dashboard-header">
-      <h1>🧱 BrickBox 자동화된 YOLO 학습 대시보드</h1>
+      <h1>🧱 BrickBox 자동화된 YOLO 학습 대시보드
+        <HelpTooltip 
+          title="자동화된 YOLO 학습"
+          content="YOLO 모델을 자동으로 학습하고 배포하는 시스템입니다. 데이터 수집부터 모델 훈련, 성능 평가까지 전체 과정을 자동화합니다."
+          :examples="['데이터 수집', '모델 훈련', '성능 평가', '자동 배포']"
+        />
+      </h1>
       <p>Supabase + Colab 연동으로 완전 자동화된 학습 파이프라인</p>
     </div>
 
     <!-- 세트 단위 학습 섹션 -->
     <div class="set-based-training-section">
-      <h2>🎯 세트 단위 학습</h2>
+      <h2>🎯 세트 단위 학습
+        <HelpTooltip 
+          title="세트 단위 학습"
+          content="특정 레고 세트의 부품들만을 대상으로 모델을 학습하는 방식입니다. 중복을 제거하고 효율적으로 학습할 수 있습니다."
+          :examples="['세트별 부품 분류', '중복 제거', '효율적 학습']"
+        />
+      </h2>
       <p class="section-description">
         특정 레고 세트에 대해 중복을 제거하고 효율적으로 학습합니다.
       </p>
@@ -37,15 +49,33 @@
           <h3>📦 {{ setInfo.set_num }} - {{ setInfo.set_name }}</h3>
           <div class="set-details">
             <div class="detail-item">
-              <span class="label">총 부품 수:</span>
+              <span class="label">총 부품 수:
+                <HelpTooltip 
+                  title="총 부품 수"
+                  content="해당 레고 세트에 포함된 모든 부품의 개수입니다."
+                  :examples="['100개', '200개', '500개']"
+                />
+              </span>
               <span class="value">{{ setInfo.total_parts }}개</span>
             </div>
             <div class="detail-item">
-              <span class="label">이미 학습된 부품:</span>
+              <span class="label">이미 학습된 부품:
+                <HelpTooltip 
+                  title="이미 학습된 부품"
+                  content="이미 모델에 학습되어 인식 가능한 부품의 개수입니다."
+                  :examples="['50개', '100개', '150개']"
+                />
+              </span>
               <span class="value">{{ setInfo.trained_parts }}개</span>
             </div>
             <div class="detail-item">
-              <span class="label">새로 학습할 부품:</span>
+              <span class="label">새로 학습할 부품:
+                <HelpTooltip 
+                  title="새로 학습할 부품"
+                  content="아직 학습되지 않아 새로 학습이 필요한 부품의 개수입니다."
+                  :examples="['50개', '100개', '200개']"
+                />
+              </span>
               <span class="value">{{ setInfo.new_parts }}개</span>
             </div>
             <div class="detail-item">
@@ -324,6 +354,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAutomatedModelRegistry } from '@/composables/useAutomatedModelRegistry.js'
 import { createClient } from '@supabase/supabase-js'
+import HelpTooltip from '../components/HelpTooltip.vue'
 
 // Supabase 클라이언트 생성
 const supabase = createClient(

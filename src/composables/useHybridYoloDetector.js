@@ -176,7 +176,7 @@ export function useHybridYoloDetector() {
       isDetecting.value = true
       
       // 1차 검출: 빠른 전체 스캔
-      const stage1Results = await executeStage1Detection(imageData, options)
+      const stage1Results = await executeStage1Analysis(imageData, options)
       console.log(`1차 검출 완료: ${stage1Results.length}개 객체`)
       
       // 누락 후보 영역 식별
@@ -195,7 +195,7 @@ export function useHybridYoloDetector() {
           await loadStage2Model()
         }
         
-        stage2Results = await executeStage2Verification(imageData, suspiciousRegions, options)
+        stage2Results = await executeStage2Analysis(imageData, suspiciousRegions, options)
         console.log(`2차 검증 완료: ${stage2Results.length}개 객체`)
         
         // 결과 통합
@@ -230,7 +230,7 @@ export function useHybridYoloDetector() {
   /**
    * 1차 검출 실행 (YOLO11n-seg)
    */
-  const executeStage1Detection = async (imageData, options) => {
+  const executeStage1Analysis = async (imageData, options) => {
     try {
       // 이미지 전처리
       const processedImage = await preprocessImage(imageData, 640)
@@ -258,7 +258,7 @@ export function useHybridYoloDetector() {
   /**
    * 2차 검증 실행 (YOLO11s-seg)
    */
-  const executeStage2Verification = async (imageData, suspiciousRegions, options) => {
+  const executeStage2Analysis = async (imageData, suspiciousRegions, options) => {
     try {
       if (!isStage2Ready.value) {
         throw new Error('2차 모델이 로드되지 않았습니다.')

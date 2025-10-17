@@ -184,7 +184,7 @@ export function useDataQualityManager() {
     
     const trainCount = Math.floor(imageDataset.length * trainRatio)
     const trainImages = imageDataset.slice(0, trainCount)
-    const valTestImages = imageDataset.slice(trainCount)
+    const valImages = imageDataset.slice(trainCount)
     
     // Train 이미지에 RDA 적용
     const rdaApplied = await Promise.all(

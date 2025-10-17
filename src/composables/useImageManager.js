@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import axios from 'axios'
 
 // UPLOAD_SERVER와 UPLOAD_PROXY 제거 - 로컬 프록시 사용
 const USE_SUPABASE_STORAGE = true // Supabase Storage 사용 여부
@@ -61,28 +62,45 @@ export function useImageManager() {
   const downloading = ref(false)
   const error = ref(null)
 
-  // 이미지 다운로드 함수 (로컬 프록시 사용)
-  const downloadImage = async (imageUrl, filename) => {
+  // 이미지 다운로드 함수 (Axios + 재시도 로직)
+  const downloadImage = async (imageUrl, filename, maxRetries = 2) => {
     downloading.value = true
     error.value = null
 
-    try {
-      // 로컬 프록시를 통한 다운로드
-      const response = await fetch(`/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`, {
-        method: 'GET'
-      })
-      
-      if (!response.ok) {
-        throw new Error(`프록시 다운로드 실패: ${response.status}`)
-      }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔄 이미지 다운로드 시도 ${attempt}/${maxRetries}: ${imageUrl}`)
+        
+        // Axios를 사용한 안정적인 다운로드
+        const response = await axios.get(`/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`, {
+          responseType: 'arraybuffer',
+          timeout: 3000,              // 3초 제한
+          validateStatus: status => status < 500,  // 5xx 에러만 재시도
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        })
+        
+        if (!response.data || response.data.length === 0) {
+          throw new Error('Image download failed - empty response')
+        }
 
-      const blob = await response.blob()
-      return blob
-    } catch (err) {
-      error.value = err.message
-      throw err
-    } finally {
-      downloading.value = false
+        // ArrayBuffer를 Blob으로 변환
+        const blob = new Blob([response.data])
+        console.log(`✅ 이미지 다운로드 성공: ${blob.size} bytes`)
+        return blob
+        
+      } catch (err) {
+        console.warn(`⚠️ 다운로드 시도 ${attempt} 실패: ${err.message}`)
+        
+        if (attempt === maxRetries) {
+          error.value = `이미지 다운로드 실패 (${maxRetries}회 시도): ${err.message}`
+          throw err
+        }
+        
+        // 재시도 전 잠시 대기
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+      }
     }
   }
 
@@ -432,16 +450,24 @@ export function useImageManager() {
         console.warn('Direct download failed, using alternative method:', downloadErr.message)
         
         try {
-          // 대체 방법 1: 프록시를 통한 이미지 다운로드 및 WebP 변환
+          // 대체 방법 1: 프록시를 통한 이미지 다운로드 및 WebP 변환 (Axios + 재시도)
           const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
           console.log(`🔄 프록시를 통한 이미지 다운로드 시도: ${proxyUrl}`)
           
-          const proxyResponse = await fetch(proxyUrl)
-          if (!proxyResponse.ok) {
-            throw new Error(`프록시 다운로드 실패: ${proxyResponse.status}`)
+          const proxyResponse = await axios.get(proxyUrl, {
+            responseType: 'arraybuffer',
+            timeout: 3000,
+            validateStatus: status => status < 500,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+          })
+          
+          if (!proxyResponse.data || proxyResponse.data.length === 0) {
+            throw new Error('프록시 다운로드 실패 - 빈 응답')
           }
           
-          const proxyBlob = await proxyResponse.blob()
+          const proxyBlob = new Blob([proxyResponse.data])
           const fileName = `${partNum}_${colorId}.webp`
           const file = new File([proxyBlob], fileName, { type: 'image/webp' })
           

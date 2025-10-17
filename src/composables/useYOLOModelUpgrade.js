@@ -31,7 +31,7 @@ export function useYOLOModelUpgrade() {
   /**
    * 모델 성능 벤치마크 (기술문서 4.2)
    */
-  const benchmarkModel = async (modelConfig, testData) => {
+  const benchmarkModel = async (modelConfig, realData) => {
     const startTime = performance.now()
     
     try {
@@ -48,8 +48,8 @@ export function useYOLOModelUpgrade() {
       }
       
       // 각 세트에 대해 벤치마크 실행
-      for (const testSet of testData) {
-        const setResults = await runSetBenchmark(modelConfig, testSet)
+      for (const dataSet of realData) {
+        const setResults = await runSetBenchmark(modelConfig, dataSet)
         
         results.smallRecall += setResults.smallRecall
         results.fps += setResults.fps
@@ -59,7 +59,7 @@ export function useYOLOModelUpgrade() {
       }
       
       // 평균 계산
-      const setCount = testData.length
+      const setCount = realData.length
       results.smallRecall /= setCount
       results.fps /= setCount
       results.avgLatency /= setCount
@@ -150,7 +150,7 @@ export function useYOLOModelUpgrade() {
   /**
    * 모델 업그레이드 파이프라인
    */
-  const runUpgradePipeline = async (testData, options = {}) => {
+  const runUpgradePipeline = async (realData, options = {}) => {
     try {
       loading.value = true
       console.log('🚀 YOLO 모델 업그레이드 파이프라인 시작...')
@@ -159,7 +159,7 @@ export function useYOLOModelUpgrade() {
       
       // 1. 기본 모델 벤치마크 (yolo11m-seg@768)
       const baseModel = benchmarkConfig.models[0]
-      const baseResults = await benchmarkModel(baseModel, testData)
+      const baseResults = await benchmarkModel(baseModel, realData)
       results.push(baseResults)
       
       // 2. SLO 확인
@@ -174,7 +174,7 @@ export function useYOLOModelUpgrade() {
       
       // 3. 960 크기로 재벤치
       const resizedModel = { ...baseModel, size: 960 }
-      const resizedResults = await benchmarkModel(resizedModel, testData)
+      const resizedResults = await benchmarkModel(resizedModel, realData)
       results.push(resizedResults)
       
       // 4. 960 결과 확인
@@ -190,7 +190,7 @@ export function useYOLOModelUpgrade() {
       
       // 5. v8-L-seg로 승급
       const v8LModel = benchmarkConfig.models[2]
-      const v8LResults = await benchmarkModel(v8LModel, testData)
+      const v8LResults = await benchmarkModel(v8LModel, realData)
       results.push(v8LResults)
       
       upgradeStats.currentModel = `${v8LModel.name}@${v8LModel.size}`

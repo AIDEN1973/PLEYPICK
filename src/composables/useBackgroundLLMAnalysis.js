@@ -10,13 +10,13 @@ import { useAutoImageMigration } from './useAutoImageMigration'
  * - 작업 큐 관리
  */
 
-// OpenAI API 리밋 설정
+// OpenAI API 리밋 설정 (안전하게 조정)
 const API_LIMITS = {
-  requestsPerMinute: 500, // 보수적으로 500 RPM 설정
-  tokensPerMinute: 200000, // 실제 제한: 200K TPM
-  maxConcurrent: 2, // 동시 요청 최대 2개로 줄임 (rate limit 방지)
-  requestDelay: 500, // 요청 간 500ms 대기 (안정적인 처리)
-  retryDelay: 1000, // 재시도 시 1초 대기 (지수 백오프로 증가)
+  requestsPerMinute: 800, // 800 RPM으로 안전하게 조정
+  tokensPerMinute: 300000, // 300K TPM으로 안전하게 조정
+  maxConcurrent: 3, // 동시 요청 3개로 안전하게 제한
+  requestDelay: 300, // 요청 간 300ms로 증가
+  retryDelay: 1000, // 재시도 시 1초로 증가
   maxRetries: 3
 }
 
@@ -119,7 +119,7 @@ export function useBackgroundLLMAnalysis() {
       
       // ✅ 1단계: LLM 분석 (배치 병렬 처리)
       const analysisResults = []
-      const BATCH_SIZE = 10 // 한 번에 10개씩 처리
+      const BATCH_SIZE = 20 // 한 번에 20개씩 처리 (2배 증가)
       
       // 배치 생성
       const batches = []
@@ -146,9 +146,58 @@ export function useBackgroundLLMAnalysis() {
                 console.log(`🔄 DEV MODE: Re-analyzing existing part ${part.part.part_num}`)
               }
               
+              // 이미지 URL 가져오기
+              let imageUrl = null
+              
+              // 1. part_images에서 uploaded_url 조회
+              const { data: partImage } = await supabase
+                .from('part_images')
+                .select('uploaded_url')
+                .eq('part_id', part.part.part_num)
+                .eq('color_id', part.color.id)
+                .maybeSingle()
+              
+              if (partImage?.uploaded_url) {
+                imageUrl = partImage.uploaded_url
+                console.log(`✅ Supabase Storage 이미지 사용: ${imageUrl}`)
+              } else {
+                // 2. image_metadata에서 supabase_url 조회 (과거 호환)
+                const { data: imageMeta } = await supabase
+                  .from('image_metadata')
+                  .select('supabase_url')
+                  .eq('part_num', part.part.part_num)
+                  .eq('color_id', part.color.id)
+                  .maybeSingle()
+                
+                if (imageMeta?.supabase_url) {
+                  imageUrl = imageMeta.supabase_url
+                  console.log(`✅ image_metadata 이미지 사용: ${imageUrl}`)
+                } else {
+                  // 3. Supabase Storage URL 생성
+                  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+                  const bucketName = 'lego_parts_images'
+                  const fileName = `${part.part.part_num}_${part.color.id}.webp`
+                  imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+                  console.log(`⚠️ 생성된 Storage URL: ${imageUrl}`)
+                }
+              }
+              
+              // 이미지 URL이 없으면 건너뛰기
+              if (!imageUrl) {
+                console.warn(`⚠️ ${part.part.part_num} 이미지 URL 없음, 건너뛰기`)
+                throw new Error('이미지 URL 없음')
+              }
+              
+              // part 객체에 이미지 URL 추가
+              const partWithImage = {
+                ...part,
+                supabase_image_url: imageUrl,
+                image_url: imageUrl
+              }
+              
               // LLM 분석 실행 (재시도 포함)
               console.log(`🧠 Analyzing ${part.part.part_num}`)
-              const analysis = await analyzePartWithRetry(part)
+              const analysis = await analyzePartWithRetry(partWithImage)
               
               if (!analysis) {
                 throw new Error(`Analysis returned null for ${part.part.part_num}`)

@@ -16,11 +16,23 @@
 
     <!-- SLO 지표 카드 -->
     <div class="slo-metrics">
-      <h2>📊 SLO 지표</h2>
+      <h2>📊 SLO 지표
+        <HelpTooltip 
+          title="SLO (Service Level Objectives)"
+          content="시스템이 달성해야 하는 성능 기준입니다. 목표값과 실제 성능을 비교하여 시스템 건강도를 측정합니다."
+          :examples="['소형 부품 인식률 95% 이상', 'Top-1 정확도 90% 이상', '오검출률 5% 이하']"
+        />
+      </h2>
       <div class="metrics-grid">
         <div class="metric-card" :class="getMetricStatus('smallRecall')">
           <div class="metric-header">
-            <h3>소형 Recall</h3>
+            <h3>소형 Recall
+              <HelpTooltip 
+                title="소형 Recall"
+                content="소형 부품을 올바르게 인식한 비율입니다. 높을수록 소형 부품을 놓치지 않고 잘 찾아냅니다."
+                :examples="['0.95 = 95% 인식', '0.90 = 90% 인식']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.smallRecall.toFixed(3) }}</span>
           </div>
           <div class="metric-threshold">
@@ -33,7 +45,13 @@
 
         <div class="metric-card" :class="getMetricStatus('top1Accuracy')">
           <div class="metric-header">
-            <h3>Top-1 정확도</h3>
+            <h3>Top-1 정확도
+              <HelpTooltip 
+                title="Top-1 정확도"
+                content="첫 번째 추천 결과가 정답과 일치하는 비율입니다. 사용자가 가장 먼저 보는 결과의 정확도를 측정합니다."
+                :examples="['0.90 = 90% 정답', '0.85 = 85% 정답']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.top1Accuracy.toFixed(3) }}</span>
           </div>
           <div class="metric-threshold">
@@ -46,7 +64,13 @@
 
         <div class="metric-card" :class="getMetricStatus('falsePositiveRate')">
           <div class="metric-header">
-            <h3>오검출률</h3>
+            <h3>오검출률
+              <HelpTooltip 
+                title="오검출률"
+                content="부품이 아닌데 부품으로 잘못 인식한 비율입니다. 낮을수록 더 정확합니다."
+                :examples="['0.05 = 5% 오인식', '0.02 = 2% 오인식']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.falsePositiveRate * 100).toFixed(1) }}%</span>
           </div>
           <div class="metric-threshold">
@@ -59,7 +83,13 @@
 
         <div class="metric-card" :class="getMetricStatus('holdRate')">
           <div class="metric-header">
-            <h3>보류율</h3>
+            <h3>보류율
+              <HelpTooltip 
+                title="보류율"
+                content="AI가 확신하지 못해 수동 검토로 넘긴 케이스의 비율입니다. 낮을수록 AI가 더 확신하고 판단합니다."
+                :examples="['0.05 = 5% 보류', '0.02 = 2% 보류']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.holdRate * 100).toFixed(1) }}%</span>
           </div>
           <div class="metric-threshold">
@@ -74,11 +104,23 @@
 
     <!-- 성능 지표 -->
     <div class="performance-metrics">
-      <h2>⚡ 성능 지표</h2>
+      <h2>⚡ 성능 지표
+        <HelpTooltip 
+          title="성능 지표"
+          content="시스템의 처리 속도와 응답 시간을 측정하는 지표들입니다. 사용자 경험과 시스템 효율성을 평가합니다."
+          :examples="['평균 지연시간', 'WebP 디코딩 속도', 'FAISS 검색 속도']"
+        />
+      </h2>
       <div class="metrics-grid">
         <div class="metric-card" :class="getMetricStatus('avgLatency')">
           <div class="metric-header">
-            <h3>평균 지연</h3>
+            <h3>평균 지연
+              <HelpTooltip 
+                title="평균 지연"
+                content="요청부터 응답까지의 평균 소요 시간입니다. 낮을수록 빠른 응답을 의미합니다."
+                :examples="['150ms = 0.15초', '100ms = 0.1초']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.avgLatency.toFixed(1) }}ms</span>
           </div>
           <div class="metric-threshold">
@@ -88,7 +130,13 @@
 
         <div class="metric-card" :class="getMetricStatus('webpDecodeP95')">
           <div class="metric-header">
-            <h3>WebP 디코딩 p95</h3>
+            <h3>WebP 디코딩 p95
+              <HelpTooltip 
+                title="WebP 디코딩 p95"
+                content="WebP 이미지 디코딩 시간의 95% 백분위수입니다. 대부분의 이미지가 이 시간 내에 디코딩됩니다."
+                :examples="['15ms = 95%가 15ms 이내', '10ms = 95%가 10ms 이내']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.webpDecodeP95.toFixed(1) }}ms</span>
           </div>
           <div class="metric-threshold">
@@ -98,7 +146,13 @@
 
         <div class="metric-card" :class="getMetricStatus('faissStage1P95')">
           <div class="metric-header">
-            <h3>FAISS Stage-1 p95</h3>
+            <h3>FAISS Stage-1 p95
+              <HelpTooltip 
+                title="FAISS Stage-1 p95"
+                content="FAISS 1단계 검색 시간의 95% 백분위수입니다. 빠른 후보 검색의 성능을 측정합니다."
+                :examples="['10ms = 95%가 10ms 이내', '5ms = 95%가 5ms 이내']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.faissStage1P95.toFixed(1) }}ms</span>
           </div>
           <div class="metric-threshold">
@@ -108,7 +162,13 @@
 
         <div class="metric-card" :class="getMetricStatus('faissStage2P95')">
           <div class="metric-header">
-            <h3>FAISS Stage-2 p95</h3>
+            <h3>FAISS Stage-2 p95
+              <HelpTooltip 
+                title="FAISS Stage-2 p95"
+                content="FAISS 2단계 정밀 검색 시간의 95% 백분위수입니다. 정확한 매칭을 위한 상세 검색 성능을 측정합니다."
+                :examples="['15ms = 95%가 15ms 이내', '10ms = 95%가 10ms 이내']"
+              />
+            </h3>
             <span class="metric-value">{{ sloMetrics.faissStage2P95.toFixed(1) }}ms</span>
           </div>
           <div class="metric-threshold">
@@ -120,11 +180,23 @@
 
     <!-- 시스템 지표 -->
     <div class="system-metrics">
-      <h2>🖥️ 시스템 지표</h2>
+      <h2>🖥️ 시스템 지표
+        <HelpTooltip 
+          title="시스템 지표"
+          content="서버의 하드웨어 리소스 사용률과 시스템 성능을 측정하는 지표들입니다. 시스템 안정성을 평가합니다."
+          :examples="['메모리 사용률', 'CPU 사용률', '인덱스 크기']"
+        />
+      </h2>
       <div class="metrics-grid">
         <div class="metric-card" :class="getMetricStatus('stage2Rate')">
           <div class="metric-header">
-            <h3>Stage-2 진입률</h3>
+            <h3>Stage-2 진입률
+              <HelpTooltip 
+                title="Stage-2 진입률"
+                content="1단계 검색에서 확신하지 못해 2단계 정밀 검색으로 넘어가는 비율입니다. 낮을수록 1단계에서 더 정확합니다."
+                :examples="['0.25 = 25% 진입', '0.15 = 15% 진입']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.stage2Rate * 100).toFixed(1) }}%</span>
           </div>
           <div class="metric-threshold">
@@ -134,7 +206,13 @@
 
         <div class="metric-card" :class="getMetricStatus('indexSize')">
           <div class="metric-header">
-            <h3>인덱스 크기</h3>
+            <h3>인덱스 크기
+              <HelpTooltip 
+                title="인덱스 크기"
+                content="검색을 위한 벡터 인덱스의 메모리 사용량입니다. 클수록 더 많은 부품을 저장할 수 있지만 메모리를 많이 사용합니다."
+                :examples="['120MB = 120MB 사용', '80MB = 80MB 사용']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.indexSize / 1024 / 1024).toFixed(1) }}MB</span>
           </div>
           <div class="metric-threshold">
@@ -144,7 +222,13 @@
 
         <div class="metric-card" :class="getMetricStatus('memoryUsage')">
           <div class="metric-header">
-            <h3>메모리 사용률</h3>
+            <h3>메모리 사용률
+              <HelpTooltip 
+                title="메모리 사용률"
+                content="서버의 RAM 메모리 사용 비율입니다. 높을수록 메모리 부족 위험이 있습니다."
+                :examples="['85% = 85% 사용', '70% = 70% 사용']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.memoryUsage * 100).toFixed(1) }}%</span>
           </div>
           <div class="metric-threshold">
@@ -154,7 +238,13 @@
 
         <div class="metric-card" :class="getMetricStatus('cpuUsage')">
           <div class="metric-header">
-            <h3>CPU 사용률</h3>
+            <h3>CPU 사용률
+              <HelpTooltip 
+                title="CPU 사용률"
+                content="서버의 CPU 프로세서 사용 비율입니다. 높을수록 처리 속도가 느려질 수 있습니다."
+                :examples="['90% = 90% 사용', '75% = 75% 사용']"
+              />
+            </h3>
             <span class="metric-value">{{ (sloMetrics.cpuUsage * 100).toFixed(1) }}%</span>
           </div>
           <div class="metric-threshold">
@@ -166,7 +256,13 @@
 
     <!-- 알림 및 경고 -->
     <div class="alerts-section">
-      <h2>🚨 알림 및 경고</h2>
+      <h2>🚨 알림 및 경고
+        <HelpTooltip 
+          title="알림 및 경고"
+          content="시스템에서 발생한 문제나 주의사항을 알려주는 메시지들입니다. 즉시 확인이 필요한 사항들을 표시합니다."
+          :examples="['SLO 위반', '리소스 부족', '성능 저하']"
+        />
+      </h2>
       <div class="alerts-list">
         <div v-for="alert in recentAlerts" :key="alert.id" class="alert-item" :class="alert.severity">
           <div class="alert-header">
@@ -181,7 +277,13 @@
 
     <!-- 통계 요약 -->
     <div class="stats-summary">
-      <h2>📈 통계 요약</h2>
+      <h2>📈 통계 요약
+        <HelpTooltip 
+          title="통계 요약"
+          content="시스템 운영 현황을 한눈에 볼 수 있는 주요 통계들입니다. 전체적인 시스템 건강도를 파악할 수 있습니다."
+          :examples="['총 알림 수', '해결된 문제', '평균 응답시간']"
+        />
+      </h2>
       <div class="stats-grid">
         <div class="stat-item">
           <span class="stat-label">총 알림</span>
@@ -211,6 +313,7 @@
 <script setup>
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useMonitoringSystem } from '@/composables/useMonitoringSystem'
+import HelpTooltip from '../components/HelpTooltip.vue'
 
 const { 
   loading, 
