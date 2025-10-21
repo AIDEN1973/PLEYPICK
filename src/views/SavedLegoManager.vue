@@ -102,7 +102,7 @@
         >
           <div class="set-image">
             <img 
-              :src="set.display_image_url || set.set_img_url" 
+              :src="getSetImageUrl(set)" 
               :alt="set.name"
               @error="handleImageError"
             />
@@ -146,7 +146,7 @@
             <tr v-for="set in savedSets" :key="set.id">
               <td>
                 <img 
-                  :src="set.display_image_url || set.set_img_url" 
+                  :src="getSetImageUrl(set)" 
                   :alt="set.name"
                   class="set-thumbnail"
                   @error="handleImageError"
@@ -204,7 +204,7 @@
           <div class="set-details">
             <div class="set-main-info">
               <img 
-                :src="selectedSet.display_image_url || selectedSet.set_img_url" 
+                :src="getSetImageUrl(selectedSet)" 
                 :alt="selectedSet.name" 
                 class="set-large-image" 
               />
@@ -251,11 +251,11 @@
                       @error="handleImageError"
                       :title="part.supabase_image_url ? 'Supabase Storage에서 로드됨' : '프록시를 통해 로드됨'"
                     />
-                    <div v-if="part.supabase_image_url" class="image-source-badge supabase-badge">
-                      📦 Supabase Storage
+                    <div v-if="part.metadata" class="image-source-badge metadata-badge">
+                      🧠 메타데이터
                     </div>
-                    <div v-else class="image-source-badge cdn-badge">
-                      🌐 Rebrickable CDN
+                    <div v-else class="image-source-badge no-metadata-badge">
+                      📝 메타데이터 없음
                     </div>
                     
                     <!-- 메타데이터 툴팁 -->
@@ -324,6 +324,36 @@
                     </p>
                     <p><strong>색상:</strong> {{ part.lego_colors.name }}</p>
                     <p><strong>수량:</strong> {{ part.quantity }}개</p>
+                    
+                    <!-- 메타데이터 생성 버튼 -->
+                    <div class="metadata-actions">
+                      <button 
+                        v-if="!part.metadata" 
+                        @click="generatePartMetadata(part)"
+                        :disabled="metadataGenerating[`${part.lego_parts.part_num}-${part.lego_colors.color_id}`]"
+                        class="btn btn-sm btn-primary metadata-generate-btn"
+                      >
+                        <span v-if="metadataGenerating[`${part.lego_parts.part_num}-${part.lego_colors.color_id}`]">
+                          🤖 생성 중...
+                        </span>
+                        <span v-else>
+                          🧠 메타데이터 생성
+                        </span>
+                      </button>
+                      <button 
+                        v-else
+                        @click="regeneratePartMetadata(part)"
+                        :disabled="metadataGenerating[`${part.lego_parts.part_num}-${part.lego_colors.color_id}`]"
+                        class="btn btn-sm btn-secondary metadata-regenerate-btn"
+                      >
+                        <span v-if="metadataGenerating[`${part.lego_parts.part_num}-${part.lego_colors.color_id}`]">
+                          🔄 재생성 중...
+                        </span>
+                        <span v-else>
+                          🔄 메타데이터 재생성
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -351,6 +381,7 @@ import { useDatabase } from '../composables/useDatabase'
 import { supabase } from '../composables/useSupabase'
 import { useImageManager } from '../composables/useImageManager'
 import { useBatchPartLoading } from '../composables/useBatchPartLoading'
+import { useBackgroundLLMAnalysis } from '../composables/useBackgroundLLMAnalysis'
 
 export default {
   name: 'SavedLegoManager',
@@ -378,6 +409,10 @@ export default {
       resetLoading
     } = useBatchPartLoading()
 
+    const {
+      startBackgroundAnalysis
+    } = useBackgroundLLMAnalysis()
+
 
     const searchQuery = ref('')
     const savedSets = ref([])
@@ -390,6 +425,9 @@ export default {
     const selectedTheme = ref('')
     const selectedYear = ref('')
     const hoveredPart = ref(null)
+    
+    // ✅ 메타데이터 생성 상태
+    const metadataGenerating = ref({})
     
     // ✅ 페이지네이션 상태
     const currentPage = ref(1)
@@ -1242,6 +1280,179 @@ export default {
       }
     }
 
+    // 세트 이미지 URL 우선순위 함수
+    const getSetImageUrl = (set) => {
+      if (!set) return getDefaultSetImage()
+      
+      // 1. WebP 이미지 우선 (스토리지에서)
+      if (set.webp_image_url) {
+        return set.webp_image_url
+      }
+      
+      // 2. display_image_url (기존 처리된 이미지)
+      if (set.display_image_url) {
+        return set.display_image_url
+      }
+      
+      // 3. 원본 이미지 URL
+      if (set.set_img_url) {
+        return set.set_img_url
+      }
+      
+      // 4. 기본 이미지
+      return getDefaultSetImage()
+    }
+
+    // ✅ 메타데이터 상태 폴링 함수
+    const pollMetadataStatus = async (part, maxAttempts = 30, interval = 2000) => {
+      const partKey = `${part.lego_parts.part_num}-${part.lego_colors.color_id}`
+      let attempts = 0
+      
+      const poll = async () => {
+        try {
+          attempts++
+          console.log(`🔍 메타데이터 상태 확인 (${attempts}/${maxAttempts}): ${part.lego_parts.part_num}`)
+          
+          // 메타데이터 조회
+          const { data: metadata, error } = await supabase
+            .from('parts_master_features')
+            .select('*')
+            .eq('part_id', part.lego_parts.part_num)
+            .eq('color_id', part.lego_colors.color_id)
+            .single()
+          
+          if (metadata && !error) {
+            // ✅ 메타데이터 생성 완료 - UI 즉시 업데이트
+            part.metadata = metadata
+            console.log(`✅ 메타데이터 생성 완료: ${part.lego_parts.part_num}`)
+            successMessage.value = `메타데이터 생성 완료!\n부품: ${part.lego_parts.name}`
+            
+            setTimeout(() => {
+              successMessage.value = ''
+            }, 3000)
+            return true
+          }
+          
+          if (attempts >= maxAttempts) {
+            console.log(`⏰ 메타데이터 생성 타임아웃: ${part.lego_parts.part_num}`)
+            successMessage.value = `메타데이터 생성이 시간 초과되었습니다. 백그라운드에서 계속 진행 중입니다.`
+            setTimeout(() => {
+              successMessage.value = ''
+            }, 5000)
+            return false
+          }
+          
+          // 다음 폴링 예약
+          setTimeout(poll, interval)
+          
+        } catch (error) {
+          console.error('메타데이터 상태 확인 실패:', error)
+          if (attempts >= maxAttempts) {
+            return false
+          }
+          setTimeout(poll, interval)
+        }
+      }
+      
+      // 첫 번째 폴링 시작
+      setTimeout(poll, interval)
+    }
+
+    // ✅ 개별 부품 메타데이터 생성
+    const generatePartMetadata = async (part) => {
+      const partKey = `${part.lego_parts.part_num}-${part.lego_colors.color_id}`
+      
+      try {
+        metadataGenerating.value[partKey] = true
+        
+        console.log(`🧠 메타데이터 생성 시작: ${part.lego_parts.part_num}`)
+        
+        // 백그라운드 분석을 위한 부품 데이터 준비
+        const partData = {
+          part: {
+            part_num: part.lego_parts.part_num,
+            name: part.lego_parts.name
+          },
+          color: {
+            id: part.lego_colors.color_id,
+            name: part.lego_colors.name
+          }
+        }
+        
+        // 백그라운드 분석 시작
+        const setData = {
+          set_num: 'individual-metadata',
+          name: '개별 메타데이터 생성',
+          id: 'individual-' + Date.now()
+        }
+        
+        const taskId = await startBackgroundAnalysis(setData, [partData])
+        
+        console.log(`📋 백그라운드 작업 시작: ${taskId}`)
+        
+        successMessage.value = `메타데이터 생성이 시작되었습니다!\n작업 ID: ${taskId}\n부품: ${part.lego_parts.name}`
+        
+        // ✅ 메타데이터 상태 폴링 시작 (즉시 반응형 업데이트)
+        pollMetadataStatus(part)
+        
+        // 3초 후 메시지 제거
+        setTimeout(() => {
+          successMessage.value = ''
+        }, 5000)
+        
+      } catch (error) {
+        console.error('메타데이터 생성 실패:', error)
+        successMessage.value = `메타데이터 생성 실패: ${error.message}`
+        
+        setTimeout(() => {
+          successMessage.value = ''
+        }, 5000)
+      } finally {
+        metadataGenerating.value[partKey] = false
+      }
+    }
+
+    // ✅ 개별 부품 메타데이터 재생성
+    const regeneratePartMetadata = async (part) => {
+      const partKey = `${part.lego_parts.part_num}-${part.lego_colors.color_id}`
+      
+      try {
+        metadataGenerating.value[partKey] = true
+        
+        console.log(`🔄 메타데이터 재생성 시작: ${part.lego_parts.part_num}`)
+        
+        // ✅ 즉시 UI 업데이트: 기존 메타데이터 제거
+        part.metadata = null
+        console.log(`🔄 UI에서 기존 메타데이터 제거됨`)
+        
+        // 기존 메타데이터 삭제
+        const { error: deleteError } = await supabase
+          .from('parts_master_features')
+          .delete()
+          .eq('part_id', part.lego_parts.part_num)
+          .eq('color_id', part.lego_colors.color_id)
+        
+        if (deleteError) {
+          console.error('기존 메타데이터 삭제 실패:', deleteError)
+        } else {
+          console.log(`✅ DB에서 기존 메타데이터 삭제 완료`)
+        }
+        
+        // 새로운 메타데이터 생성
+        await generatePartMetadata(part)
+        
+      } catch (error) {
+        console.error('메타데이터 재생성 실패:', error)
+        successMessage.value = `메타데이터 재생성 실패: ${error.message}`
+        
+        setTimeout(() => {
+          successMessage.value = ''
+        }, 5000)
+      } finally {
+        metadataGenerating.value[partKey] = false
+      }
+    }
+
     onMounted(async () => {
       // ✅ 최적화: 통계와 세트 병렬 로드
       await Promise.all([
@@ -1283,12 +1494,17 @@ export default {
       resetDatabase,
       resetProjectData,
       getPartImageUrl,
+      getSetImageUrl,
       getDisplayValue,
       getSmartScale,
       getSmartShape,
       loadMore, // ✅ 무한 스크롤 함수 추가
       currentPage,
-      itemsPerPage
+      itemsPerPage,
+      // ✅ 메타데이터 생성 함수들
+      generatePartMetadata,
+      regeneratePartMetadata,
+      metadataGenerating
     }
   }
 }
@@ -1805,13 +2021,13 @@ export default {
   box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
-.supabase-badge {
-  background: linear-gradient(135deg, #4caf50, #2e7d32);
+.metadata-badge {
+  background: linear-gradient(135deg, #2196f3, #1976d2);
   color: white;
 }
 
-.cdn-badge {
-  background: linear-gradient(135deg, #ff9800, #f57c00);
+.no-metadata-badge {
+  background: linear-gradient(135deg, #9e9e9e, #757575);
   color: white;
 }
 
@@ -2073,5 +2289,51 @@ export default {
     min-width: 250px;
     font-size: 0.8rem;
   }
+}
+
+/* ✅ 메타데이터 액션 버튼 스타일 */
+.metadata-actions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.metadata-generate-btn,
+.metadata-regenerate-btn {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.metadata-generate-btn {
+  background: linear-gradient(135deg, #2196f3, #1976d2);
+  color: white;
+}
+
+.metadata-generate-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1976d2, #1565c0);
+  transform: translateY(-1px);
+}
+
+.metadata-regenerate-btn {
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+}
+
+.metadata-regenerate-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f57c00, #ef6c00);
+  transform: translateY(-1px);
+}
+
+.metadata-generate-btn:disabled,
+.metadata-regenerate-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 </style>

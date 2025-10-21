@@ -23,7 +23,59 @@ io.on('connection', (socket) => {
   console.log('🔌 socket connected', socket.id)
 })
 
-const PORT = process.env.API_PORT || 3005
+// 포트 자동 할당 함수
+async function findAvailablePort(startPort = 3005, endPort = 3015) {
+  const net = await import('net')
+  
+  for (let port = startPort; port <= endPort; port++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const server = net.default.createServer()
+        
+        server.listen(port, () => {
+          server.close(() => {
+            resolve(port)
+          })
+        })
+        
+        server.on('error', (err) => {
+          if (err.code === 'EADDRINUSE') {
+            reject(new Error(`Port ${port} is in use`))
+          } else {
+            reject(err)
+          }
+        })
+      })
+      
+      return port
+    } catch (error) {
+      if (port === endPort) {
+        throw new Error(`No available ports found between ${startPort} and ${endPort}`)
+      }
+      continue
+    }
+  }
+}
+
+// 포트 관리 시스템에서 포트 가져오기
+let PORT;
+try {
+  // 포트 설정 파일에서 읽기
+  const portConfigPath = path.join(process.cwd(), '.port-config.json');
+  if (fs.existsSync(portConfigPath)) {
+    const portConfig = JSON.parse(fs.readFileSync(portConfigPath, 'utf8'));
+    PORT = portConfig.trainingApi;
+    console.log(`📄 포트 설정 파일에서 읽기: ${PORT}`);
+  } else {
+    // 포트 설정 파일이 없으면 자동 할당
+    PORT = await findAvailablePort();
+    console.log(`🔍 사용 가능한 포트 찾기: ${PORT}`);
+  }
+} catch (error) {
+  console.error('❌ 포트 할당 실패:', error.message);
+  PORT = process.env.API_PORT || 3010;
+  console.log(`⚠️ 기본 포트 사용: ${PORT}`);
+}
 
 // CORS 설정
 app.use(cors())
@@ -359,6 +411,21 @@ app.get('/api/training/jobs', async (req, res) => {
 // 서버 시작
 server.listen(PORT, () => {
   console.log(`🚀 학습 API 서버 시작: http://localhost:${PORT}`)
+  
+  // 포트 정보를 파일에 저장
+  const portInfo = {
+    port: PORT,
+    timestamp: new Date().toISOString(),
+    service: 'training-api'
+  }
+  
+  try {
+    const portFilePath = path.join(process.cwd(), '.training-api-port.json')
+    fs.writeFileSync(portFilePath, JSON.stringify(portInfo, null, 2))
+    console.log(`📄 포트 정보 저장: ${portFilePath}`)
+  } catch (err) {
+    console.warn('포트 정보 저장 실패:', err.message)
+  }
 })
 
 // WebSocket 설정 (이미 위에서 초기화됨)

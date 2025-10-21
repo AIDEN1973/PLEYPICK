@@ -18,11 +18,27 @@ training:
     val_split: 0.1
     test_split: 0.1
     
-  # 모델 설정
+  # 모델 설정 (2단계 하이브리드)
   model:
-    architecture: "yolo11n-seg"
-    pretrained: true
-    freeze_backbone: false
+    # 1차 모델 (빠른 스캔)
+    stage1:
+      architecture: "yolo11n-seg"
+      pretrained: true
+      freeze_backbone: false
+      purpose: "fast_scan"
+      target_fps: 50
+      conf_threshold: 0.3
+    
+    # 2차 모델 (정밀 검증)
+    stage2:
+      architecture: "yolo11s-seg"
+      pretrained: true
+      freeze_backbone: false
+      purpose: "precise_verification"
+      target_fps: 30
+      conf_threshold: 0.5
+      # 옵션: use_pretrained_only (true면 학습 생략, false면 Fine-tuning)
+      use_pretrained_only: false  # ← false=학습함, true=사전학습만 사용
     
   # 최적화 설정
   optimization:

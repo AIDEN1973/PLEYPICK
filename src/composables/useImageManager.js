@@ -540,24 +540,74 @@ export function useImageManager() {
 
         // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
         let response
+        let downloadMethod = 'unknown'
+        
         try {
-          // 로컬 프록시를 통해 이미지 다운로드 (WebP 변환 포함)
-          const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+          // 1. Vite 프록시를 통한 다운로드 (CORS 문제 해결)
+          if (imageUrl.includes('cdn.rebrickable.com')) {
+            try {
+              // Vite 프록시를 통해 Rebrickable CDN 접근
+              const proxyUrl = imageUrl.replace('https://cdn.rebrickable.com', '/api/proxy')
+              response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'image/*',
+                  'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+                }
+              })
+              
+              if (response.ok) {
+                downloadMethod = 'vite_proxy'
+                console.log(`✅ Vite 프록시 다운로드 성공`)
+              } else {
+                console.warn(`⚠️ Vite 프록시 다운로드 실패: ${response.status}`)
+              }
+            } catch (proxyError) {
+              console.warn(`⚠️ Vite 프록시 서버 오류: ${proxyError.message}`)
+            }
+          }
           
-          response = await fetch(proxyUrl)
-          if (!response.ok) {
-            throw new Error(`프록시 다운로드 실패: ${response.status}`)
+          // 2. API 프록시 서버를 통한 다운로드 (fallback)
+          if (!response || !response.ok) {
+            try {
+              const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+              response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'image/*',
+                  'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+                }
+              })
+              
+              if (response.ok) {
+                downloadMethod = 'api_proxy'
+                console.log(`✅ API 프록시 다운로드 성공`)
+              } else {
+                console.warn(`⚠️ API 프록시 다운로드 실패: ${response.status}`)
+              }
+            } catch (proxyError) {
+              console.warn(`⚠️ API 프록시 서버 오류: ${proxyError.message}`)
+            }
           }
-        } catch (proxyErr) {
-          console.warn('프록시 다운로드 실패, 직접 다운로드 시도:', proxyErr.message)
-          // 프록시 실패 시 직접 다운로드 시도
-          response = await fetch(imageUrl)
-          if (!response.ok) {
-            throw new Error(`Failed to download image: ${response.status}`)
+          
+          // 3. 직접 다운로드 시도 (최종 fallback)
+          if (!response || !response.ok) {
+            console.log(`🔄 직접 다운로드 시도: ${imageUrl}`)
+            response = await fetch(imageUrl)
+            if (response.ok) {
+              downloadMethod = 'direct'
+              console.log(`✅ 직접 다운로드 성공`)
+            } else {
+              throw new Error(`모든 다운로드 방법 실패: ${response.status}`)
+            }
           }
+        } catch (downloadErr) {
+          console.warn('모든 다운로드 방법 실패:', downloadErr.message)
+          throw new Error(`이미지 다운로드 실패: ${downloadErr.message}`)
         }
         
         const blob = await response.blob()
+        console.log(`📊 다운로드 완료: ${blob.size} bytes (방법: ${downloadMethod})`)
         
         // WebP로 강제 변환
         let webpBlob
@@ -608,6 +658,10 @@ export function useImageManager() {
         
         // 중복 파일 처리: 덮어쓰기 옵션 사용
         console.log(`📤 Supabase Storage 업로드 시도: ${filePath} (bucket: ${bucketName})`)
+        console.log(`📤 File size: ${file.size} bytes`)
+        console.log(`📤 File type: ${file.type}`)
+        console.log(`📤 Upload path: ${uploadPath}`)
+        
         const { data, error: uploadError } = await supabase.storage
           .from(bucketName)
           .upload(filePath, file, {
@@ -616,6 +670,13 @@ export function useImageManager() {
 
         if (uploadError) {
           console.error(`❌ Supabase 업로드 실패:`, uploadError)
+          console.error(`❌ Upload details:`, {
+            bucket: bucketName,
+            filePath: filePath,
+            fileSize: file.size,
+            fileType: file.type,
+            uploadPath: uploadPath
+          })
           throw new Error(`Supabase upload failed: ${uploadError.message}`)
         }
         

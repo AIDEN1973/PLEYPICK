@@ -31,14 +31,38 @@ export function useWorkerHealth() {
     try {
       lastCheckTime.value = new Date()
       
-      // 1. 임베딩 워커 상태 확인
-      const { data: embeddingData, error: embeddingError } = await supabase
-        .from('embedding_worker_status')
-        .select('*')
-        .maybeSingle()
+      // 1. 워커 포트 정보 읽기
+      let workerPort = 3006 // 기본값
+      try {
+        const portResponse = await fetch('/.worker-port.json')
+        if (portResponse.ok) {
+          const portData = await portResponse.json()
+          workerPort = portData.port
+        }
+      } catch (portError) {
+        console.warn('워커 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+      }
 
-      if (embeddingError && embeddingError.code !== 'PGRST116') {
-        console.warn('임베딩 워커 상태 테이블이 없습니다. (선택사항)')
+      // 2. 워커 서버 직접 호출
+      try {
+        const response = await fetch(`http://localhost:${workerPort}/api/worker/health`, {
+          method: 'GET',
+          timeout: 5000
+        })
+        
+        if (response.ok) {
+          const healthData = await response.json()
+          workerStatus.value = 'running'
+          lastHeartbeat.value = new Date()
+          return { status: 'running', timestamp: healthData.timestamp }
+        } else {
+          workerStatus.value = 'stopped'
+          return { status: 'stopped', error: `HTTP ${response.status}` }
+        }
+      } catch (fetchError) {
+        console.warn('워커 서버 연결 실패:', fetchError.message)
+        workerStatus.value = 'stopped'
+        return { status: 'stopped', error: fetchError.message }
       }
 
       // 2. LLM 분석 큐 상태 확인

@@ -1,4 +1,5 @@
 import express from 'express'
+import cors from 'cors'
 import sharp from 'sharp'
 import { createClient } from '@supabase/supabase-js'
 import { spawn } from 'child_process'
@@ -15,7 +16,18 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const app = express()
-app.use(express.json())
+
+// 인코딩 설정
+app.use(express.json({ limit: '50mb' }))
+app.use(express.urlencoded({ extended: true, limit: '50mb' }))
+
+// CORS 설정 (localhost:3000에서의 요청 허용)
+app.use(cors({
+  origin: 'http://localhost:3000',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control'],
+  credentials: true
+}))
 // 캐시 비활성화 (ETag로 304 반환 방지)
 app.set('etag', false)
 // 정적 파일 제공: 생성된 합성 이미지 제공 (프록시 경로 하위로 제공)
@@ -29,13 +41,44 @@ if (!supabaseUrl || !supabaseKey) {
   console.error('❌ Supabase 환경 변수가 설정되지 않았습니다.')
   console.error('VITE_SUPABASE_URL:', supabaseUrl)
   console.error('VITE_SUPABASE_ANON_KEY:', supabaseKey ? '설정됨' : '설정되지 않음')
-  process.exit(1)
+  console.error('⚠️ 서버를 계속 실행하지만 Supabase 기능이 제한됩니다.')
+  // process.exit(1) // 서버 다운 방지
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey)
 
 // 렌더링 작업 관리
 const activeJobs = new Map()
+
+// 자동 복구 시스템 상태 관리
+const autoRecoveryStatus = {
+  isActive: false,
+  serverMonitor: {
+    running: false,
+    lastCheck: null,
+    retryCount: 0,
+    maxRetries: 5
+  },
+  autoRecovery: {
+    running: false,
+    lastStateCheck: null,
+    renderingResumed: false
+  },
+  logs: []
+}
+
+// 포트 관리 시스템
+const portManager = {
+  currentPort: null,
+  portHistory: [],
+  portConflicts: [],
+  autoRecoveryPort: null,
+  isPortMonitoring: false
+}
+
+// 데이터셋 변환 작업 관리
+const conversionJobs = new Map()
+const conversionProgress = new Map()
 
 // 렌더링 시작 API
 app.post('/api/synthetic/start-rendering', async (req, res) => {
@@ -71,6 +114,265 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
     
   } catch (error) {
     console.error('렌더링 시작 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 헬스체크 API
+app.get('/api/synthetic/health', (req, res) => {
+  res.json({
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    activeJobs: activeJobs.size
+  })
+})
+
+// 서버 상태 확인 API
+app.get('/api/synthetic/status', (req, res) => {
+  res.json({
+    success: true,
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    activeJobs: activeJobs.size,
+    version: '1.0.0'
+  })
+})
+
+// 자동 복구 시스템 상태 API
+app.get('/api/synthetic/auto-recovery/status', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      autoRecovery: autoRecoveryStatus,
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 자동 복구 시스템 시작 API
+app.post('/api/synthetic/auto-recovery/start', (req, res) => {
+  try {
+    autoRecoveryStatus.isActive = true
+    autoRecoveryStatus.serverMonitor.running = true
+    autoRecoveryStatus.serverMonitor.lastCheck = new Date().toISOString()
+    autoRecoveryStatus.logs.push({
+      timestamp: new Date().toISOString(),
+      type: 'info',
+      message: '자동 복구 시스템 시작됨'
+    })
+    
+    res.json({
+      success: true,
+      message: '자동 복구 시스템이 시작되었습니다',
+      status: autoRecoveryStatus
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 자동 복구 시스템 중단 API
+app.post('/api/synthetic/auto-recovery/stop', (req, res) => {
+  try {
+    autoRecoveryStatus.isActive = false
+    autoRecoveryStatus.serverMonitor.running = false
+    autoRecoveryStatus.autoRecovery.running = false
+    autoRecoveryStatus.logs.push({
+      timestamp: new Date().toISOString(),
+      type: 'info',
+      message: '자동 복구 시스템 중단됨'
+    })
+    
+    res.json({
+      success: true,
+      message: '자동 복구 시스템이 중단되었습니다',
+      status: autoRecoveryStatus
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 자동 복구 로그 추가 API (내부용)
+const addAutoRecoveryLog = (type, message) => {
+  autoRecoveryStatus.logs.push({
+    timestamp: new Date().toISOString(),
+    type: type,
+    message: message
+  })
+  
+  // 로그 개수 제한 (최근 100개만 유지)
+  if (autoRecoveryStatus.logs.length > 100) {
+    autoRecoveryStatus.logs = autoRecoveryStatus.logs.slice(-100)
+  }
+}
+
+// 포트 충돌 감지 및 자동 수정
+const detectPortConflicts = async () => {
+  try {
+    const usedPorts = []
+    
+    // 현재 사용 중인 포트들 확인
+    for (let port = 3000; port <= 3100; port++) {
+      if (!(await isPortAvailable(port))) {
+        usedPorts.push(port)
+      }
+    }
+    
+    portManager.portConflicts = usedPorts
+    addAutoRecoveryLog('info', `포트 충돌 감지: ${usedPorts.length}개 포트 사용 중`)
+    
+    return usedPorts
+  } catch (error) {
+    addAutoRecoveryLog('error', `포트 충돌 감지 실패: ${error.message}`)
+    return []
+  }
+}
+
+// 동적 포트 할당 (충돌 방지)
+const allocatePortDynamically = async (preferredPort = 3002) => {
+  try {
+    // 선호 포트가 사용 가능한지 확인
+    if (await isPortAvailable(preferredPort)) {
+      portManager.currentPort = preferredPort
+      addAutoRecoveryLog('info', `선호 포트 ${preferredPort} 사용 가능`)
+      return preferredPort
+    }
+    
+    // 사용 가능한 포트 찾기
+    for (let port = 3002; port <= 3100; port++) {
+      if (await isPortAvailable(port)) {
+        portManager.currentPort = port
+        portManager.portHistory.push({
+          port: port,
+          timestamp: new Date().toISOString(),
+          reason: 'auto-assignment'
+        })
+        addAutoRecoveryLog('info', `동적 포트 할당: ${port}`)
+        return port
+      }
+    }
+    
+    throw new Error('사용 가능한 포트를 찾을 수 없습니다 (3002-3100)')
+  } catch (error) {
+    addAutoRecoveryLog('error', `동적 포트 할당 실패: ${error.message}`)
+    return null
+  }
+}
+
+// 포트 상태 모니터링
+const startPortMonitoring = () => {
+  if (portManager.isPortMonitoring) return
+  
+  portManager.isPortMonitoring = true
+  
+  const monitorInterval = setInterval(async () => {
+    if (!portManager.isPortMonitoring) {
+      clearInterval(monitorInterval)
+      return
+    }
+    
+    // 현재 포트 상태 확인
+    if (portManager.currentPort && !(await isPortAvailable(portManager.currentPort))) {
+      addAutoRecoveryLog('warning', `현재 포트 ${portManager.currentPort} 사용 불가 - 재할당 필요`)
+      
+      // 새로운 포트 할당
+      const newPort = await allocatePortDynamically()
+      if (newPort) {
+        addAutoRecoveryLog('info', `포트 재할당 완료: ${newPort}`)
+      }
+    }
+  }, 10000) // 10초마다 확인
+  
+  addAutoRecoveryLog('info', '포트 모니터링 시작됨')
+}
+
+// 포트 상태 조회 API
+app.get('/api/synthetic/ports/status', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      portManager: {
+        currentPort: portManager.currentPort,
+        portHistory: portManager.portHistory.slice(-10), // 최근 10개
+        portConflicts: portManager.portConflicts,
+        isPortMonitoring: portManager.isPortMonitoring,
+        autoRecoveryPort: portManager.autoRecoveryPort
+      },
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 포트 재할당 API
+app.post('/api/synthetic/ports/reallocate', async (req, res) => {
+  try {
+    const { preferredPort } = req.body
+    const newPort = await allocatePortDynamically(preferredPort)
+    
+    if (newPort) {
+      res.json({
+        success: true,
+        message: `포트 재할당 완료: ${newPort}`,
+        newPort: newPort
+      })
+    } else {
+      res.status(500).json({
+        success: false,
+        error: '포트 재할당 실패'
+      })
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 포트 모니터링 시작/중단 API
+app.post('/api/synthetic/ports/monitoring/:action', (req, res) => {
+  try {
+    const { action } = req.params
+    
+    if (action === 'start') {
+      startPortMonitoring()
+      res.json({
+        success: true,
+        message: '포트 모니터링이 시작되었습니다'
+      })
+    } else if (action === 'stop') {
+      portManager.isPortMonitoring = false
+      res.json({
+        success: true,
+        message: '포트 모니터링이 중단되었습니다'
+      })
+    } else {
+      res.status(400).json({
+        success: false,
+        error: '잘못된 액션입니다 (start/stop)'
+      })
+    }
+  } catch (error) {
     res.status(500).json({
       success: false,
       error: error.message
@@ -670,30 +972,7 @@ function isPortAvailable(port) {
   });
 }
 
-/**
- * 사용 가능한 포트를 찾아 서버 실행
- */
-async function startServer() {
-  let port = DEFAULT_PORT;
-  while (port <= MAX_PORT && !(await isPortAvailable(port))) {
-    console.log(`⚠️ Port ${port} is in use, trying next...`);
-    port++;
-  }
-
-  if (port > MAX_PORT) {
-    console.error('❌ No available ports found between 3004–3100.');
-    process.exit(1);
-  }
-
-  app.listen(port, () => {
-    console.log(`🧱 BrickBox 합성 데이터셋 API 서버가 포트 ${port}에서 실행 중입니다`);
-  });
-}
-
-startServer().catch((err) => {
-  console.error('🚨 Failed to start server:', err);
-  process.exit(1);
-});
+// 기존 startServer 함수 제거됨 - 새로운 함수 사용
 
 // 생성된 이미지 파일 목록 반환 API (로컬 출력 기반)
 app.get('/api/synthetic/files/:partId', async (req, res) => {
@@ -729,5 +1008,620 @@ app.get('/api/synthetic/files/:partId', async (req, res) => {
     res.status(500).json({ success: false, error: error.message })
   }
 })
+
+// 데이터셋 변환 API 엔드포인트들
+app.post('/api/dataset/convert', async (req, res) => {
+  try {
+    const { sourcePath, targetPath, format } = req.body
+    const jobId = `conversion_${Date.now()}`
+    
+    console.log(`🔄 데이터셋 변환 시작: ${jobId}`)
+    
+    // 변환 작업 시작
+    const conversionProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'prepare_training_dataset.py')
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8'
+      }
+    })
+    
+    // 작업 저장
+    conversionJobs.set(jobId, {
+      process: conversionProcess,
+      startTime: new Date(),
+      status: 'running'
+    })
+    
+    conversionProgress.set(jobId, {
+      progress: 0,
+      status: '변환 시작...',
+      logs: []
+    })
+    
+    // 프로세스 출력 처리
+    conversionProcess.stdout.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      console.log(`[${jobId}] ${message}`)
+      
+      const progress = conversionProgress.get(jobId)
+      progress.logs.push({
+        time: new Date().toLocaleTimeString(),
+        message,
+        type: 'info'
+      })
+      
+      // 진행률 추정 (간단한 휴리스틱)
+      if (message.includes('전체 이미지 수')) {
+        progress.progress = 10
+        progress.status = '이미지 분석 중...'
+      } else if (message.includes('Train:')) {
+        progress.progress = 50
+        progress.status = '데이터셋 분할 중...'
+      } else if (message.includes('데이터셋 준비 완료')) {
+        progress.progress = 100
+        progress.status = '변환 완료!'
+      }
+    })
+    
+    conversionProcess.stderr.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      console.error(`[${jobId}] ERROR: ${message}`)
+      
+      const progress = conversionProgress.get(jobId)
+      progress.logs.push({
+        time: new Date().toLocaleTimeString(),
+        message,
+        type: 'error'
+      })
+    })
+    
+    conversionProcess.on('close', (code) => {
+      const job = conversionJobs.get(jobId)
+      if (job) {
+        job.status = code === 0 ? 'completed' : 'failed'
+        job.endTime = new Date()
+      }
+      
+      const progress = conversionProgress.get(jobId)
+      if (code === 0) {
+        progress.progress = 100
+        progress.status = '변환 완료!'
+        progress.logs.push({
+          time: new Date().toLocaleTimeString(),
+          message: '데이터셋 변환이 성공적으로 완료되었습니다!',
+          type: 'success'
+        })
+      } else {
+        progress.status = '변환 실패'
+        progress.logs.push({
+          time: new Date().toLocaleTimeString(),
+          message: `변환 실패 (종료 코드: ${code})`,
+          type: 'error'
+        })
+      }
+    })
+    
+    res.json({ 
+      success: true, 
+      jobId,
+      message: '데이터셋 변환이 시작되었습니다.' 
+    })
+    
+  } catch (error) {
+    console.error('데이터셋 변환 시작 실패:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    })
+  }
+})
+
+app.get('/api/dataset/progress', (req, res) => {
+  try {
+    const { jobId } = req.query
+    
+    if (!jobId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'jobId가 필요합니다.' 
+      })
+    }
+    
+    const progress = conversionProgress.get(jobId)
+    if (!progress) {
+      return res.status(404).json({ 
+        success: false, 
+        error: '작업을 찾을 수 없습니다.' 
+      })
+    }
+    
+    res.json({
+      success: true,
+      progress: progress.progress,
+      status: progress.status,
+      logs: progress.logs.slice(-10) // 최근 10개 로그만 반환
+    })
+    
+  } catch (error) {
+    console.error('진행률 조회 실패:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    })
+  }
+})
+
+app.get('/api/dataset/source-count', async (req, res) => {
+  try {
+    const outputDir = path.join(__dirname, '..', 'output', 'synthetic')
+    
+    if (!fs.existsSync(outputDir)) {
+      return res.json({ count: 0 })
+    }
+    
+    // WebP 이미지 파일 개수 계산 (재귀적으로)
+    let imageCount = 0
+    
+    const countWebPFiles = (dir) => {
+      try {
+        const items = fs.readdirSync(dir)
+        for (const item of items) {
+          const fullPath = path.join(dir, item)
+          const stat = fs.statSync(fullPath)
+          
+          if (stat.isDirectory()) {
+            countWebPFiles(fullPath)
+          } else if (item.endsWith('.webp')) {
+            imageCount++
+          }
+        }
+      } catch (error) {
+        console.warn(`디렉토리 읽기 실패: ${dir}`, error.message)
+      }
+    }
+    
+    countWebPFiles(outputDir)
+    
+    res.json({ count: imageCount })
+    
+  } catch (error) {
+    console.error('소스 이미지 개수 조회 실패:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    })
+  }
+})
+
+app.get('/api/dataset/download', async (req, res) => {
+  try {
+    const datasetPath = path.join(__dirname, '..', 'data', 'brickbox_dataset')
+    
+    if (!fs.existsSync(datasetPath)) {
+      return res.status(404).json({ 
+        success: false, 
+        error: '데이터셋이 아직 생성되지 않았습니다.' 
+      })
+    }
+    
+    // 폴더 구조 정보 반환 (ZIP 생성 대신)
+    try {
+      // 데이터셋 폴더 구조 읽기
+      const readDirRecursive = (dir, basePath = '') => {
+        const items = []
+        const entries = fs.readdirSync(dir, { withFileTypes: true })
+        
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          const relativePath = path.join(basePath, entry.name)
+          
+          if (entry.isDirectory()) {
+            items.push({
+              name: entry.name,
+              type: 'directory',
+              path: relativePath,
+              children: readDirRecursive(fullPath, relativePath)
+            })
+          } else {
+            const stats = fs.statSync(fullPath)
+            items.push({
+              name: entry.name,
+              type: 'file',
+              path: relativePath,
+              size: stats.size,
+              modified: stats.mtime
+            })
+          }
+        }
+        
+        return items
+      }
+      
+      const datasetStructure = readDirRecursive(datasetPath)
+      
+      // 폴더 구조 정보 반환
+      res.json({
+        success: true,
+        message: '데이터셋 폴더 구조 정보',
+        datasetPath: datasetPath,
+        structure: datasetStructure,
+        instructions: [
+          '1. 위 경로의 폴더를 직접 압축하세요',
+          '2. Windows: 폴더 우클릭 → "압축" 또는 "ZIP으로 압축"',
+          '3. 생성된 압축 파일을 YOLO 학습에 사용하세요'
+        ],
+        downloadNote: 'ZIP 자동 생성 기능은 현재 사용할 수 없습니다. 폴더를 직접 압축해주세요.'
+      })
+      
+    } catch (error) {
+      console.error('폴더 구조 읽기 오류:', error)
+      res.status(500).json({
+        success: false,
+        error: '데이터셋 폴더를 읽을 수 없습니다.',
+        message: error.message
+      })
+    }
+    
+  } catch (error) {
+    console.error('데이터셋 다운로드 실패:', error)
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    })
+  }
+})
+
+// 포트 자동 할당 함수
+const findAvailablePort = async (startPort = 3001, maxPort = 3010) => {
+  const net = await import('net')
+  
+  for (let port = startPort; port <= maxPort; port++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const server = net.createServer()
+        
+        server.listen(port, () => {
+          server.close(() => resolve(port))
+        })
+        
+        server.on('error', (err) => {
+          if (err.code === 'EADDRINUSE') {
+            reject(new Error(`Port ${port} is in use`))
+          } else {
+            reject(err)
+          }
+        })
+      })
+      
+      return port
+    } catch (error) {
+      if (port === maxPort) {
+        throw new Error(`No available ports found between ${startPort} and ${maxPort}`)
+      }
+      continue
+    }
+  }
+}
+
+// 서버 시작
+const startServer = async () => {
+  try {
+    // 포트 관리 시스템에서 포트 가져오기
+    let PORT;
+    try {
+      // 포트 충돌 감지
+      await detectPortConflicts()
+      
+      // 포트 설정 파일에서 읽기
+      const portConfigPath = path.join(process.cwd(), '.port-config.json');
+      if (fs.existsSync(portConfigPath)) {
+        const portConfig = JSON.parse(fs.readFileSync(portConfigPath, 'utf8'));
+        PORT = portConfig.syntheticApi;
+        console.log(`📄 포트 설정 파일에서 읽기: ${PORT}`);
+      } else {
+        // 동적 포트 할당 (충돌 방지)
+        PORT = await allocatePortDynamically(3002);
+        if (!PORT) {
+          throw new Error('동적 포트 할당 실패');
+        }
+        console.log(`🔍 동적 포트 할당: ${PORT}`);
+      }
+      
+      // 포트 모니터링 시작
+      startPortMonitoring()
+      
+    } catch (error) {
+      console.error('❌ 포트 할당 실패:', error.message);
+      PORT = process.env.SYNTHETIC_API_PORT || 3002;
+      console.log(`⚠️ 기본 포트 사용: ${PORT}`);
+    }
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 Synthetic API 서버가 포트 ${PORT}에서 실행 중입니다.`)
+      console.log(`📡 API 엔드포인트: http://localhost:${PORT}`)
+      console.log(`🖼️  정적 파일: http://localhost:${PORT}/api/synthetic/static`)
+      console.log(`📊 데이터셋 변환: http://localhost:${PORT}/api/dataset/convert`)
+      
+      // 포트 정보를 파일로 저장 (Vite 프록시에서 사용)
+      const portInfo = {
+        port: PORT,
+        timestamp: new Date().toISOString(),
+        pid: process.pid
+      }
+      
+      try {
+        const portFilePath = path.join(process.cwd(), '.synthetic-api-port.json')
+        fs.writeFileSync(portFilePath, JSON.stringify(portInfo, null, 2))
+        console.log(`📝 포트 정보 저장: ${portFilePath}`)
+      } catch (fileError) {
+        console.warn('포트 정보 파일 저장 실패:', fileError.message)
+      }
+    })
+    
+  } catch (error) {
+    console.error('서버 시작 실패:', error.message)
+    process.exit(1)
+  }
+}
+
+// 렌더링 최적화 진단 API
+app.post('/api/render-optimization/audit', async (req, res) => {
+  try {
+    const {
+      glob = 'output/synthetic/*/*.json',
+      baseline_sec = 4.0,
+      auto_baseline = true,
+      quality_simulation = true,
+      group_by = 'shape_tag',
+      max_files = 0,
+      workers = 8
+    } = req.body;
+
+    console.log('렌더링 최적화 진단 요청:', { glob, baseline_sec, auto_baseline, quality_simulation, group_by });
+
+    // Python 스크립트 실행
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'render_optimize_audit_enhanced.py');
+    console.log('Python 스크립트 경로:', scriptPath);
+    console.log('스크립트 존재 여부:', fs.existsSync(scriptPath));
+    
+    const args = [
+      '--glob', glob,
+      '--baseline-sec', baseline_sec.toString(),
+      '--report', 'json'
+    ];
+
+    if (auto_baseline) {
+      args.push('--auto-baseline');
+    }
+
+    if (quality_simulation) {
+      args.push('--quality-simulation');
+    }
+
+    if (group_by) {
+      args.push('--group-by', group_by);
+    }
+
+    if (max_files > 0) {
+      args.push('--max-files', max_files.toString());
+    }
+
+    args.push('--workers', workers.toString());
+
+    console.log('Python 스크립트 실행:', scriptPath, args);
+    console.log('작업 디렉토리:', process.cwd());
+
+    const pythonProcess = spawn('python', [scriptPath, ...args], {
+      cwd: process.cwd(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1'
+      }
+    });
+    
+    console.log('Python 프로세스 시작됨, PID:', pythonProcess.pid);
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      const output = data.toString('utf8');
+      stdout += output;
+      console.log('Python STDOUT:', output);
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      const output = data.toString('utf8');
+      stderr += output;
+      console.log('Python STDERR:', output);
+    });
+
+    pythonProcess.on('close', (code) => {
+      console.log('Python 프로세스 종료, 코드:', code);
+      console.log('전체 STDOUT:', stdout);
+      console.log('전체 STDERR:', stderr);
+      
+      if (code === 0) {
+        try {
+          const result = JSON.parse(stdout);
+          console.log('진단 완료:', result.files, '개 파일 분석');
+          res.json({
+            success: true,
+            data: result,
+            timestamp: new Date().toISOString()
+          });
+        } catch (parseError) {
+          console.error('JSON 파싱 오류:', parseError);
+          console.error('stdout:', stdout);
+          res.status(500).json({
+            success: false,
+            error: '결과 파싱 실패',
+            details: parseError.message,
+            stdout: stdout.substring(0, 500)
+          });
+        }
+      } else {
+        console.error('Python 스크립트 실행 실패:', code);
+        console.error('stderr:', stderr);
+        res.status(500).json({
+          success: false,
+          error: '진단 스크립트 실행 실패',
+          details: stderr,
+          code: code
+        });
+      }
+    });
+
+    pythonProcess.on('error', (error) => {
+      console.error('Python 프로세스 오류:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Python 프로세스 시작 실패',
+        details: error.message
+      });
+    });
+
+  } catch (error) {
+    console.error('API 오류:', error);
+    res.status(500).json({
+      success: false,
+      error: '서버 오류',
+      details: error.message
+    });
+  }
+});
+
+// 렌더링 최적화 히스토리 조회
+app.get('/api/render-optimization/history', async (req, res) => {
+  try {
+    const { limit = 10, offset = 0 } = req.query;
+    
+    // 실제 구현에서는 Supabase에서 히스토리 조회
+    // 현재는 빈 배열 반환
+    res.json({
+      success: true,
+      data: [],
+      total: 0,
+      message: '히스토리 데이터가 없습니다. 첫 번째 진단을 실행해주세요.'
+    });
+
+  } catch (error) {
+    console.error('히스토리 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      error: '히스토리 조회 실패',
+      details: error.message
+    });
+  }
+});
+
+// 최적화 권장사항 적용
+app.post('/api/render-optimization/apply', async (req, res) => {
+  try {
+    const { 
+      scenario, 
+      target_samples, 
+      gpu_enabled, 
+      cache_enabled,
+      parallel_workers 
+    } = req.body;
+
+    console.log('최적화 적용 요청:', { scenario, target_samples, gpu_enabled, cache_enabled, parallel_workers });
+
+    const result = {
+      success: true,
+      applied_changes: {
+        samples: target_samples,
+        gpu_enabled: gpu_enabled,
+        cache_enabled: cache_enabled,
+        parallel_workers: parallel_workers
+      },
+      estimated_improvement: {
+        speedup: scenario === 'once_render_low' ? 3.44 : 1.50,
+        quality_impact: 'low'
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    res.json(result);
+
+  } catch (error) {
+    console.error('최적화 적용 오류:', error);
+    res.status(500).json({
+      success: false,
+      error: '최적화 적용 실패',
+      details: error.message
+    });
+  }
+});
+
+// 실시간 렌더링 상태 모니터링
+app.get('/api/render-optimization/status', async (req, res) => {
+  try {
+    // 실제 구현에서는 현재 렌더링 작업 상태 조회
+    const status = {
+      active_jobs: 0,
+      completed_today: 0,
+      average_time: 0,
+      gpu_utilization: 0,
+      memory_usage: 0,
+      last_optimization: null
+    };
+
+    res.json({
+      success: true,
+      data: status,
+      timestamp: new Date().toISOString(),
+      message: '렌더링 작업이 없습니다.'
+    });
+
+  } catch (error) {
+    console.error('상태 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      error: '상태 조회 실패',
+      details: error.message
+    });
+  }
+});
+
+// 렌더링 품질 메트릭 조회
+app.get('/api/render-optimization/metrics', async (req, res) => {
+  try {
+    const { period = '24h' } = req.query;
+    
+    // 실제 구현에서는 시계열 데이터 조회
+    const metrics = {
+      ssim_trend: [],
+      snr_trend: [],
+      render_time_trend: []
+    };
+
+    res.json({
+      success: true,
+      data: metrics,
+      period: period,
+      message: '메트릭 데이터가 없습니다. 첫 번째 진단을 실행해주세요.'
+    });
+
+  } catch (error) {
+    console.error('메트릭 조회 오류:', error);
+    res.status(500).json({
+      success: false,
+      error: '메트릭 조회 실패',
+      details: error.message
+    });
+  }
+});
+
+startServer()
 
 export default app

@@ -1151,9 +1151,13 @@ export default {
             // 1.5. 세트 이미지 WebP 변환 (백그라운드에서 실행)
             try {
               console.log(`🖼️ Converting set image to WebP for ${selectedSet.value.set_num}...`)
+              console.log(`🖼️ Set image URL: ${selectedSet.value.set_img_url}`)
+              
               const webpResult = await convertSetImageToWebP(selectedSet.value)
               if (webpResult) {
                 console.log(`✅ Set image converted to WebP: ${selectedSet.value.set_num}`)
+                console.log(`✅ WebP URL: ${webpResult.webpUrl}`)
+                console.log(`✅ File path: ${webpResult.path}`)
               } else {
                 console.log(`⚠️ Set image WebP conversion failed: ${selectedSet.value.set_num}`)
               }
@@ -1404,19 +1408,30 @@ export default {
           return null
         }
 
+        console.log(`🖼️ Starting set image conversion for ${set.set_num}`)
+        console.log(`🖼️ Original URL: ${set.set_img_url}`)
         
         // WebP 파일명 생성
         const webpFileName = `${set.set_num}_set.webp`
         const uploadPath = 'lego_sets_images'
         
+        console.log(`🖼️ Target filename: ${webpFileName}`)
+        console.log(`🖼️ Upload path: ${uploadPath}`)
+        
         // 이미지 다운로드 및 WebP 변환
+        console.log(`🖼️ Calling uploadImageFromUrl...`)
         const result = await uploadImageFromUrl(
           set.set_img_url,
           webpFileName,
           uploadPath
         )
         
+        console.log(`🖼️ uploadImageFromUrl result:`, result)
+        
         if (result && result.url) {
+          console.log(`✅ Set image upload successful!`)
+          console.log(`✅ WebP URL: ${result.url}`)
+          console.log(`✅ File path: ${result.path}`)
           // 세트 이미지 메타데이터 저장
           await saveSetImageMetadata({
             set_num: set.set_num,
@@ -1429,18 +1444,28 @@ export default {
           
           // lego_sets 테이블의 webp_image_url 필드 업데이트
           try {
+            console.log(`🔄 Updating lego_sets table for ${set.set_num}...`)
+            console.log(`🔄 WebP URL to save: ${result.url}`)
+            
             const { error: updateError } = await supabase
               .from('lego_sets')
               .update({ webp_image_url: result.url })
               .eq('set_num', set.set_num)
             
             if (updateError) {
-              console.warn(`⚠️ lego_sets webp_image_url 업데이트 실패: ${updateError.message}`)
+              console.error(`❌ lego_sets webp_image_url 업데이트 실패: ${updateError.message}`)
+              console.error(`❌ Update details:`, {
+                setNum: set.set_num,
+                webpUrl: result.url,
+                error: updateError
+              })
             } else {
               console.log(`✅ lego_sets webp_image_url 업데이트 완료: ${set.set_num}`)
+              console.log(`✅ Saved WebP URL: ${result.url}`)
             }
           } catch (updateErr) {
-            console.warn(`⚠️ lego_sets webp_image_url 업데이트 중 오류: ${updateErr.message}`)
+            console.error(`❌ lego_sets webp_image_url 업데이트 중 오류: ${updateErr.message}`)
+            console.error(`❌ Update error details:`, updateErr)
           }
           
           return {

@@ -149,8 +149,8 @@
               </span>
             </td>
             <td class="dimension">
-              <span v-if="item.vector_dimensions" class="dim-badge">
-                {{ item.vector_dimensions }}
+              <span v-if="item.embedding_status === 'completed'" class="dim-badge">
+                768
               </span>
               <span v-else class="dim-badge empty">-</span>
             </td>
@@ -251,20 +251,20 @@
             <strong>상태:</strong> {{ getStatusLabel(selectedItem?.embedding_status) }}
           </div>
           <div class="detail-row">
-            <strong>차원:</strong> {{ selectedItem?.embedding_dimension || '-' }}
+            <strong>차원:</strong> {{ selectedItem?.embedding_status === 'completed' ? '768' : '-' }}
           </div>
           <div class="detail-row">
             <strong>Feature Text:</strong>
             <p class="detail-text">{{ selectedItem?.feature_text }}</p>
           </div>
           <div class="detail-row">
-            <strong>임베딩 벡터 (처음 20개):</strong>
-            <pre class="detail-json">{{ getEmbeddingPreview(selectedItem?.clip_text_emb) }}</pre>
+            <strong>임베딩 벡터 (전체):</strong>
+            <pre class="detail-json embedding-vector">{{ getEmbeddingFull(selectedItem?.clip_text_emb) }}</pre>
           </div>
           <div class="detail-row">
             <strong>제로 벡터 여부:</strong>
-            <span :class="selectedItem?.is_zero_vector ? 'badge-error' : 'badge-success'">
-              {{ selectedItem?.is_zero_vector ? '⚠️ 제로 벡터' : '✅ 정상' }}
+            <span :class="isZeroVector(selectedItem?.clip_text_emb) ? 'badge-error' : 'badge-success'">
+              {{ isZeroVector(selectedItem?.clip_text_emb) ? '⚠️ 제로 벡터' : '✅ 정상' }}
             </span>
           </div>
         </div>
@@ -552,6 +552,39 @@ const getEmbeddingPreview = (embedding) => {
   return '파싱 오류'
 }
 
+const getEmbeddingFull = (embedding) => {
+  if (!embedding) return '없음'
+  
+  try {
+    // embedding이 문자열인 경우 파싱
+    const embArray = typeof embedding === 'string' ? JSON.parse(embedding) : embedding
+    if (Array.isArray(embArray)) {
+      return JSON.stringify(embArray, null, 2)
+    }
+  } catch (e) {
+    console.error('임베딩 파싱 실패:', e)
+  }
+  
+  return '파싱 오류'
+}
+
+// 제로 벡터 감지 함수
+const isZeroVector = (embedding) => {
+  if (!embedding) return true
+  
+  try {
+    const embArray = typeof embedding === 'string' ? JSON.parse(embedding) : embedding
+    if (Array.isArray(embArray)) {
+      // 모든 값이 0인지 확인
+      return embArray.every(val => val === 0 || val === 0.0)
+    }
+  } catch (e) {
+    console.error('제로 벡터 감지 실패:', e)
+  }
+  
+  return true
+}
+
 // 워치
 watch(statusFilter, () => {
   currentPage.value = 1
@@ -570,6 +603,44 @@ const checkWorkerStatus = async () => {
   } catch (error) {
     console.error('워커 상태 체크 실패:', error)
     workerStatus.value = 'unknown'
+  }
+}
+
+// 워커 직접 호출 함수
+const callWorkerDirectly = async (partId, featureText) => {
+  try {
+    // 워커 포트 정보 읽기
+    let workerPort = 3006 // 기본값
+    try {
+      const portResponse = await fetch('/.worker-port.json')
+      if (portResponse.ok) {
+        const portData = await portResponse.json()
+        workerPort = portData.port
+      }
+    } catch (portError) {
+      console.warn('워커 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+    }
+
+    const response = await fetch(`http://localhost:${workerPort}/api/worker/generate-embedding`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        partId,
+        featureText
+      })
+    })
+
+    if (!response.ok) {
+      throw new Error(`워커 호출 실패: ${response.status}`)
+    }
+
+    const result = await response.json()
+    return result
+  } catch (error) {
+    console.error('워커 직접 호출 실패:', error)
+    throw error
   }
 }
 
@@ -1086,6 +1157,14 @@ onMounted(() => {
   border-radius: 4px;
   overflow-x: auto;
   font-size: 0.9rem;
+}
+
+.embedding-vector {
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .badge-success {

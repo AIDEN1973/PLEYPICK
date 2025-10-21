@@ -293,7 +293,6 @@ export function useDataQualityManager() {
       image_quality_ssim: metadata.image_quality?.ssim,
       image_quality_snr: metadata.image_quality?.snr,
       image_quality_q: metadata.image_quality?.q,
-      updated_at: new Date().toISOString(),
       version: (metadata.version || 0) + 1
     }
     

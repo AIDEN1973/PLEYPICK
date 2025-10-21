@@ -12,6 +12,7 @@ import ElementIdSearchTest from './views/ElementIdSearchTest.vue'
 import MasterDataBuilder from './views/MasterDataBuilder.vue'
 import StoreManager from './views/StoreManager.vue'
 import SyntheticDatasetManager from './views/SyntheticDatasetManager.vue'
+import DatasetConverter from './views/DatasetConverter.vue'
 import HybridDetection from './views/HybridDetection.vue'
 import AutomatedTrainingDashboard from './views/AutomatedTrainingDashboard.vue'
 import StoreManagementDashboard from './views/StoreManagementDashboard.vue'
@@ -19,6 +20,9 @@ import MonitoringDashboard from './views/MonitoringDashboard.vue'
 import ModelMonitoringDashboard from './views/ModelMonitoringDashboard.vue'
 import SystemMonitoringDashboard from './views/SystemMonitoringDashboard.vue'
 import MetadataManagement from './views/MetadataManagement.vue'
+import FailedUploadManager from './views/FailedUploadManager.vue'
+import QualityHealingDashboard from './views/QualityHealingDashboard.vue'
+import RenderOptimizationDashboard from './views/RenderOptimizationDashboard.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -32,13 +36,17 @@ const routes = [
   { path: '/master-builder', name: 'MasterDataBuilder', component: MasterDataBuilder },
   { path: '/store-manager', name: 'StoreManager', component: StoreManager },
   { path: '/synthetic-dataset', name: 'SyntheticDatasetManager', component: SyntheticDatasetManager },
+  { path: '/dataset-converter', name: 'DatasetConverter', component: DatasetConverter },
   { path: '/hybrid-detection', name: 'HybridDetection', component: HybridDetection },
   { path: '/automated-training', name: 'AutomatedTrainingDashboard', component: AutomatedTrainingDashboard },
   { path: '/store-management', name: 'StoreManagementDashboard', component: StoreManagementDashboard },
   { path: '/monitoring', name: 'MonitoringDashboard', component: MonitoringDashboard },
   { path: '/model-monitoring', name: 'ModelMonitoringDashboard', component: ModelMonitoringDashboard },
   { path: '/system-monitoring', name: 'SystemMonitoringDashboard', component: SystemMonitoringDashboard },
-  { path: '/metadata-management', name: 'MetadataManagement', component: MetadataManagement }
+  { path: '/metadata-management', name: 'MetadataManagement', component: MetadataManagement },
+  { path: '/failed-uploads', name: 'FailedUploadManager', component: FailedUploadManager },
+  { path: '/quality-healing', name: 'QualityHealingDashboard', component: QualityHealingDashboard },
+  { path: '/render-optimization', name: 'RenderOptimizationDashboard', component: RenderOptimizationDashboard }
 ]
 
 const router = createRouter({

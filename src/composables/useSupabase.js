@@ -4,7 +4,22 @@ import { ref } from 'vue'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-supabase-url.supabase.co'
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-supabase-anon-key'
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+// CORS 및 Storage 접근을 위한 추가 옵션
+const supabaseOptions = {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true
+  },
+  global: {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  }
+}
+
+export const supabase = createClient(supabaseUrl, supabaseKey, supabaseOptions)
 
 export function useSupabase() {
   const user = ref(null)

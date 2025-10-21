@@ -1,11 +1,15 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import { useImageManager } from './useImageManager'
 
 export function useBatchProcessing() {
   const loading = ref(false)
   const progress = ref(0)
   const currentStep = ref('')
   const error = ref(null)
+  
+  // useImageManager에서 uploadImageFromUrl 함수 가져오기
+  const { uploadImageFromUrl } = useImageManager()
 
   // 진짜 배치 처리 함수
   const batchProcessSet = async (setData, parts) => {
@@ -157,6 +161,72 @@ export function useBatchProcessing() {
         throw setPartsError
       }
       console.log(`✅ Batch upserted ${savedSetParts.length} set-part relationships`)
+      progress.value = 80
+      
+      // 3. 세트 이미지 WebP 변환 (백그라운드에서 실행)
+      currentStep.value = '세트 이미지 변환 중...'
+      try {
+        console.log(`🖼️ Converting set image to WebP for ${setData.set_num}...`)
+        console.log(`🖼️ Set image URL: ${setData.set_img_url}`)
+        
+        if (setData.set_img_url) {
+          // WebP 파일명 생성
+          const webpFileName = `${setData.set_num}_set.webp`
+          const uploadPath = 'lego_sets_images'
+          
+          console.log(`🖼️ Target filename: ${webpFileName}`)
+          console.log(`🖼️ Upload path: ${uploadPath}`)
+          
+          // 이미지 다운로드 및 WebP 변환
+          console.log(`🖼️ Calling uploadImageFromUrl...`)
+          const result = await uploadImageFromUrl(
+            setData.set_img_url,
+            webpFileName,
+            uploadPath
+          )
+          
+          console.log(`🖼️ uploadImageFromUrl result:`, result)
+          
+          if (result && result.url) {
+            console.log(`✅ Set image upload successful!`)
+            console.log(`✅ WebP URL: ${result.url}`)
+            console.log(`✅ File path: ${result.path}`)
+            
+            // lego_sets 테이블의 webp_image_url 필드 업데이트
+            try {
+              console.log(`🔄 Updating lego_sets table for ${setData.set_num}...`)
+              console.log(`🔄 WebP URL to save: ${result.url}`)
+              
+              const { error: updateError } = await supabase
+                .from('lego_sets')
+                .update({ webp_image_url: result.url })
+                .eq('set_num', setData.set_num)
+              
+              if (updateError) {
+                console.error(`❌ lego_sets webp_image_url 업데이트 실패: ${updateError.message}`)
+                console.error(`❌ Update details:`, {
+                  setNum: setData.set_num,
+                  webpUrl: result.url,
+                  error: updateError
+                })
+              } else {
+                console.log(`✅ lego_sets webp_image_url 업데이트 완료: ${setData.set_num}`)
+                console.log(`✅ Saved WebP URL: ${result.url}`)
+              }
+            } catch (updateErr) {
+              console.error(`❌ lego_sets webp_image_url 업데이트 중 오류: ${updateErr.message}`)
+              console.error(`❌ Update error details:`, updateErr)
+            }
+          } else {
+            console.log(`⚠️ Set image WebP conversion failed: ${setData.set_num}`)
+          }
+        } else {
+          console.warn(`세트 ${setData.set_num}에 이미지 URL이 없습니다.`)
+        }
+      } catch (imageError) {
+        console.warn(`⚠️ Set image WebP conversion failed for ${setData.set_num}:`, imageError)
+        // 이미지 변환 실패해도 세트 저장은 계속 진행
+      }
       
       progress.value = 100
       currentStep.value = '완료!'

@@ -143,6 +143,38 @@
         <button @click="retryFailedParts" class="btn-primary btn-small" v-if="failedParts.length > 0">
           🔄 실패한 부품 재시도 ({{ failedParts.length }}개)
         </button>
+        <button @click="startAutoRecovery" class="btn-success btn-small" v-if="!autoRecoveryStatus.isActive">
+          🛡️ 자동 복구 시작
+        </button>
+        <button @click="stopAutoRecovery" class="btn-warning btn-small" v-if="autoRecoveryStatus.isActive">
+          🛑 자동 복구 중단
+        </button>
+        <button @click="startAutoRecoveryMonitoring" class="btn-info btn-small" v-if="!autoRecoveryMonitoring">
+          📊 모니터링 시작
+        </button>
+        <button @click="stopAutoRecoveryMonitoring" class="btn-secondary btn-small" v-if="autoRecoveryMonitoring">
+          📊 모니터링 중단
+        </button>
+        <button @click="reallocatePort" class="btn-warning btn-small">
+          🔄 포트 재할당
+        </button>
+        <button @click="togglePortMonitoring('start')" class="btn-info btn-small" v-if="!portManagerStatus.isPortMonitoring">
+          📡 포트 모니터링 시작
+        </button>
+        <button @click="togglePortMonitoring('stop')" class="btn-secondary btn-small" v-if="portManagerStatus.isPortMonitoring">
+          📡 포트 모니터링 중단
+        </button>
+      </div>
+    </div>
+
+    <!-- 데이터셋 변환 안내 -->
+    <div class="dataset-conversion-notice">
+      <h3>📊 데이터셋 변환</h3>
+        <div class="notice-content">
+        <p>렌더링된 이미지를 YOLO 학습용 데이터셋으로 변환하려면 전용 페이지를 사용하세요.</p>
+        <router-link to="/dataset-converter" class="btn btn-primary">
+          📊 데이터셋 변환 페이지로 이동
+        </router-link>
       </div>
     </div>
 
@@ -374,6 +406,82 @@
       </div>
       <p>{{ renderProgress }}% 완료 ({{ currentImage }}/{{ totalImages }})</p>
       
+      <!-- 자동 복구 시스템 상태 -->
+      <div class="auto-recovery-status" v-if="autoRecoveryStatus.isActive || autoRecoveryMonitoring">
+        <h4>🛡️ 자동 복구 시스템</h4>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="status-label">시스템:</span>
+            <span class="status-value" :class="autoRecoveryStatus.isActive ? 'status-active' : 'status-inactive'">
+              {{ autoRecoveryStatus.isActive ? '활성' : '비활성' }}
+            </span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">모니터:</span>
+            <span class="status-value" :class="autoRecoveryStatus.serverMonitor.running ? 'status-active' : 'status-inactive'">
+              {{ autoRecoveryStatus.serverMonitor.running ? '실행 중' : '중지됨' }}
+            </span>
+          </div>
+          <div class="status-item">
+            <span class="status-label">재시도:</span>
+            <span class="status-value">{{ autoRecoveryStatus.serverMonitor.retryCount }}/{{ autoRecoveryStatus.serverMonitor.maxRetries }}</span>
+          </div>
+        </div>
+        
+        <!-- 자동 복구 로그 -->
+        <div class="auto-recovery-logs" v-if="autoRecoveryStatus.logs.length > 0">
+          <h5>자동 복구 로그</h5>
+          <div class="log-container">
+            <div 
+              v-for="(log, index) in autoRecoveryStatus.logs.slice(-5)" 
+              :key="index"
+              class="log-item"
+              :class="`log-${log.type}`"
+            >
+              <span class="log-time">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+              <span class="log-message">{{ log.message }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 포트 관리 시스템 상태 -->
+      <div class="port-management-status" v-if="portManagerStatus.currentPort || portManagerStatus.isPortMonitoring">
+        <h4>🔌 포트 관리 시스템</h4>
+        <div class="port-status-grid">
+          <div class="port-status-item">
+            <span class="port-label">현재 포트:</span>
+            <span class="port-value">{{ portManagerStatus.currentPort || 'N/A' }}</span>
+          </div>
+          <div class="port-status-item">
+            <span class="port-label">모니터링:</span>
+            <span class="port-value" :class="portManagerStatus.isPortMonitoring ? 'status-active' : 'status-inactive'">
+              {{ portManagerStatus.isPortMonitoring ? '활성' : '비활성' }}
+            </span>
+          </div>
+          <div class="port-status-item">
+            <span class="port-label">충돌 포트:</span>
+            <span class="port-value">{{ portManagerStatus.portConflicts.length }}개</span>
+          </div>
+        </div>
+        
+        <!-- 포트 히스토리 -->
+        <div class="port-history" v-if="portManagerStatus.portHistory.length > 0">
+          <h5>포트 할당 히스토리</h5>
+          <div class="history-container">
+            <div 
+              v-for="(entry, index) in portManagerStatus.portHistory.slice(-5)" 
+              :key="index"
+              class="history-item"
+            >
+              <span class="history-time">{{ new Date(entry.timestamp).toLocaleTimeString() }}</span>
+              <span class="history-port">포트: {{ entry.port }}</span>
+              <span class="history-reason">{{ entry.reason }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- 현재 렌더링 중인 부품 정보 -->
       <div class="current-rendering" v-if="currentRenderingPart">
         <h4>🎯 현재 렌더링 중인 부품</h4>
@@ -400,6 +508,64 @@
           :class="log.type"
         >
           {{ log.message }}
+        </div>
+      </div>
+    </div>
+    
+    <!-- 자동 복구 시스템 독립 상태 패널 -->
+    <div class="auto-recovery-panel" v-if="!isRendering && (autoRecoveryStatus.isActive || autoRecoveryMonitoring)">
+      <h3>🛡️ 자동 복구 시스템</h3>
+      <div class="status-overview">
+        <div class="status-card">
+          <div class="status-header">
+            <span class="status-title">시스템 상태</span>
+            <span class="status-indicator" :class="autoRecoveryStatus.isActive ? 'indicator-active' : 'indicator-inactive'"></span>
+          </div>
+          <div class="status-content">
+            <p>{{ autoRecoveryStatus.isActive ? '자동 복구 활성화됨' : '자동 복구 비활성화됨' }}</p>
+          </div>
+        </div>
+        
+        <div class="status-card">
+          <div class="status-header">
+            <span class="status-title">서버 모니터</span>
+            <span class="status-indicator" :class="autoRecoveryStatus.serverMonitor.running ? 'indicator-active' : 'indicator-inactive'"></span>
+          </div>
+          <div class="status-content">
+            <p>재시도: {{ autoRecoveryStatus.serverMonitor.retryCount }}/{{ autoRecoveryStatus.serverMonitor.maxRetries }}</p>
+            <p v-if="autoRecoveryStatus.serverMonitor.lastCheck">
+              마지막 확인: {{ new Date(autoRecoveryStatus.serverMonitor.lastCheck).toLocaleString() }}
+            </p>
+          </div>
+        </div>
+        
+        <div class="status-card">
+          <div class="status-header">
+            <span class="status-title">자동 복구</span>
+            <span class="status-indicator" :class="autoRecoveryStatus.autoRecovery.running ? 'indicator-active' : 'indicator-inactive'"></span>
+          </div>
+          <div class="status-content">
+            <p>{{ autoRecoveryStatus.autoRecovery.renderingResumed ? '렌더링 복구됨' : '대기 중' }}</p>
+            <p v-if="autoRecoveryStatus.autoRecovery.lastStateCheck">
+              상태 확인: {{ new Date(autoRecoveryStatus.autoRecovery.lastStateCheck).toLocaleString() }}
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 자동 복구 로그 -->
+      <div class="auto-recovery-logs" v-if="autoRecoveryStatus.logs.length > 0">
+        <h4>자동 복구 로그</h4>
+        <div class="log-container">
+          <div 
+            v-for="(log, index) in autoRecoveryStatus.logs.slice(-10)" 
+            :key="index"
+            class="log-item"
+            :class="`log-${log.type}`"
+          >
+            <span class="log-time">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+            <span class="log-message">{{ log.message }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -635,6 +801,38 @@ export default {
     const renderResults = ref([])
     const resolvedPartIdForFiles = ref('')
     
+    // 자동 복구 시스템 상태
+    const autoRecoveryStatus = ref({
+      isActive: false,
+      serverMonitor: {
+        running: false,
+        lastCheck: null,
+        retryCount: 0,
+        maxRetries: 5
+      },
+      autoRecovery: {
+        running: false,
+        lastStateCheck: null,
+        renderingResumed: false
+      },
+      logs: []
+    })
+    
+    // 자동 복구 시스템 모니터링
+    const autoRecoveryMonitoring = ref(false)
+    
+    // 포트 관리 시스템 상태
+    const portManagerStatus = ref({
+      currentPort: null,
+      portHistory: [],
+      portConflicts: [],
+      isPortMonitoring: false,
+      autoRecoveryPort: null
+    })
+    
+    // 렌더링 상태만 유지
+    const hasRenderedData = ref(false)
+    
     const availableSets = ref([])
     const setParts = ref([])
     const batchJobs = ref([])
@@ -646,6 +844,24 @@ export default {
     const failedParts = ref([])
     
     // 중복 렌더링 방지를 위한 추적 시스템
+    
+    // 렌더링 완료 시 데이터셋 변환 가능하도록 설정
+    const checkRenderedData = async () => {
+      try {
+        const response = await fetch('/api/dataset/source-count')
+        const data = await response.json()
+        const count = data.count || 0
+        hasRenderedData.value = count > 0
+      } catch (error) {
+        console.error('Rendered data check error:', error)
+        hasRenderedData.value = false
+      }
+    }
+    
+    // 컴포넌트 마운트 시 초기화
+    onMounted(async () => {
+      await checkRenderedData()
+    })
     const renderedItems = ref(new Set()) // 이미 렌더링된 아이템 추적
     const duplicateCheck = ref(new Map()) // elementId + partNum 조합으로 중복 체크
     const excludedCount = ref(0) // 제외된 부품 수
@@ -961,17 +1177,31 @@ export default {
         const folderExists = async (folderPath) => {
           for (const bucket of candidateBuckets) {
             try {
-              const { data: folderData, error: folderError } = await supabase.storage
-                .from(bucket)
-                // 최소 파일 수 기준으로 존재 판정 강화
-                .list(folderPath, { limit: DUP_MIN_FILES })
-              if (!folderError && Array.isArray(folderData) && folderData.length >= DUP_MIN_FILES) {
-                return true
+              // CORS 문제 해결을 위한 백엔드 프록시 사용
+              const proxyUrl = `/api/supabase/storage/list/${bucket}/${encodeURIComponent(folderPath)}`
+              const response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+                }
+              })
+              
+              if (response.ok) {
+                const folderData = await response.json()
+                if (Array.isArray(folderData) && folderData.length >= DUP_MIN_FILES) {
+                  console.log(`✅ 폴더 확인: ${bucket}/${folderPath} (${folderData.length}개 파일)`)
+                  return true
+                }
+              } else {
+                console.warn(`⚠️ 프록시 요청 실패: ${response.status}`)
               }
-            } catch (_) {
+            } catch (err) {
+              console.warn(`⚠️ 버킷 ${bucket} 접근 실패:`, err.message)
               // 다음 버킷 후보 시도
             }
           }
+          console.log(`❌ 폴더 없음: ${folderPath} (모든 버킷에서 확인됨)`)
           return false
         }
         // 폴더 키(elementId || part_num)별로 해당 파트들의 elementKey 집합을 구성
@@ -1230,8 +1460,251 @@ export default {
       console.log('렌더링 설정 업데이트:', renderMode.value)
     }
 
+    // 서버 연결 상태 확인
+    const checkServerConnection = async () => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/status', { 
+          timeout: 3000,
+          signal: AbortSignal.timeout(3000)
+        })
+        return response.ok
+      } catch (error) {
+        console.warn('서버 연결 확인 실패:', error)
+        return false
+      }
+    }
+    
+    // 자동 서버 재연결
+    const autoReconnect = async (maxRetries = 5) => {
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          console.log(`서버 재연결 시도 ${i + 1}/${maxRetries}`)
+          
+          // 서버 상태 확인
+          if (await checkServerConnection()) {
+            console.log('✅ 서버 연결 복구됨')
+            return true
+          }
+          
+          // 잠시 대기 후 재시도
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          
+        } catch (error) {
+          console.warn(`재연결 시도 ${i + 1} 실패:`, error)
+        }
+      }
+      
+      console.error('❌ 서버 재연결 실패')
+      return false
+    }
+    
+    // 자동 복구 시스템 상태 조회
+    const fetchAutoRecoveryStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/auto-recovery/status', {
+          timeout: 3000,
+          signal: AbortSignal.timeout(3000)
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          autoRecoveryStatus.value = data.autoRecovery
+          return true
+        }
+        return false
+      } catch (error) {
+        console.warn('자동 복구 상태 조회 실패:', error)
+        return false
+      }
+    }
+    
+    // 자동 복구 시스템 시작
+    const startAutoRecovery = async () => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/auto-recovery/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          autoRecoveryStatus.value = data.status
+          renderLogs.value.push({
+            type: 'success',
+            message: '자동 복구 시스템이 시작되었습니다'
+          })
+          return true
+        }
+        return false
+      } catch (error) {
+        console.error('자동 복구 시스템 시작 실패:', error)
+        renderLogs.value.push({
+          type: 'error',
+          message: `자동 복구 시스템 시작 실패: ${error.message}`
+        })
+        return false
+      }
+    }
+    
+    // 자동 복구 시스템 중단
+    const stopAutoRecovery = async () => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/auto-recovery/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          autoRecoveryStatus.value = data.status
+          renderLogs.value.push({
+            type: 'info',
+            message: '자동 복구 시스템이 중단되었습니다'
+          })
+          return true
+        }
+        return false
+      } catch (error) {
+        console.error('자동 복구 시스템 중단 실패:', error)
+        renderLogs.value.push({
+          type: 'error',
+          message: `자동 복구 시스템 중단 실패: ${error.message}`
+        })
+        return false
+      }
+    }
+    
+    // 자동 복구 시스템 모니터링 시작
+    const startAutoRecoveryMonitoring = () => {
+      if (autoRecoveryMonitoring.value) return
+      
+      autoRecoveryMonitoring.value = true
+      
+      const monitorInterval = setInterval(async () => {
+        if (!autoRecoveryMonitoring.value) {
+          clearInterval(monitorInterval)
+          return
+        }
+        
+        await fetchAutoRecoveryStatus()
+      }, 5000) // 5초마다 상태 업데이트
+      
+      renderLogs.value.push({
+        type: 'info',
+        message: '자동 복구 시스템 모니터링이 시작되었습니다'
+      })
+    }
+    
+    // 자동 복구 시스템 상태 실시간 업데이트
+    const updateAutoRecoveryStatus = () => {
+      if (autoRecoveryMonitoring.value) {
+        fetchAutoRecoveryStatus()
+      }
+    }
+    
+    // 포트 상태 조회
+    const fetchPortStatus = async () => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/ports/status', {
+          timeout: 3000,
+          signal: AbortSignal.timeout(3000)
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          portManagerStatus.value = data.portManager
+          return true
+        }
+        return false
+      } catch (error) {
+        console.warn('포트 상태 조회 실패:', error)
+        return false
+      }
+    }
+    
+    // 포트 재할당
+    const reallocatePort = async (preferredPort = 3002) => {
+      try {
+        const response = await fetch('http://localhost:3002/api/synthetic/ports/reallocate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preferredPort })
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          renderLogs.value.push({
+            type: 'success',
+            message: `포트 재할당 완료: ${data.newPort}`
+          })
+          await fetchPortStatus()
+          return true
+        }
+        return false
+      } catch (error) {
+        console.error('포트 재할당 실패:', error)
+        renderLogs.value.push({
+          type: 'error',
+          message: `포트 재할당 실패: ${error.message}`
+        })
+        return false
+      }
+    }
+    
+    // 포트 모니터링 시작/중단
+    const togglePortMonitoring = async (action) => {
+      try {
+        const response = await fetch(`http://localhost:3002/api/synthetic/ports/monitoring/${action}`, {
+          method: 'POST'
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          renderLogs.value.push({
+            type: 'info',
+            message: data.message
+          })
+          await fetchPortStatus()
+          return true
+        }
+        return false
+      } catch (error) {
+        console.error('포트 모니터링 제어 실패:', error)
+        renderLogs.value.push({
+          type: 'error',
+          message: `포트 모니터링 제어 실패: ${error.message}`
+        })
+        return false
+      }
+    }
+    
+    // 자동 복구 시스템 모니터링 중단
+    const stopAutoRecoveryMonitoring = () => {
+      autoRecoveryMonitoring.value = false
+      renderLogs.value.push({
+        type: 'info',
+        message: '자동 복구 시스템 모니터링이 중단되었습니다'
+      })
+    }
+
     const startRendering = async () => {
       if (!canStartRendering.value) return
+      
+      // 서버 연결 확인
+      if (!(await checkServerConnection())) {
+        renderLogs.value.push({ 
+          type: 'warning', 
+          message: '서버 연결 실패. 자동 재연결 시도 중...' 
+        })
+        
+        if (!(await autoReconnect())) {
+          renderLogs.value.push({ 
+            type: 'error', 
+            message: '서버 재연결 실패. 수동으로 서버를 시작해주세요.' 
+          })
+          return
+        }
+      }
       
       // 세트 모드는 단일 호출 대신 배치 렌더링 플로우로 위임
       if (renderMode.value === 'set') {
@@ -1366,7 +1839,23 @@ export default {
           const pollInterval = setInterval(async () => {
             try {
               // 진행상황
-              const progressRes = await fetch(`/api/synthetic/progress/${jobId}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+              // Synthetic API 서버 포트 동적 감지
+              let syntheticPort = 3001 // 기본값
+              try {
+                const portResponse = await fetch('/.synthetic-api-port.json')
+                if (portResponse.ok) {
+                  const portData = await portResponse.json()
+                  syntheticPort = portData.port
+                }
+              } catch (portError) {
+                console.warn('Synthetic API 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+              }
+              
+              const progressRes = await fetch(`http://localhost:${syntheticPort}/api/synthetic/progress/${jobId}`, { 
+                cache: 'no-store', 
+                headers: { 'Cache-Control': 'no-cache' },
+                signal: AbortSignal.timeout(5000) // 5초 타임아웃
+              })
               const progressJson = await progressRes.json()
               if (progressJson && progressJson.success) {
                 renderProgress.value = Math.round(progressJson.progress || 0)
@@ -1379,7 +1868,7 @@ export default {
               const fetchPart = resolvedPartIdForFiles.value || selectedPartId.value
               if (isSingleMode && fetchPart) {
                 try {
-                  const filesRes = await fetch(`/api/synthetic/files/${fetchPart}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
+                  const filesRes = await fetch(`http://localhost:3007/api/synthetic/files/${fetchPart}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } })
                   if (!filesRes.ok) {
                     // 404 등은 무시하고 다음 폴링으로
                     return
@@ -1607,7 +2096,19 @@ export default {
               while (status === 'running' && attempts < maxAttempts) {
                 await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
                 try {
-                  const pRes = await fetch(`/api/synthetic/progress/${jobId}`, { cache: 'no-store' })
+                  // Synthetic API 서버 포트 동적 감지
+                  let syntheticPort = 3002 // 기본값
+                  try {
+                    const portResponse = await fetch('/.synthetic-api-port.json')
+                    if (portResponse.ok) {
+                      const portData = await portResponse.json()
+                      syntheticPort = portData.port
+                    }
+                  } catch (portError) {
+                    console.warn('Synthetic API 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+                  }
+                  
+                  const pRes = await fetch(`http://localhost:${syntheticPort}/api/synthetic/progress/${jobId}`, { cache: 'no-store' })
                   const pJson = await pRes.json()
                   status = pJson.status
                   attempts++
@@ -2315,6 +2816,12 @@ export default {
       await loadAutoTrainingSetting()
       await loadSetTrainingStats()
       
+      // 자동 복구 시스템 상태 초기 로드
+      await fetchAutoRecoveryStatus()
+      
+      // 포트 상태 초기 로드
+      await fetchPortStatus()
+      
       // 통계 디버깅
       console.log('📊 현재 통계:', stats.value)
       
@@ -2391,6 +2898,20 @@ export default {
       updateAutoTrainingSetting,
       loadAutoTrainingSetting,
       loadSetTrainingStats,
+      // 자동 복구 시스템 관련
+      autoRecoveryStatus,
+      autoRecoveryMonitoring,
+      fetchAutoRecoveryStatus,
+      startAutoRecovery,
+      stopAutoRecovery,
+      startAutoRecoveryMonitoring,
+      stopAutoRecoveryMonitoring,
+      updateAutoRecoveryStatus,
+      // 포트 관리 시스템 관련
+      portManagerStatus,
+      fetchPortStatus,
+      reallocatePort,
+      togglePortMonitoring,
       trainedSetsCount,
       availableSetsCount,
       // 신규 설정 (기술문서 정합성)
@@ -2402,13 +2923,290 @@ export default {
       yoloIou,
       yoloMaxDet,
       showAdvanced,
-      validateQuality
+      validateQuality,
+      
+      // 렌더링 상태만 유지
+      hasRenderedData,
+      checkRenderedData
     }
   }
 }
 </script>
 
 <style scoped>
+/* 자동 복구 시스템 UI 스타일 */
+.auto-recovery-status {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+}
+
+.status-label {
+  font-weight: 500;
+  color: #495057;
+}
+
+.status-value {
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.status-active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-inactive {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.auto-recovery-logs {
+  margin-top: 15px;
+}
+
+.auto-recovery-logs h4,
+.auto-recovery-logs h5 {
+  margin: 0 0 10px 0;
+  color: #495057;
+  font-size: 1.1em;
+}
+
+.log-container {
+  max-height: 200px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.log-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.log-time {
+  color: #6c757d;
+  margin-right: 10px;
+  font-size: 0.8em;
+  min-width: 80px;
+}
+
+.log-message {
+  flex: 1;
+}
+
+.log-info {
+  background: #d1ecf1;
+  color: #0c5460;
+}
+
+.log-success {
+  background: #d4edda;
+  color: #155724;
+}
+
+.log-warning {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.log-error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* 자동 복구 독립 패널 */
+.auto-recovery-panel {
+  margin: 20px 0;
+  padding: 20px;
+  background: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e9ecef;
+}
+
+.auto-recovery-panel h3 {
+  margin: 0 0 20px 0;
+  color: #495057;
+  font-size: 1.3em;
+}
+
+.status-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.status-card {
+  background: white;
+  border-radius: 8px;
+  border: 1px solid #dee2e6;
+  padding: 15px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.status-title {
+  font-weight: 600;
+  color: #495057;
+  font-size: 1.1em;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px #dee2e6;
+}
+
+.indicator-active {
+  background: #28a745;
+}
+
+.indicator-inactive {
+  background: #dc3545;
+}
+
+.status-content p {
+  margin: 5px 0;
+  color: #6c757d;
+  font-size: 0.9em;
+}
+
+.status-content p:first-child {
+  font-weight: 500;
+  color: #495057;
+}
+
+/* 포트 관리 시스템 UI 스타일 */
+.port-management-status {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f0f8ff;
+  border-radius: 8px;
+  border: 1px solid #b3d9ff;
+}
+
+.port-management-status h4 {
+  margin: 0 0 15px 0;
+  color: #0066cc;
+  font-size: 1.2em;
+}
+
+.port-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.port-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #b3d9ff;
+}
+
+.port-label {
+  font-weight: 500;
+  color: #0066cc;
+}
+
+.port-value {
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: #e6f3ff;
+  color: #0066cc;
+}
+
+.port-history {
+  margin-top: 15px;
+}
+
+.port-history h5 {
+  margin: 0 0 10px 0;
+  color: #0066cc;
+  font-size: 1.1em;
+}
+
+.history-container {
+  max-height: 150px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #b3d9ff;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  background: #f8fcff;
+  border: 1px solid #e6f3ff;
+}
+
+.history-time {
+  color: #6c757d;
+  margin-right: 10px;
+  font-size: 0.8em;
+  min-width: 80px;
+}
+
+.history-port {
+  font-weight: 600;
+  color: #0066cc;
+  margin-right: 10px;
+  min-width: 80px;
+}
+
+.history-reason {
+  flex: 1;
+  color: #495057;
+  font-style: italic;
+}
 .synthetic-dataset-manager {
   max-width: 1200px;
   margin: 0 auto;
@@ -3345,6 +4143,110 @@ export default {
   opacity: 0.8;
   font-size: 12px;
 }
+
+/* 데이터셋 변환 섹션 스타일 */
+/* 데이터셋 변환 안내 섹션 */
+.dataset-conversion-notice {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  color: white;
+  text-align: center;
+}
+
+.dataset-conversion-notice h3 {
+  margin: 0 0 15px 0;
+  font-size: 1.5rem;
+  color: white;
+}
+
+.dataset-conversion-notice .notice-content p {
+  margin: 0 0 20px 0;
+  font-size: 1.1rem;
+  opacity: 0.9;
+}
+
+.dataset-conversion-notice .btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  padding: 12px 24px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  transition: all 0.3s ease;
+  display: inline-block;
+}
+
+.dataset-conversion-notice .btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+/* 프로덕션 환경 안내 스타일 */
+.production-notice {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.notice-header h4 {
+  margin: 0 0 15px 0;
+  color: #856404;
+  font-size: 18px;
+}
+
+.notice-content p {
+  margin: 0 0 15px 0;
+  color: #856404;
+  font-weight: 500;
+}
+
+.notice-content ul {
+  margin: 0 0 20px 0;
+  padding-left: 20px;
+}
+
+.notice-content li {
+  margin: 5px 0;
+  color: #856404;
+}
+
+.alternatives {
+  background: white;
+  border-radius: 6px;
+  padding: 15px;
+  border: 1px solid #ffeaa7;
+}
+
+.alternatives h5 {
+  margin: 0 0 10px 0;
+  color: #856404;
+  font-size: 16px;
+}
+
+.alternatives ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.alternatives li {
+  margin: 8px 0;
+  color: #856404;
+}
+
+.alternatives code {
+  background: #f8f9fa;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  color: #e74c3c;
+}
+
 
 /* 고급 설정 스타일 */
 .advanced-settings {

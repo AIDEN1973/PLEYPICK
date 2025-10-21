@@ -394,33 +394,17 @@ export function useDatabase() {
     }
   }
 
-  // 작업 로그 저장
+  // 작업 로그 저장 (완전 비활성화 - RLS 정책 문제)
   const saveOperationLog = async (operationData) => {
-    loading.value = true
-    error.value = null
-
-    try {
-      const { data, error: dbError } = await supabase
-        .from('operation_logs')
-        .insert({
-          admin_user_id: operationData.admin_user_id,
-          operation_type: operationData.operation_type,
-          target_type: operationData.target_type,
-          target_id: operationData.target_id,
-          status: operationData.status,
-          message: operationData.message,
-          metadata: operationData.metadata
-        })
-        .select()
-
-      if (dbError) throw dbError
-      return data[0]
-    } catch (err) {
-      error.value = err.message
-      throw err
-    } finally {
-      loading.value = false
-    }
+    // operation_logs 테이블의 RLS 정책 문제로 인해 완전히 비활성화
+    // 콘솔에만 로그 출력하여 디버깅 가능
+    console.log('📝 Operation log (disabled due to RLS policy):', {
+      operation_type: operationData.operation_type,
+      target_type: operationData.target_type,
+      status: operationData.status,
+      message: operationData.message?.substring(0, 100) + '...'
+    })
+    return null
   }
 
   // 세트 목록 조회
@@ -434,7 +418,7 @@ export function useDatabase() {
 
       const { data, error: dbError } = await supabase
         .from('lego_sets')
-        .select('*')
+        .select('*, webp_image_url')
         .order('created_at', { ascending: false })
         .range(from, to)
 

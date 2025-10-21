@@ -152,11 +152,20 @@ const checkSupabaseConnection = async () => {
   // 렌더링 시작
   const startRendering = async (config) => {
     try {
-      // 렌더링 시작
+      // Synthetic API 서버 포트 동적 감지
+      let syntheticPort = 3001 // 기본값
+      try {
+        const portResponse = await fetch('/.synthetic-api-port.json')
+        if (portResponse.ok) {
+          const portData = await portResponse.json()
+          syntheticPort = portData.port
+        }
+      } catch (portError) {
+        console.warn('Synthetic API 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+      }
       
-      // 실제 렌더링 로직은 백엔드에서 처리
-      // 실제 구현 필요
-      const response = await fetch('/api/synthetic/start-rendering', {
+      // 렌더링 시작
+      const response = await fetch(`http://localhost:${syntheticPort}/api/synthetic/start-rendering`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -290,7 +299,19 @@ const checkSupabaseConnection = async () => {
   const getRenderProgress = async (jobId) => {
     try {
       // 실제 구현에서는 WebSocket이나 Server-Sent Events 사용
-      const response = await fetch(`/api/synthetic/progress/${jobId}`)
+      // Synthetic API 서버 포트 동적 감지
+      let syntheticPort = 3001 // 기본값
+      try {
+        const portResponse = await fetch('/.synthetic-api-port.json')
+        if (portResponse.ok) {
+          const portData = await portResponse.json()
+          syntheticPort = portData.port
+        }
+      } catch (portError) {
+        console.warn('Synthetic API 포트 정보 읽기 실패, 기본값 사용:', portError.message)
+      }
+      
+      const response = await fetch(`http://localhost:${syntheticPort}/api/synthetic/progress/${jobId}`)
       
       if (!response.ok) {
         throw new Error('진행 상황 조회 실패')

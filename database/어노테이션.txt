@@ -47,7 +47,7 @@ Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상�
   "element_id": "453601",
   "part_id": "4536",
   "class_map_version": "v2025-10-11-a",
-  "image_size": [640, 640],
+  "image_size": [1024, 1024],  # 고해상도 기본 설정
 
   "class_id_mapping": { "4536": 12, "3001": 13, "3068b": 14 },
   "render_source": "auto_renderer_v5",

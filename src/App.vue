@@ -5,22 +5,35 @@
         <h1>BrickBox</h1>
       </div>
       <div class="nav-links">
-        <router-link to="/" class="nav-link">홈</router-link>
         <router-link to="/login" class="nav-link" v-if="!user">로그인</router-link>
-        <router-link to="/dashboard" class="nav-link" v-if="user">대시보드</router-link>
         <div v-if="user" class="lego-menu">
           <router-link to="/new-lego" class="nav-link">신규 레고 등록</router-link>
           <router-link to="/saved-lego" class="nav-link">저장된 레고</router-link>
-          <router-link to="/element-search" class="nav-link">🔍 Element ID 검색</router-link>
-          <router-link to="/metadata-management" class="nav-link">🤖 메타데이터 관리</router-link>
-          <router-link to="/store-manager" class="nav-link">매장 관리</router-link>
-          <router-link to="/store-management" class="nav-link">🏪 매장 대시보드</router-link>
           <router-link to="/synthetic-dataset" class="nav-link">합성 데이터셋</router-link>
-          <router-link to="/hybrid-detection" class="nav-link">부품 검출</router-link>
+          <router-link to="/render-optimization" class="nav-link">🚀 렌더링 최적화</router-link>
+          <router-link to="/failed-uploads" class="nav-link">📤 실패 업로드 관리</router-link>
+          <router-link to="/dataset-converter" class="nav-link">📊 데이터셋 변환</router-link>
           <router-link to="/automated-training" class="nav-link">🧠 AI 학습</router-link>
-          <router-link to="/monitoring" class="nav-link">📊 모니터링</router-link>
-          <router-link to="/model-monitoring" class="nav-link">🤖 모델 모니터링</router-link>
-          <router-link to="/system-monitoring" class="nav-link">🔍 시스템 모니터링</router-link>
+          <router-link to="/hybrid-detection" class="nav-link">부품 검출</router-link>
+          
+          <!-- 관리 메뉴 드롭다운 -->
+          <div class="dropdown-menu" @mouseenter="handleMouseEnter" @mouseleave="handleMouseLeave">
+            <button class="nav-link dropdown-toggle">
+              🛠️ 관리
+              <span class="dropdown-arrow">▼</span>
+            </button>
+            <div class="dropdown-content" v-show="showManagementMenu" @mouseenter="handleMouseEnter" @mouseleave="handleMouseLeave">
+              <router-link to="/dashboard" class="dropdown-item">📊 대시보드</router-link>
+              <router-link to="/element-search" class="dropdown-item">🔍 Element ID 검색</router-link>
+              <router-link to="/metadata-management" class="dropdown-item">🤖 메타데이터 관리</router-link>
+              <router-link to="/store-manager" class="dropdown-item">매장 관리</router-link>
+              <router-link to="/store-management" class="dropdown-item">🏪 매장 대시보드</router-link>
+              <router-link to="/monitoring" class="dropdown-item">📊 모니터링</router-link>
+              <router-link to="/model-monitoring" class="dropdown-item">🤖 모델 모니터링</router-link>
+              <router-link to="/system-monitoring" class="dropdown-item">🔍 시스템 모니터링</router-link>
+              <router-link to="/quality-healing" class="dropdown-item">📊 품질 회복 대시보드</router-link>
+            </div>
+          </div>
         </div>
         <button @click="logout" class="nav-link logout-btn" v-if="user">로그아웃</button>
       </div>
@@ -41,15 +54,34 @@ export default {
   setup() {
     const router = useRouter()
     const { supabase, user } = useSupabase()
+    const showManagementMenu = ref(false)
+    let closeTimer = null
 
     const logout = async () => {
       await supabase.auth.signOut()
       router.push('/')
     }
 
+    const handleMouseEnter = () => {
+      if (closeTimer) {
+        clearTimeout(closeTimer)
+        closeTimer = null
+      }
+      showManagementMenu.value = true
+    }
+
+    const handleMouseLeave = () => {
+      closeTimer = setTimeout(() => {
+        showManagementMenu.value = false
+      }, 150) // 150ms 지연
+    }
+
     return {
       user,
-      logout
+      logout,
+      showManagementMenu,
+      handleMouseEnter,
+      handleMouseLeave
     }
   }
 }
@@ -133,6 +165,70 @@ body {
   font-size: inherit;
 }
 
+/* 드롭다운 메뉴 스타일 */
+.dropdown-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-toggle {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.dropdown-toggle:hover {
+  background-color: rgba(255,255,255,0.1);
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.dropdown-menu:hover .dropdown-arrow {
+  transform: rotate(180deg);
+}
+
+.dropdown-content {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: white;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  border-radius: 8px;
+  z-index: 1000;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.dropdown-item {
+  display: block;
+  color: #333;
+  text-decoration: none;
+  padding: 0.75rem 1rem;
+  transition: background-color 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.dropdown-item:hover {
+  background-color: #f8f9fa;
+  color: #667eea;
+}
+
 .main-content {
   padding: 2rem;
   max-width: 1200px;
@@ -155,6 +251,24 @@ body {
   .lego-menu {
     flex-wrap: wrap;
     justify-content: center;
+  }
+  
+  .dropdown-content {
+    position: static;
+    box-shadow: none;
+    background: rgba(255,255,255,0.1);
+    margin-top: 0;
+    border-radius: 0;
+  }
+  
+  .dropdown-item {
+    color: white;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  
+  .dropdown-item:hover {
+    background-color: rgba(255,255,255,0.1);
+    color: white;
   }
   
   .main-content {

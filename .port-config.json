@@ -1,0 +1,41 @@
+{
+  "frontend": 3000,
+  "trainingApi": 3010,
+  "syntheticApi": 3011,
+  "worker": 3020,
+  "manualUploadApi": 3030,
+  "monitoring": 3040,
+  "timestamp": "2025-10-21T10:08:34.069Z",
+  "services": {
+    "frontend": {
+      "port": 3000,
+      "url": "http://localhost:3000",
+      "description": "Vue.js 프론트엔드"
+    },
+    "trainingApi": {
+      "port": 3010,
+      "url": "http://localhost:3010",
+      "description": "AI 학습 API"
+    },
+    "syntheticApi": {
+      "port": 3011,
+      "url": "http://localhost:3011",
+      "description": "합성 데이터셋 API"
+    },
+    "worker": {
+      "port": 3020,
+      "url": "http://localhost:3020",
+      "description": "백그라운드 워커"
+    },
+    "manualUploadApi": {
+      "port": 3030,
+      "url": "http://localhost:3030",
+      "description": "수동 업로드 API"
+    },
+    "monitoring": {
+      "port": 3040,
+      "url": "http://localhost:3040",
+      "description": "모니터링 대시보드"
+    }
+  }
+}
