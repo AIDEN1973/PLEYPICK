@@ -10,8 +10,8 @@ export function usePartCharacteristics() {
   const LLM_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || 'your-openai-api-key'
   const LLM_BASE_URL = 'https://api.openai.com/v1'
 
-  // LLM API 호출 헬퍼
-  const callLLM = async (prompt, model = 'gpt-4o-mini') => {
+  // LLM API 호출 헬퍼 (Vision API 지원)
+  const callLLM = async (messages, model = 'gpt-4o-mini') => {
     try {
       const response = await fetch(`${LLM_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -21,13 +21,8 @@ export function usePartCharacteristics() {
         },
         body: JSON.stringify({
           model: model,
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 1000,
+          messages: messages,
+          max_completion_tokens: 1000,
           temperature: 0.3
         })
       })
@@ -57,20 +52,42 @@ export function usePartCharacteristics() {
     }
   }
 
-  // 부품 특징 LLM 분석
-  const analyzePartWithLLM = async (partData) => {
+  // 부품 특징 LLM 분석 (Vision API 지원)
+  const analyzePartWithLLM = async (partData, imageUrl = null) => {
     analyzing.value = true
     error.value = null
 
     try {
-      const prompt = `
-당신은 레고 부품 분석 전문가입니다. 다음 부품의 이미지와 메타데이터를 분석하여 구조화된 특징 정보를 제공해주세요.
+      // 이미지 URL 우선순위 설정 (WebP 우선 사용)
+      let finalImageUrl = imageUrl || partData.part?.part_img_url || partData.part_img_url
+      
+      // WebP 이미지 우선 사용 로직
+      if (partData.supabase_image_url) {
+        finalImageUrl = partData.supabase_image_url
+        console.log(`✅ Supabase Storage WebP 이미지 사용: ${finalImageUrl}`)
+      } else if (partData.llm_image_url) {
+        finalImageUrl = partData.llm_image_url
+        console.log(`✅ LLM 분석용 WebP 이미지 사용: ${finalImageUrl}`)
+      } else {
+        console.log(`⚠️ WebP 없음, Rebrickable 원본 사용: ${finalImageUrl}`)
+      }
 
+      const messages = [
+        {
+          role: 'system',
+          content: `당신은 레고 부품 분석 전문가입니다. 
+          부품 이미지를 분석하여 구조화된 특징 정보를 제공해주세요.`
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `
 부품 정보:
 - 부품명: ${partData.part.name}
 - 색상: ${partData.color.name}
 - 부품 번호: ${partData.part.part_num}
-- 이미지 URL: ${partData.part.part_img_url}
 
 다음 JSON 구조로 응답해주세요:
 {
@@ -99,10 +116,20 @@ export function usePartCharacteristics() {
     "unique_features": ["고유한 특징들"]
   },
   "confidence": 0.95
-}
-`
+}`
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: finalImageUrl,
+                detail: 'high'
+              }
+            }
+          ]
+        }
+      ]
 
-      const llmResponse = await callLLM(prompt)
+      const llmResponse = await callLLM(messages)
       
       // JSON 파싱
       let analysisResult
@@ -257,8 +284,9 @@ export function usePartCharacteristics() {
         try {
           console.log(`Analyzing part: ${part.part.part_num} (${part.color.name})`)
           
-          // LLM 분석
-          const llmAnalysis = await analyzePartWithLLM(part)
+          // LLM 분석 (WebP 이미지 전달)
+          const imageUrl = part.supabase_image_url || part.llm_image_url || part.part.part_img_url
+          const llmAnalysis = await analyzePartWithLLM(part, imageUrl)
           
           // 특징 정보 저장
           const savedCharacteristics = await savePartCharacteristics(
@@ -268,8 +296,9 @@ export function usePartCharacteristics() {
             llmAnalysis
           )
           
-          // CLIP 임베딩 생성 및 저장
-          const embedding = await generateClipEmbedding(part.part.part_img_url)
+          // CLIP 임베딩 생성 및 저장 (WebP 우선 사용)
+          const imageUrl = part.supabase_image_url || part.llm_image_url || part.part.part_img_url
+          const embedding = await generateClipEmbedding(imageUrl)
           await saveClipEmbedding(
             part.part.part_num,
             setNum,

@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import Home from './views/Home.vue'
 import Login from './views/Login.vue'
@@ -23,6 +24,9 @@ import MetadataManagement from './views/MetadataManagement.vue'
 import FailedUploadManager from './views/FailedUploadManager.vue'
 import QualityHealingDashboard from './views/QualityHealingDashboard.vue'
 import RenderOptimizationDashboard from './views/RenderOptimizationDashboard.vue'
+import CategoryManagementView from './views/CategoryManagementView.vue'
+import SyntheticImageUploader from './views/SyntheticImageUploader.vue'
+import PortManagement from './components/PortManagement.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -46,7 +50,10 @@ const routes = [
   { path: '/metadata-management', name: 'MetadataManagement', component: MetadataManagement },
   { path: '/failed-uploads', name: 'FailedUploadManager', component: FailedUploadManager },
   { path: '/quality-healing', name: 'QualityHealingDashboard', component: QualityHealingDashboard },
-  { path: '/render-optimization', name: 'RenderOptimizationDashboard', component: RenderOptimizationDashboard }
+  { path: '/render-optimization', name: 'RenderOptimizationDashboard', component: RenderOptimizationDashboard },
+  { path: '/category-management', name: 'CategoryManagementView', component: CategoryManagementView },
+  { path: '/synthetic-uploader', name: 'SyntheticImageUploader', component: SyntheticImageUploader },
+  { path: '/port-management', name: 'PortManagement', component: PortManagement }
 ]
 
 const router = createRouter({
@@ -55,5 +62,8 @@ const router = createRouter({
 })
 
 const app = createApp(App)
+const pinia = createPinia()
+
+app.use(pinia)
 app.use(router)
 app.mount('#app')

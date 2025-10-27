@@ -350,7 +350,7 @@ export function useMasterPartsMatching() {
       }
       
       // part_images에 없으면 Storage URL 직접 생성
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
       if (supabaseUrl) {
         const bucketName = 'lego_parts_images'
         const fileName = `${partId}_${colorId}.webp`

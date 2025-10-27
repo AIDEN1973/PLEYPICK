@@ -29,10 +29,10 @@
             :disabled="loading || processing"
           />
           <span class="checkmark"></span>
-          ⚡ 빠른 저장 (LLM 분석 건너뛰기)
+          ⚡ 빠른 저장 (LLM 분석 + CLIP 임베딩 건너뛰기)
         </label>
         <small class="form-help">
-          체크하면 기본 데이터만 저장하고 LLM 분석을 건너뜁니다. (기본값: 체크 해제 = LLM 분석 실행)
+          체크하면 기본 데이터만 저장하고 LLM 분석 + CLIP 임베딩을 건너뜁니다. (기본값: 체크 해제 = 자동 LLM 분석 + CLIP 임베딩 실행)
         </small>
       </div>
     </div>
@@ -253,67 +253,80 @@
       {{ successMessage }}
     </div>
 
-    <!-- 배치 처리 진행률 -->
-    <div v-if="batchLoading" class="batch-processing-progress">
-      <h4>⚡ 배치 처리 중...</h4>
-      <div class="progress">
-        <div class="progress-bar" :style="{ width: batchProgress + '%' }"></div>
-        <span>{{ batchProgress }}%</span>
-      </div>
-      <small>{{ batchCurrentStep }}</small>
-      <div v-if="batchError" class="processing-errors">
-        <small>오류: {{ batchError }}</small>
+    <!-- 진행률 모달 -->
+    <div v-if="showProgressModal" class="progress-modal-overlay" @click="closeProgressModal">
+      <div class="progress-modal" @click.stop>
+        <div class="progress-modal-header">
+          <h3>🚀 처리 진행 중...</h3>
+          <button @click="closeProgressModal" class="close-btn">&times;</button>
+        </div>
+        
+        <div class="progress-modal-content">
+          <!-- 배치 처리 진행률 -->
+          <div v-if="batchLoading" class="progress-section">
+            <h4>⚡ 배치 처리 중...</h4>
+            <div class="progress">
+              <div class="progress-bar" :style="{ width: batchProgress + '%' }"></div>
+              <span>{{ batchProgress }}%</span>
+            </div>
+            <small>{{ batchCurrentStep }}</small>
+            <div v-if="batchError" class="processing-errors">
+              <small>오류: {{ batchError }}</small>
+            </div>
+          </div>
+
+          <!-- LLM 분석 진행률 -->
+          <div v-if="!skipLLMAnalysis && masterDataProgress > 0" class="progress-section">
+            <h4>🤖 AI 메타데이터 생성 중...</h4>
+            <div class="progress">
+              <div class="progress-bar" :style="{ width: masterDataProgress + '%' }"></div>
+              <span>{{ masterDataProgress }}%</span>
+            </div>
+            <small>LLM 분석 및 CLIP 임베딩 생성 중... (고품질 메타데이터)</small>
+          </div>
+
+          <!-- 백그라운드 작업 상태 -->
+          <div v-if="runningTasks.length > 0" class="progress-section">
+            <h4>🔄 백그라운드 작업 중</h4>
+            <div v-for="task in runningTasks" :key="task.id" class="task-item">
+              <div class="task-info">
+                <span class="task-name">{{ task.name }}</span>
+                <span class="task-progress">{{ task.current }}/{{ task.total }} ({{ task.progress }}%)</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: task.progress + '%' }"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 백그라운드 LLM 분석 상태 -->
+          <div v-if="llmRunningTasks.length > 0" class="progress-section">
+            <h4>🤖 LLM 분석 진행 중</h4>
+            <div class="queue-status">
+              <span>대기: {{ queueStatus.pending }} | 실행: {{ queueStatus.running }} | 완료: {{ queueStatus.completed }} | 실패: {{ queueStatus.failed }}</span>
+            </div>
+            <div v-for="task in llmRunningTasks" :key="task.id" class="llm-task-item">
+              <div class="task-info">
+                <span class="task-name">{{ task.setName }} ({{ task.setNum }})</span>
+                <span class="task-progress">{{ task.processedParts }}/{{ task.totalParts }} ({{ task.progress }}%)</span>
+              </div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: task.progress + '%' }"></div>
+              </div>
+              <div v-if="task.errors.length > 0" class="task-errors">
+                <small v-for="error in task.errors" :key="error">{{ error }}</small>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- LLM 분석 진행률 -->
-    <div v-if="!skipLLMAnalysis && masterDataProgress > 0" class="master-data-progress">
-      <h4>🤖 AI 메타데이터 생성 중...</h4>
-      <div class="progress">
-        <div class="progress-bar" :style="{ width: masterDataProgress + '%' }"></div>
-        <span>{{ masterDataProgress }}%</span>
-      </div>
-      <small>LLM 분석 및 CLIP 임베딩 생성 중... (고품질 메타데이터)</small>
-    </div>
-
-    <!-- 백그라운드 작업 상태 -->
-    <div v-if="runningTasks.length > 0" class="background-tasks">
-      <h4>백그라운드 작업 중</h4>
-      <div v-for="task in runningTasks" :key="task.id" class="task-item">
-        <div class="task-info">
-          <span class="task-name">{{ task.name }}</span>
-          <span class="task-progress">{{ task.current }}/{{ task.total }} ({{ task.progress }}%)</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: task.progress + '%' }"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 백그라운드 LLM 분석 상태 -->
-    <div v-if="llmRunningTasks.length > 0" class="llm-background-tasks">
-      <h4>🤖 LLM 분석 진행 중</h4>
-      <div class="queue-status">
-        <span>대기: {{ queueStatus.pending }} | 실행: {{ queueStatus.running }} | 완료: {{ queueStatus.completed }} | 실패: {{ queueStatus.failed }}</span>
-      </div>
-      <div v-for="task in llmRunningTasks" :key="task.id" class="llm-task-item">
-        <div class="task-info">
-          <span class="task-name">{{ task.setName }} ({{ task.setNum }})</span>
-          <span class="task-progress">{{ task.processedParts }}/{{ task.totalParts }} ({{ task.progress }}%)</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: task.progress + '%' }"></div>
-        </div>
-        <div v-if="task.errors.length > 0" class="task-errors">
-          <small>오류: {{ task.errors.length }}개</small>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRebrickable } from '../composables/useRebrickable'
 import { useImageManager } from '../composables/useImageManager'
 import { useDatabase } from '../composables/useDatabase'
@@ -410,6 +423,7 @@ export default {
     const skipLLMAnalysis = ref(false) // LLM 분석 건너뛰기 옵션 (기본값: false = LLM 분석 실행)
     const masterDataProgress = ref(0) // LLM 분석 진행률
     const processing = ref(false) // 전체 처리 상태
+    const showProgressModal = ref(false) // 진행률 모달 표시 여부
 
     // 단일 제품 번호인지 확인하는 함수
     const isSingleSetNumber = (query) => {
@@ -1003,8 +1017,8 @@ export default {
             const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
             console.log(`📋 Background task started: ${taskId}`)
             successMessage.value = migrationComplete
-              ? `세트 강제 재저장 완료! 이미지 마이그레이션 후 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
-              : `세트 강제 재저장 완료! (원본 이미지로 LLM 분석 진행) (작업 ID: ${taskId})`
+              ? `🎉 세트 강제 재저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${setParts.value.length * 2}초\n📋 작업 ID: ${taskId}`
+              : `🎉 세트 강제 재저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${setParts.value.length * 2}초\n📋 작업 ID: ${taskId}`
           } catch (migrationError) {
             console.warn(`⚠️ 이미지 마이그레이션 실패: ${migrationError.message}`)
             
@@ -1019,7 +1033,7 @@ export default {
             console.log(`🤖 원본 이미지로 백그라운드 LLM 분석 시작...`)
             const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
             console.log(`📋 Background task started: ${taskId}`)
-            successMessage.value = `세트 강제 재저장 완료! (이미지 마이그레이션 실패, 원본 이미지로 LLM 분석 진행) (작업 ID: ${taskId})`
+            successMessage.value = `🎉 세트 강제 재저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${setParts.value.length * 2}초\n📋 작업 ID: ${taskId}`
           }
         } else if (skipLLMAnalysis.value) {
           console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
@@ -1250,12 +1264,12 @@ export default {
               console.log(`🔍 DEBUG: Save completed - Success: ${savedParts.length}, Failed: ${failedParts.length}`)
               console.log(`🔍 DEBUG: Failed parts:`, failedParts)
               
-              // LLM 분석 (백그라운드 처리)
+              // 🤖 백그라운드 LLM 분석 + CLIP 임베딩 자동화
               if (!skipLLMAnalysis.value && savedParts.length > 0) {
-                console.log(`🤖 백그라운드 LLM 분석 시작 (${savedParts.length}개 부품)`)
+                console.log(`🤖 백그라운드 LLM 분석 + CLIP 임베딩 자동화 시작 (${savedParts.length}개 부품)`)
                 const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
                 console.log(`📋 Background task started: ${taskId}`)
-                successMessage.value = `세트 저장 완료! 백그라운드에서 LLM 분석을 진행합니다. (작업 ID: ${taskId})`
+                successMessage.value = `🎉 세트 저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${savedParts.length * 2}초\n📋 작업 ID: ${taskId}`
               } else if (skipLLMAnalysis.value) {
                 console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
                 successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
@@ -1647,6 +1661,24 @@ export default {
     const llmRunningTasks = computed(() => getLLMRunningTasks())
     const queueStatus = computed(() => getQueueStatus())
 
+    // 모달 관련 함수들
+    const closeProgressModal = () => {
+      showProgressModal.value = false
+    }
+
+    // 모달 표시 조건
+    const shouldShowModal = computed(() => {
+      return batchLoading.value || 
+             (!skipLLMAnalysis.value && masterDataProgress.value > 0) ||
+             runningTasks.value.length > 0 ||
+             llmRunningTasks.value.length > 0
+    })
+
+    // 모달 표시 상태 감시
+    watch(shouldShowModal, (newValue) => {
+      showProgressModal.value = newValue
+    }, { immediate: true })
+
     return {
       searchQuery,
       searchResults,
@@ -1665,6 +1697,8 @@ export default {
       skipLLMAnalysis,
       masterDataProgress,
       processing,
+      showProgressModal,
+      closeProgressModal,
       searchSets,
       selectSet,
       loadSetParts,
@@ -2403,5 +2437,92 @@ export default {
   .parts-controls {
     flex-direction: column;
   }
+}
+
+/* 진행률 모달 스타일 */
+.progress-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.progress-modal {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.progress-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e1e5e9;
+}
+
+.progress-modal-header h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.25rem;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #666;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+.close-btn:hover {
+  background-color: #f5f5f5;
+}
+
+.progress-modal-content {
+  padding: 24px;
+}
+
+.progress-section {
+  margin-bottom: 24px;
+}
+
+.progress-section:last-child {
+  margin-bottom: 0;
+}
+
+.progress-section h4 {
+  margin: 0 0 12px 0;
+  color: #333;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.queue-status {
+  background: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+  color: #6c757d;
 }
 </style>

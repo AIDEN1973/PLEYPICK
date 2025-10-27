@@ -1,16 +1,31 @@
 {
   "frontend": 3000,
+  "webpImageApi": 3004,
+  "aiApi": 3005,
   "trainingApi": 3010,
   "syntheticApi": 3011,
   "worker": 3020,
+  "clipService": 3021,
+  "semanticVectorApi": 3022,
   "manualUploadApi": 3030,
   "monitoring": 3040,
-  "timestamp": "2025-10-21T10:08:34.069Z",
+  "trainingExecutor": 3012,
+  "timestamp": "2025-10-27T07:43:32.870Z",
   "services": {
     "frontend": {
       "port": 3000,
       "url": "http://localhost:3000",
       "description": "Vue.js 프론트엔드"
+    },
+    "webpImageApi": {
+      "port": 3004,
+      "url": "http://localhost:3004",
+      "description": "WebP 이미지 API"
+    },
+    "aiApi": {
+      "port": 3005,
+      "url": "http://localhost:3005",
+      "description": "AI 추론 API"
     },
     "trainingApi": {
       "port": 3010,
@@ -27,6 +42,16 @@
       "url": "http://localhost:3020",
       "description": "백그라운드 워커"
     },
+    "clipService": {
+      "port": 3021,
+      "url": "http://localhost:3021",
+      "description": "CLIP 임베딩 서비스"
+    },
+    "semanticVectorApi": {
+      "port": 3022,
+      "url": "http://localhost:3022",
+      "description": "Semantic Vector API"
+    },
     "manualUploadApi": {
       "port": 3030,
       "url": "http://localhost:3030",
@@ -36,6 +61,11 @@
       "port": 3040,
       "url": "http://localhost:3040",
       "description": "모니터링 대시보드"
+    },
+    "trainingExecutor": {
+      "port": 3012,
+      "url": "http://localhost:3012",
+      "description": "학습 실행 서버"
     }
   }
 }

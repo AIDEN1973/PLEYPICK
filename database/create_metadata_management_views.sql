@@ -34,6 +34,8 @@ SELECT
     WHEN pmf.feature_json IS NOT NULL 
          AND pmf.feature_text IS NOT NULL 
          AND pmf.feature_text != '' THEN 'completed'
+    WHEN pmf.feature_json IS NOT NULL 
+         AND (pmf.feature_json->>'function' IS NOT NULL OR pmf.feature_json->>'connection' IS NOT NULL) THEN 'completed'
     ELSE 'error'
   END as metadata_status
 FROM parts_master_features pmf
@@ -345,18 +347,19 @@ GROUP BY pc.id, pc.code, pc.display_name, pc.display_name_ko,
          pc.category_type, pc.sort_order, pc.is_active, pc.created_at, pc.updated_at
 ORDER BY pc.sort_order;
 
--- 16. 부품별 상세 뷰
+-- 16. 부품별 상세 뷰 (개선됨)
 DROP VIEW IF EXISTS v_unknown_parts_detail CASCADE;
 CREATE VIEW v_unknown_parts_detail AS
 SELECT 
-  ucl.part_id,
-  ucl.part_name,
+  COALESCE(pmf.part_id, ucl.part_id) as part_id,
+  COALESCE(pmf.part_name, ucl.part_name) as part_name,
   ucl.shape_tag,
   ucl.detected_count,
   ucl.first_detected_at,
   ucl.last_detected_at,
   ucl.metadata
 FROM unknown_category_logs ucl
+LEFT JOIN parts_master_features pmf ON ucl.part_id = pmf.part_id
 WHERE ucl.part_category = 99
 ORDER BY ucl.detected_count DESC, ucl.last_detected_at DESC;
 

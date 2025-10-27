@@ -2,7 +2,7 @@
   <div class="metadata-management">
     <div class="header">
       <h1>🤖 AI 메타데이터 관리</h1>
-      <p class="subtitle">AI 메타데이터 및 CLIP 임베딩 상태를 관리합니다</p>
+      <p class="subtitle">AI 메타데이터, CLIP 임베딩, Semantic Vector 상태를 관리합니다</p>
     </div>
 
     <!-- 탭 -->
@@ -18,6 +18,12 @@
         @click="activeTab = 'embedding'"
       >
         🧠 CLIP 임베딩
+      </button>
+      <button 
+        :class="['tab', { active: activeTab === 'semantic-vector' }]"
+        @click="activeTab = 'semantic-vector'"
+      >
+        🎯 Semantic Vector
       </button>
       <button 
         :class="['tab', { active: activeTab === 'prompt-config' }]"
@@ -45,6 +51,11 @@
         <EmbeddingTab />
       </div>
 
+      <!-- Semantic Vector 탭 -->
+      <div v-if="activeTab === 'semantic-vector'" class="semantic-vector-tab">
+        <SemanticVectorTab />
+      </div>
+
       <!-- 프롬프트 설정 탭 -->
       <div v-if="activeTab === 'prompt-config'" class="prompt-config-tab">
         <PromptConfigTab />
@@ -62,6 +73,7 @@
 import { ref } from 'vue'
 import MetadataTab from '../components/MetadataTab.vue'
 import EmbeddingTab from '../components/EmbeddingTab.vue'
+import SemanticVectorTab from '../components/SemanticVectorTab.vue'
 import PromptConfigTab from '../components/PromptConfigTab.vue'
 import CategoryMonitoringTab from '../components/CategoryMonitoringTab.vue'
 

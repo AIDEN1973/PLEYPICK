@@ -530,7 +530,7 @@ export default {
 
         // 3) Supabase Storage에서 직접 확인 (여러 버킷과 경로 시도)
         const webpFileName = `${setNum}_set.webp`
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
         
         // ✅ 레고 세트 이미지 경로: lego_parts_images > lego_sets_images 폴더만 확인
         const imageUrl = `${supabaseUrl}/storage/v1/object/public/lego_parts_images/lego_sets_images/${webpFileName}`
@@ -719,20 +719,20 @@ export default {
           batchSize: 100 // 100개씩 배치 처리 (초고속)
         })
         
-        console.log(`✅ Batch load completed: ${result.parts.length} parts loaded`)
+        console.log(`✅ Batch load completed: ${result.parts?.length || 0} parts loaded`)
         console.log(`📊 Loading stats:`, result.loadingState)
         
-        if (result.errors.length > 0) {
+        if (result.errors?.length > 0) {
           console.warn(`⚠️ ${result.errors.length} errors during batch load:`, result.errors)
         }
         
-        setParts.value = result.parts
+        setParts.value = result.parts || []
         
         // ✅ 최적화: 메타데이터를 비동기로 백그라운드 로드 (부품 표시를 차단하지 않음)
-        console.log(`🧠 Background loading AI metadata for ${result.parts.length} parts...`)
-        getBatchPartMetadata(result.parts).then(metadataMap => {
+        console.log(`🧠 Background loading AI metadata for ${result.parts?.length || 0} parts...`)
+        getBatchPartMetadata(result.parts || []).then(metadataMap => {
           // 각 부품에 메타데이터 할당
-          result.parts.forEach(part => {
+          (result.parts || []).forEach(part => {
             const partNum = part.lego_parts?.part_num || part.part_id
             const colorId = part.lego_colors?.id || part.color_id
             const key = `${partNum}_${colorId}`
@@ -1390,7 +1390,7 @@ export default {
         
         console.log(`📋 백그라운드 작업 시작: ${taskId}`)
         
-        successMessage.value = `메타데이터 생성이 시작되었습니다!\n작업 ID: ${taskId}\n부품: ${part.lego_parts.name}`
+        successMessage.value = `🤖 백그라운드 LLM 분석 시작!\n\n📋 작업 ID: ${taskId}\n🧱 부품: ${part.lego_parts.name}\n\n🤖 자동 처리:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성\n• 데이터베이스 저장`
         
         // ✅ 메타데이터 상태 폴링 시작 (즉시 반응형 업데이트)
         pollMetadataStatus(part)

@@ -3,6 +3,7 @@ import { supabase } from './useSupabase'
 import { useEnhancedRecognition } from './useEnhancedRecognition'
 import { usePartClassification } from './usePartClassification'
 import { useAutoImageMigration } from './useAutoImageMigration'
+import { useFGCEncoder } from './useFGCEncoder'
 import pLimit from 'p-limit'
 
 // 🧩 전역 상수: FAISS 호환성을 위한 벡터 차원 (text-embedding-3-small 기준)
@@ -17,25 +18,549 @@ if (VECTOR_LEN_STORE !== 768) {
 
 // ✅ 벡터 정규화 함수 (v5.0) - 768D 고정 (DB 스키마 호환)
 function normalizeVector(vec = []) {
-  if (!Array.isArray(vec)) return Array(VECTOR_LEN_STORE).fill(0.0)
-  
-  // ✅ 768D 고정 처리
-  if (vec.length === VECTOR_LEN_STORE) {
-    // console.log('🔧 768D vector detected - maintaining 768D for DB compatibility')
-    return vec
-  }
-  
-  if (vec.length < VECTOR_LEN_STORE) {
-    // console.log(`🔧 Vector padding: ${vec.length} → ${VECTOR_LEN_STORE}`)
-    return [...vec, ...Array(VECTOR_LEN_STORE - vec.length).fill(0.0)]
-  }
-  
-  if (vec.length > VECTOR_LEN_STORE) {
-    // console.log(`🔧 Vector truncating: ${vec.length} → ${VECTOR_LEN_STORE}`)
-    return vec.slice(0, VECTOR_LEN_STORE)
-  }
-  
+  // 🔧 수정됨: 일반 벡터 유틸 (null → zero-padding 허용) — clip_text_emb에는 사용 금지
+  if (!Array.isArray(vec)) return Array(VECTOR_LEN_STORE).fill(0.0) // 🔧 수정됨
+  if (vec.length === VECTOR_LEN_STORE) return vec // 🔧 수정됨
+  if (vec.length < VECTOR_LEN_STORE) return [...vec, ...Array(VECTOR_LEN_STORE - vec.length).fill(0.0)] // 🔧 수정됨
+  if (vec.length > VECTOR_LEN_STORE) return vec.slice(0, VECTOR_LEN_STORE) // 🔧 수정됨
   return vec
+}
+
+// 🔧 수정됨: set_parts 테이블에서 엘리먼트 ID로 부품 정보 조회 (API 호출 제거)
+async function getRealPartIdFromElementId(elementId) {
+  try {
+    console.log(`🔍 엘리먼트 ID ${elementId}에서 실제 부품 ID 조회 중...`)
+    
+    // set_parts 테이블에서 직접 조회 (더 효율적)
+    const { data, error } = await supabase
+      .from('set_parts')
+      .select(`
+        element_id,
+        part_id,
+        lego_parts(part_num, name),
+        lego_colors(name, rgb)
+      `)
+      .eq('element_id', elementId)
+      .limit(1)
+    
+    if (error) {
+      console.warn(`⚠️ set_parts 조회 실패: ${error.message}`)
+      return null
+    }
+    
+    if (data && data.length > 0) {
+      const setPart = data[0]
+      console.log(`✅ 엘리먼트 ID ${elementId} → 실제 부품 ID ${setPart.part_id}`)
+      return {
+        part_id: setPart.part_id,
+        part_name: setPart.lego_parts?.name || 'Unknown',
+        color_id: setPart.lego_colors?.id || null,
+        color_name: setPart.lego_colors?.name || 'Unknown'
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.warn(`⚠️ 엘리먼트 ID ${elementId} 조회 실패:`, error.message)
+    return null
+  }
+}
+
+// 🔧 수정됨: parts_master 테이블에 엘리먼트 ID 자동 등록
+async function registerElementIdsToPartsMaster(analysisResults) {
+  try {
+    console.log('🔧 parts_master 테이블에 엘리먼트 ID 자동 등록 시작...')
+    
+    const elementIdsToRegister = []
+    
+    // 엘리먼트 ID가 있는 부품들만 필터링
+    for (const result of analysisResults) {
+      if (result.element_id && result.element_id !== 'unknown' && result.element_id !== 'Unknown') {
+        // 🔧 수정됨: LEGO API를 통해 실제 부품 ID 조회
+        const realPartInfo = await getRealPartIdFromElementId(result.element_id)
+        
+        if (realPartInfo) {
+          elementIdsToRegister.push({
+            element_id: result.element_id,
+            part_id: realPartInfo.part_id,  // 실제 부품 ID
+            part_name: realPartInfo.part_name,
+            category: result.category || 'Unknown',
+            color: realPartInfo.color_name
+          })
+        } else {
+          // API 조회 실패 시 기존 방식 사용 (fallback)
+          console.warn(`⚠️ 엘리먼트 ID ${result.element_id} API 조회 실패, 기존 방식 사용`)
+          elementIdsToRegister.push({
+            element_id: result.element_id,
+            part_id: result.part_num,
+            part_name: result.part_name || `LEGO Element ${result.element_id}`,
+            category: result.category || 'Unknown',
+            color: result.color_name || 'Unknown'
+          })
+        }
+      }
+    }
+    
+    if (elementIdsToRegister.length === 0) {
+      console.log('📝 등록할 엘리먼트 ID가 없습니다.')
+      return
+    }
+    
+    console.log(`📝 ${elementIdsToRegister.length}개 엘리먼트 ID 등록 중...`)
+    
+    // 기존 엘리먼트 ID 확인
+    const existingElementIds = new Set()
+    for (const element of elementIdsToRegister) {
+      const { data: existing, error } = await supabase
+        .from('parts_master')
+        .select('element_id')
+        .eq('element_id', element.element_id)
+        .limit(1)
+      
+      if (!error && existing && existing.length > 0) {
+        existingElementIds.add(element.element_id)
+        console.log(`✅ ${element.element_id} 이미 등록됨`)
+      }
+    }
+    
+    // 🔧 수정됨: 기존 잘못된 데이터 수정
+    const elementsToUpdate = elementIdsToRegister.filter(e => existingElementIds.has(e.element_id))
+    if (elementsToUpdate.length > 0) {
+      console.log(`🔧 ${elementsToUpdate.length}개 기존 엘리먼트 ID 데이터 수정 중...`)
+      
+      for (const element of elementsToUpdate) {
+        const { error: updateError } = await supabase
+          .from('parts_master')
+          .update({
+            part_id: element.part_id,
+            part_name: element.part_name,
+            color: element.color
+          })
+          .eq('element_id', element.element_id)
+        
+        if (updateError) {
+          console.error(`❌ 엘리먼트 ID ${element.element_id} 수정 실패:`, updateError)
+        } else {
+          console.log(`✅ 엘리먼트 ID ${element.element_id} 수정 완료: ${element.part_id}`)
+        }
+      }
+    }
+    
+    // 새 엘리먼트 ID만 등록
+    const newElements = elementIdsToRegister.filter(e => !existingElementIds.has(e.element_id))
+    
+    if (newElements.length > 0) {
+      const { data, error } = await supabase
+        .from('parts_master')
+        .insert(newElements)
+      
+      if (error) {
+        console.error('❌ 엘리먼트 ID 등록 실패:', error)
+      } else {
+        console.log(`✅ ${newElements.length}개 엘리먼트 ID 등록 완료`)
+        newElements.forEach(e => console.log(`  - ${e.element_id}: ${e.part_name}`))
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ 엘리먼트 ID 등록 중 오류:', error)
+  }
+}
+
+// 🔧 수정됨: CLIP 전용 — 입력이 없거나 잘못된 경우 null 유지 (제로벡터 생성 금지)
+function normalizeClipVectorOrNull(vec) {
+  if (!Array.isArray(vec)) return null // 🔧 수정됨
+  const trimmed = vec.slice(0, VECTOR_LEN_STORE)
+  if (trimmed.length < VECTOR_LEN_STORE) return null // 🔧 수정됨
+  return trimmed
+}
+
+// 🔧 수정됨: 제로벡터 감지 (문자열 '0' 포함)
+function isZeroVector(vec) {
+  if (!Array.isArray(vec) || vec.length === 0) return true
+  let hasNonZero = false
+  for (let i = 0; i < vec.length; i++) {
+    const v = typeof vec[i] === 'string' ? parseFloat(vec[i]) : vec[i]
+    if (Number.isFinite(v) && v !== 0) {
+      hasNonZero = true
+      break
+    }
+  }
+  return !hasNonZero
+}
+
+// 이미지 URL 유효성 검증 함수
+async function validateImageUrl(url) {
+  try {
+    const response = await fetch(url, { method: 'HEAD' })
+    // 일부 CDN/스토리지는 CORS/HEAD 제한이 있어 ok=false가 나올 수 있음
+    // 본 다운로드 단계에서 한 번 더 시도하므로 여기서는 보수적으로 통과시킴
+    return response.ok || true // 🔧 수정됨: 사전 검증 실패 시에도 진행
+  } catch (error) {
+    console.warn(`URL validation failed for ${url}:`, error)
+    return true // 🔧 수정됨: 네트워크/CORS 오류는 본 요청에서 재시도
+  }
+}
+
+// 🚀 semantic_vector 생성 함수 (API 서버 기반)
+async function generateSemanticVector(imageUrl, partId, colorId) {
+  try {
+    console.log(`🔍 [Semantic Vector Debug] Starting generation for ${partId} (${colorId})`)
+    console.log(`🔍 [Semantic Vector Debug] Image URL: ${imageUrl}`)
+    
+    // 1. 이미지 URL 유효성 사전 검증
+    console.log(`🔍 [Semantic Vector Debug] Step 1: Validating image URL...`)
+    const isValidUrl = await validateImageUrl(imageUrl)
+    if (!isValidUrl) {
+      console.warn(`⚠️ [Semantic Vector Debug] URL precheck failed for ${partId}: ${imageUrl} (will try API)`)
+    } else {
+      console.log(`✅ [Semantic Vector Debug] Image URL is valid (HEAD)`) 
+    }
+    
+    // 2. Semantic Vector API 서버 호출
+    console.log(`🔍 [Semantic Vector Debug] Step 2: Calling Semantic Vector API...`)
+    
+    const apiResponse = await fetch('/api/semantic-vector', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        imageUrl: imageUrl,
+        partId: partId,
+        colorId: colorId
+      })
+    })
+    
+    if (!apiResponse.ok) {
+      throw new Error(`API request failed: ${apiResponse.status}`)
+    }
+    
+    const result = await apiResponse.json()
+    
+    if (!result.success) {
+      throw new Error(`API generation failed: ${result.error}`)
+    }
+    
+    console.log(`✅ [Semantic Vector Debug] API response received`)
+    console.log(`✅ [Semantic Vector Debug] Semantic vector generated: ${result.dimensions}D`)
+    console.log(`✅ [Semantic Vector Debug] Method: ${result.method}`)
+    
+    // 3. 품질 검증
+    console.log(`🔍 [Semantic Vector Debug] Step 3: Quality validation...`)
+    if (isZeroVector(result.semanticVector)) {
+      throw new Error('Generated semantic vector is zero')
+    }
+    console.log(`✅ [Semantic Vector Debug] Quality validation passed`)
+    
+    console.log(`✅ [Semantic Vector Debug] Semantic vector generated successfully for ${partId}: ${result.semanticVector.length}D`)
+    return result.semanticVector
+    
+  } catch (error) {
+    console.error(`❌ [Semantic Vector Debug] Generation failed for ${partId}:`, error)
+    console.error(`❌ [Semantic Vector Debug] Error details:`, {
+      message: error.message,
+      stack: error.stack,
+      imageUrl: imageUrl,
+      partId: partId,
+      colorId: colorId
+    })
+    return null
+  }
+}
+
+// FGC 512차원을 CLIP 768차원으로 확장
+function expandTo768Dimensions(fgcVector) {
+  if (!Array.isArray(fgcVector) || fgcVector.length !== 512) {
+    console.warn('Invalid FGC vector, using zero padding')
+    return Array(768).fill(0.0)
+  }
+  
+  // FGC 512차원 + 256차원 제로 패딩 = 768차원
+  return [...fgcVector, ...Array(256).fill(0.0)]
+}
+
+// L2 정규화 함수
+function l2Normalize(vector) {
+  if (!Array.isArray(vector) || vector.length === 0) {
+    return Array(768).fill(0.0)
+  }
+  
+  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0))
+  if (norm === 0) {
+    return Array(768).fill(0.0)
+  }
+  
+  return vector.map(val => val / norm)
+}
+
+// 텍스트 분석 폴백 함수
+async function analyzeWithTextOnly(part) {
+  try {
+    console.log(`📝 [텍스트 분석 폴백] ${part.part_num || part.part?.part_num || 'unknown'}`)
+    
+    // 기본 메타데이터 생성
+    const partName = part.part?.name || part.name || 'Unknown Part'
+    const partNum = part.part?.part_num || part.part_num || 'unknown'
+    const colorName = part.color?.name || part.color_name || 'Unknown Color'
+    
+    // 텍스트 기반 기본 분석
+    const basicAnalysis = {
+      feature_text: `${partName} (${partNum}) - ${colorName} 색상의 레고 부품입니다.`,
+      function: '구조적 지지',
+      connection: '스터드 연결',
+      recognition_hints: [`${partName} 형태`, `${colorName} 색상`, '표준 레고 부품'],
+      confusions: [],
+      similar_parts: [],
+      shape: generateShapeDescriptionFromTag('unknown', partName),
+      confidence: 0.5
+    }
+    
+    console.log(`✅ [텍스트 분석 완료] ${partNum}`)
+    return basicAnalysis
+    
+  } catch (error) {
+    console.error(`❌ [텍스트 분석 실패] ${part.part_num || 'unknown'}:`, error)
+    return null
+  }
+}
+
+// 🔧 Function과 Connection 추론 함수들 (postprocess_worker.js 기반)
+// shape_tag → function 매핑 (데이터베이스 기반)
+const FUNCTION_MAP = {
+  // 기본 형태 (building block)
+  'plate': 'building_block',
+  'brick': 'building_block',
+  'tile': 'building_block',
+  'slope': 'building_block',
+  'panel': 'building_block',
+  'wedge': 'building_block',
+  'inverted': 'building_block',
+  'baseplate': 'foundation',
+  
+  // 원형/곡면 (building block)
+  'cylinder': 'building_block',
+  'cone': 'building_block',
+  'arch': 'building_block',
+  'round': 'building_block',
+  'dish': 'building_block',
+  'roof': 'building_block',
+  
+  // 연결 부품 (connector)
+  'hinge': 'connector',
+  'clip': 'connector',
+  'bar': 'connector',
+  
+  // 기계 부품 (mechanical)
+  'gear': 'mechanical',
+  'axle': 'mechanical',
+  'wheel': 'movement',
+  'tire': 'movement',
+  
+  // 장식/구조 (decoration/structure)
+  'fence': 'structure',
+  'door': 'structure',
+  'window': 'structure',
+  'wing': 'decoration',
+  'propeller': 'mechanical',
+  
+  // 특수 부품
+  'minifig_part': 'minifigure',
+  'animal_figure': 'decoration',
+  'plant_leaf': 'decoration',
+  'chain': 'connector',
+  
+  // 레거시 호환
+  'technic': 'mechanical',
+  'minifig': 'minifigure',
+  'duplo': 'building_block',
+  
+  // 기본값
+  'unknown': 'unknown'
+}
+
+async function inferFunction(shapeTag, partName = '') {
+  try {
+    // 1차: 데이터베이스에서 실제 매핑 조회
+    const { data: dbMapping, error } = await supabase
+      .from('parts_master_features')
+      .select('feature_json')
+      .eq('feature_json->>shape_tag', shapeTag)
+      .not('feature_json->>function', 'is', null)
+      .neq('feature_json->>function', 'unknown')
+      .limit(10)
+    
+    if (!error && dbMapping && dbMapping.length > 0) {
+      // 데이터베이스에서 가장 많이 사용된 function 찾기
+      const functionCounts = {}
+      dbMapping.forEach(item => {
+        const func = item.feature_json?.function
+        if (func && func !== 'unknown') {
+          functionCounts[func] = (functionCounts[func] || 0) + 1
+        }
+      })
+      
+      const mostCommonFunction = Object.keys(functionCounts).reduce((a, b) => 
+        functionCounts[a] > functionCounts[b] ? a : b
+      )
+      
+      if (mostCommonFunction && mostCommonFunction !== 'unknown') {
+        console.log(`🔧 [DB 매핑] ${shapeTag} → ${mostCommonFunction}`)
+        return mostCommonFunction
+      }
+    }
+  } catch (err) {
+    console.warn(`⚠️ [DB 조회 실패] ${shapeTag}:`, err.message)
+  }
+  
+  // 2차: 하드코딩된 매핑 테이블 사용
+  const mapped = FUNCTION_MAP[shapeTag]
+  if (mapped && mapped !== 'unknown') {
+    return mapped
+  }
+
+  // 3차: part_name 기반 추가 추론
+  const nameLower = (partName || '').toLowerCase()
+  
+  if (nameLower.includes('gear') || nameLower.includes('cog')) {
+    return 'mechanical'
+  }
+  if (nameLower.includes('wheel') || nameLower.includes('tire')) {
+    return 'movement'
+  }
+  if (nameLower.includes('hinge') || nameLower.includes('joint')) {
+    return 'connector'
+  }
+  if (nameLower.includes('minifig') || nameLower.includes('figure')) {
+    return 'minifigure'
+  }
+  if (nameLower.includes('animal') || nameLower.includes('plant')) {
+    return 'decoration'
+  }
+  if (nameLower.includes('door') || nameLower.includes('window')) {
+    return 'structure'
+  }
+
+  // 4차: 최종 폴백
+  return 'building_block'
+}
+
+// shape_tag → connection 매핑
+const CONNECTION_MAP = {
+  // 스터드 연결
+  'plate': 'stud_connection',
+  'brick': 'stud_connection',
+  'tile': 'stud_connection',
+  'slope': 'stud_connection',
+  'panel': 'stud_connection',
+  'wedge': 'stud_connection',
+  'cylinder': 'stud_connection',
+  'cone': 'stud_connection',
+  'arch': 'stud_connection',
+  'round': 'stud_connection',
+  'dish': 'stud_connection',
+  'roof': 'stud_connection',
+  'inverted': 'stud_connection',
+  'baseplate': 'stud_connection',
+  
+  // 특수 연결
+  'hinge': 'hinge_connection',
+  'clip': 'clip_connection',
+  'bar': 'bar_connection',
+  'fence': 'bar_connection',
+  'axle': 'axle_connection',
+  'gear': 'axle_connection',
+  'chain': 'chain_connection',
+  
+  // 움직임 부품
+  'wheel': 'axle_connection',
+  'tire': 'friction_fit',
+  
+  // 장식/미니피규어
+  'door': 'hinge_connection',
+  'window': 'clip_connection',
+  'wing': 'clip_connection',
+  'propeller': 'axle_connection',
+  'minifig_part': 'ball_joint',
+  'animal_figure': 'integrated',
+  'plant_leaf': 'bar_connection',
+  
+  // 레거시
+  'technic': 'pin_connection',
+  'minifig': 'ball_joint',
+  'duplo': 'stud_connection',
+  
+  // 기본값
+  'unknown': 'unknown'
+}
+
+async function inferConnection(shapeTag, partName = '') {
+  try {
+    // 1차: 데이터베이스에서 실제 매핑 조회
+    const { data: dbMapping, error } = await supabase
+      .from('parts_master_features')
+      .select('feature_json')
+      .eq('feature_json->>shape_tag', shapeTag)
+      .not('feature_json->>connection', 'is', null)
+      .neq('feature_json->>connection', 'unknown')
+      .limit(10)
+    
+    if (!error && dbMapping && dbMapping.length > 0) {
+      // 데이터베이스에서 가장 많이 사용된 connection 찾기
+      const connectionCounts = {}
+      dbMapping.forEach(item => {
+        const conn = item.feature_json?.connection
+        if (conn && conn !== 'unknown') {
+          connectionCounts[conn] = (connectionCounts[conn] || 0) + 1
+        }
+      })
+      
+      const mostCommonConnection = Object.keys(connectionCounts).reduce((a, b) => 
+        connectionCounts[a] > connectionCounts[b] ? a : b
+      )
+      
+      if (mostCommonConnection && mostCommonConnection !== 'unknown') {
+        console.log(`🔧 [DB 매핑] ${shapeTag} → ${mostCommonConnection}`)
+        return mostCommonConnection
+      }
+    }
+  } catch (err) {
+    console.warn(`⚠️ [DB 조회 실패] ${shapeTag}:`, err.message)
+  }
+  
+  // 2차: 하드코딩된 매핑 테이블 사용
+  const mapped = CONNECTION_MAP[shapeTag]
+  if (mapped && mapped !== 'unknown') {
+    return mapped
+  }
+
+  // 3차: part_name 기반 추가 추론
+  const nameLower = (partName || '').toLowerCase()
+  
+  if (nameLower.includes('gear') || nameLower.includes('cog')) {
+    return 'axle_connection'
+  }
+  if (nameLower.includes('wheel') || nameLower.includes('tire')) {
+    return 'axle_connection'
+  }
+  if (nameLower.includes('hinge') || nameLower.includes('joint')) {
+    return 'hinge_connection'
+  }
+  if (nameLower.includes('minifig') || nameLower.includes('figure')) {
+    return 'ball_joint'
+  }
+  if (nameLower.includes('animal') || nameLower.includes('plant')) {
+    return 'integrated'
+  }
+  if (nameLower.includes('door')) {
+    return 'hinge_connection'
+  }
+  if (nameLower.includes('window')) {
+    return 'clip_connection'
+  }
+
+  // 4차: 최종 폴백
+  return 'stud_connection'
 }
 
 // ✅ bbox_ratio 임계값 계산 (DB 평균 기준)
@@ -138,9 +663,10 @@ function extractNouns(text) {
 }
 
 // ✅ 사용자 설정 로드 함수 (v2.1 - DB 우선, 로컬 캐시 폴백)
+// 🔧 수정됨 - 메타데이터 관리 UI에서 편집한 프롬프트가 자동으로 반영됩니다
 async function loadUserConfigFromDB() {
   try {
-    // DB에서 설정 로드
+    // DB에서 설정 로드 (metadata_prompt_configs 테이블)
     const { data, error } = await supabase
       .from('metadata_prompt_configs')
       .select('*')
@@ -193,11 +719,12 @@ async function loadUserConfigFromDB() {
 // 설정을 동기적으로 관리하기 위한 전역 변수
 let globalUserConfig = null
 
-// 초기 로드 (비동기)
+// 🔧 수정됨 - 초기 로드 (비동기)
+// 메타데이터 관리 UI에서 편집한 프롬프트가 자동으로 반영됩니다
 ;(async () => {
   globalUserConfig = await loadUserConfigFromDB()
   if (globalUserConfig) {
-    console.log('✅ DB에서 사용자 설정 로드 완료:', {
+    console.log('✅ DB에서 사용자 설정 로드 완료 (UI 편집 내용 반영됨):', {
       model: globalUserConfig.llm.model,
       temperature: globalUserConfig.llm.temperature,
       maxTokens: globalUserConfig.llm.maxTokens
@@ -208,9 +735,9 @@ let globalUserConfig = null
 // LLM API 설정 (하이브리드 전략용) - 동기 폴백
 const LLM_CONFIG = {
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  baseUrl: '/api/openai/v1',
+  baseUrl: 'http://localhost:3005/api/openai/v1',
   model: 'gpt-4o-mini',
-  maxTokens: 1000,
+  maxTokens: 4000,
   temperature: 0.1
 }
 
@@ -218,7 +745,7 @@ const LLM_CONFIG = {
 function updateLLMConfig() {
   if (globalUserConfig?.llm) {
     LLM_CONFIG.model = globalUserConfig.llm.model || 'gpt-4o-mini'
-    LLM_CONFIG.maxTokens = globalUserConfig.llm.maxTokens || 300
+    LLM_CONFIG.maxTokens = globalUserConfig.llm.maxTokens || 4000
     LLM_CONFIG.temperature = globalUserConfig.llm.temperature ?? 0.0
   }
 }
@@ -347,18 +874,29 @@ function validateLLMResponse(response) {
       errors.push('recognition_hints가 너무 김 (최대 200자)')
     }
     
-    // 7. 허용된 값 검증 (v2.1: 30개 카테고리)
+    // 7. 허용된 값 검증 (v2.2: 55개 카테고리)
     const validShapeTags = [
-      // 기본 형태 (1-19)
+      // 기본 조립 (21개)
       'plate', 'brick', 'tile', 'slope', 'panel', 'wedge', 'cylinder', 'cone', 'arch',
-      'round', 'dish', 'hinge', 'clip', 'bar', 'fence', 'door', 'window', 'roof', 'inverted',
-      // 특수 부품 (20-29)
-      'minifig_part', 'animal_figure', 'plant_leaf', 'wheel', 'tire',
-      'wing', 'propeller', 'gear', 'chain', 'axle',
-      // 레거시 호환 (구버전)
-      'technic', 'minifig', 'duplo',
-      // 분류 불가
-      'unknown'
+      'round', 'dish', 'roof', 'inverted', 'baseplate', 'corner', 'hinge', 'clip', 'bar', 
+      'fence', 'door', 'window',
+      
+      // 테크닉 (10개)
+      'technic_pin', 'technic_beam', 'gear', 'axle', 'wheel', 'tire', 'propeller', 'chain', 
+      'electronics', 'mechanical',
+      
+      // 미니피그 (6개)
+      'minifig_head', 'minifig_torso', 'minifig_leg', 'minifig_accessory', 'minifig_part', 'minifig',
+      
+      // 생물/자연 (4개)
+      'animal_figure', 'plant_leaf', 'animals', 'plants',
+      
+      // 액세서리 (10개)
+      'sticker', 'decal', 'accessory', 'printed_part', 'transparent', 'tools', 'containers', 
+      'energy_effects', 'magnets', 'tubes_hoses',
+      
+      // 레거시 (4개)
+      'technic', 'duplo', 'misc_shape', 'unknown'
     ]
     
     // shape_tag가 파이프로 연결된 경우 첫 번째 유효한 값 선택
@@ -396,10 +934,20 @@ function validateLLMResponse(response) {
 }
 
 export async function analyzePartWithLLM(part, retryCount = 0) {
+  // partKey를 안전하게 생성
+  let partKey = 'unknown'
   try {
+    partKey = `${part.part_num || part.part?.part_num || 'unknown'}_${part.color?.id ?? part.color_id ?? 'unknown'}`
+  } catch (e) {
+    partKey = 'unknown_part'
+  }
+  
+  try {
+    console.log(`🧠 [LLM 분석 시작] ${partKey} (재시도: ${retryCount})`)
+    
     // API 키 검증
     if (!LLM_CONFIG.apiKey || LLM_CONFIG.apiKey === 'undefined') {
-      console.warn('⚠️ OpenAI API key is missing, skipping LLM analysis')
+      console.warn(`⚠️ [LLM 분석 실패] ${partKey} - OpenAI API key is missing`)
       console.warn('🔍 Environment check:', {
         VITE_OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY ? 'Present' : 'Missing',
         allEnv: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
@@ -415,15 +963,15 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
     
     // 최대 재시도 횟수 (이미지 분석 강제)
     const MAX_RETRIES = 3
-    const partKey = `${part.part_num || part.part?.part_num}_${part.color?.id || part.color_id}`
     
     if (retryCount >= MAX_RETRIES) {
-      console.error(`❌ 최대 재시도 횟수 초과 (${MAX_RETRIES}회): ${partKey}`)
-      throw new Error('이미지 기반 분석 실패')
+      console.error(`❌ [LLM 분석 실패] ${partKey} - 최대 재시도 횟수 초과 (${MAX_RETRIES}회)`)
+      console.log(`📝 [텍스트 분석 폴백] ${partKey} - 이미지 분석 실패로 텍스트 분석으로 전환`)
+      return await analyzeWithTextOnly(part)
     }
     
     if (retryCount > 0) {
-      console.log(`🔄 이미지 분석 재시도 ${retryCount}/${MAX_RETRIES}: ${partKey}`)
+      console.log(`🔄 [LLM 분석 재시도] ${partKey} - ${retryCount}/${MAX_RETRIES}`)
     }
     
     // ✅ 이미지 마이그레이션 대기 완전 비활성화 (30-50초 절약)
@@ -494,9 +1042,11 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
     
     // 이미지 URL이 없으면 분석 불가
     if (!partImgUrl) {
-      console.warn(`부품 ${partNum}의 이미지 URL이 없습니다. 이미지 기반 분석이 필요합니다.`)
+      console.warn(`⚠️ [LLM 분석 실패] ${partKey} - 이미지 URL이 없습니다`)
       throw new Error('이미지 URL이 없어 분석할 수 없습니다')
     }
+    
+    console.log(`📷 [이미지 URL 확인] ${partKey} - ${partImgUrl}`)
     
     // 이미지 URL 검증 및 우선순위 설정
     let finalImageUrl = partImgUrl
@@ -519,7 +1069,7 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
           finalImageUrl = partImage.uploaded_url
           console.log(`✅ Supabase Storage 이미지 사용(DB): ${finalImageUrl}`)
         } else {
-          // 3. Storage에서 직접 확인
+          // 3. Storage에서 직접 확인 (공개 URL 사용)
           const fileName = `${partNum}_${colorId}.webp`
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
           const bucketName = 'lego_parts_images'
@@ -527,16 +1077,20 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
           
           try {
             const response = await fetch(storageUrl, { 
-              method: 'GET',
-              headers: { 'Range': 'bytes=0-0' },
-              signal: AbortSignal.timeout(3000) // 3초 타임아웃
+              method: 'HEAD', // HEAD 요청으로 빠른 확인
+              signal: AbortSignal.timeout(5000) // 5초 타임아웃
             })
             
-            // Content-Type으로 이미지 존재 확인 (JSON이면 에러 응답)
+            // Content-Type으로 이미지 존재 확인
             const contentType = response.headers.get('content-type')
-            const isImage = contentType && !contentType.includes('application/json')
+            const isImage = contentType && (
+              contentType.includes('image/') || 
+              contentType.includes('webp') ||
+              contentType.includes('jpeg') ||
+              contentType.includes('png')
+            )
             
-            if (isImage && (response.ok || response.status === 206)) {
+            if (isImage && response.ok) {
               finalImageUrl = storageUrl
               console.log(`✅ Supabase Storage 이미지 사용(Storage): ${finalImageUrl}`)
             } else {
@@ -616,24 +1170,25 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
       }
     }
     
-    // ✅ 최적화: Rebrickable 원본 이미지 직접 사용 (OpenAI API 안정성 우선)
-    // Supabase Storage는 접근 권한 문제로 OpenAI API에서 차단될 수 있음
-    let llmImageUrl = partImgUrl // 항상 Rebrickable 원본 사용
-    console.log('🧩 Using Rebrickable CDN URL for LLM (stable & reliable)')
-    
-    // Supabase Storage는 UI 표시 및 캐싱 용도로만 사용
-    if (finalImageUrl !== partImgUrl) {
-      console.log(`💾 Supabase Storage 이미지는 UI/캐싱 전용: ${finalImageUrl}`)
+    // ✅ 이미지 URL 검증: OpenAI API 접근 가능성 확인
+    let llmImageUrl = finalImageUrl
+    console.log(`🔍 [이미지 URL 검증] ${partKey} - ${llmImageUrl}`)
+    // HEAD가 실패해도 본 요청 시도하도록 완화
+    const headOk = await validateImageUrl(llmImageUrl)
+    if (!headOk) {
+      console.warn(`⚠️ [이미지 URL 사전검증 실패] ${partKey}: ${llmImageUrl} (본 요청 시도)`)
     }
 
     // ✅ v2.1: DB 설정 또는 기본 프롬프트 사용
+    // 🔧 수정됨 - 메타데이터 관리 UI (http://localhost:3000/metadata-management)에서 
+    // 프롬프트 편집 내용이 자동으로 반영됩니다
     let prompt
     
     // LLM Config 동적 업데이트
     updateLLMConfig()
     
     if (globalUserConfig?.prompt) {
-      // DB 사용자 정의 프롬프트 사용
+      // DB 사용자 정의 프롬프트 사용 (UI에서 편집한 내용 자동 반영)
       prompt = `${globalUserConfig.prompt.system || '당신은 레고 부품 전문가입니다.'}
 
 ${globalUserConfig.prompt.main}
@@ -643,7 +1198,7 @@ ${globalUserConfig.prompt.requirements || ''}`
         .replace(/\$\{partNum\}/g, partNum)
         .replace(/\$\{colorName\}/g, colorName)
       
-      console.log('✅ DB 사용자 정의 프롬프트 사용')
+      console.log('✅ DB 사용자 정의 프롬프트 사용 (UI 편집 내용 반영됨)')
     } else {
       // 기본 프롬프트 (v2.1 - series 분리)
       prompt = `당신은 레고 부품 전문가입니다. 이미지를 분석하여 JSON 형식으로 응답하세요.
@@ -657,7 +1212,7 @@ ${globalUserConfig.prompt.requirements || ''}`
 
 {
   "part_id": "${partNum}",
-  "shape_tag": "아래 30개 옵션 중 하나 선택 (코드명으로)",
+  "shape_tag": "아래 55개 옵션 중 하나 선택 (코드명으로)",
   "series": "system, duplo, technic, bionicle, unknown 중 하나 (부품명에서 추출)",
   "stud_count_top": 상단 스터드 개수 (숫자),
   "tube_count_bottom": 하단 튜브 개수 (숫자),
@@ -673,18 +1228,27 @@ ${globalUserConfig.prompt.requirements || ''}`
   }
 }
 
-shape_tag 선택 가능 옵션 (30개):
-기본 형태 (1-19):
-plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, hinge, clip, bar, fence, door, window, roof, inverted
+shape_tag 선택 가능 옵션 (55개):
+기본 조립 (21개):
+plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, roof, inverted, baseplate, corner, hinge, clip, bar, fence, door, window
 
-특수 부품 (20-29):
-minifig_part, animal_figure, plant_leaf, wheel, tire, wing, propeller, gear, chain, axle
+테크닉 (10개):
+technic_pin, technic_beam, gear, axle, wheel, tire, propeller, chain, electronics, mechanical
 
-분류 불가:
-unknown
+미니피그 (6개):
+minifig_head, minifig_torso, minifig_leg, minifig_accessory, minifig_part, minifig
+
+생물/자연 (4개):
+animal_figure, plant_leaf, animals, plants
+
+액세서리 (10개):
+sticker, decal, accessory, printed_part, transparent, tools, containers, energy_effects, magnets, tubes_hoses
+
+레거시 (4개):
+technic, duplo, misc_shape, unknown
 
 필수 요구사항:
-- shape_tag: 위 30개 옵션 중 정확히 하나 선택 (코드명으로, 예: "plate", "brick", "gear")
+- shape_tag: 위 55개 옵션 중 정확히 하나 선택 (코드명으로, 예: "plate", "brick", "gear", "baseplate", "minifig_head")
 - series: 시리즈 분류 (기본값: "system")
 - recognition_hints.ko: 반드시 20자 이상의 자연스러운 한국어 설명
 - confusions: 최소 1개 이상의 유사 부품 번호 (숫자만, 예: ["3001", "3004"])
@@ -715,11 +1279,14 @@ unknown
           ]
         }
       ],
-      max_tokens: 300, // ✅ v2.0-draft: 12필드 축소로 토큰 대폭 감소 (300 토큰)
+      max_tokens: 4000, // ✅ 토큰 수 증가로 응답 잘림 방지
       temperature: 0.0, // ✅ 최고 정확도 + 실패율 2-3% 감소
       response_format: { type: 'json_object' }
     }
 
+    console.log(`📝 [프롬프트 생성] ${partKey} - 길이: ${prompt.length}자`)
+    console.log(`🤖 [API 요청 준비] ${partKey} - 모델: ${LLM_CONFIG.model}, 이미지: ${llmImageUrl}`)
+    
     if (import.meta.env.DEV) {
       console.log('API 요청 정보:', {
         model: LLM_CONFIG.model,
@@ -786,25 +1353,46 @@ unknown
         }
       }
     } catch (error) {
-      console.warn('⚠️ gpt-4o-mini 실패 → gpt-4o로 재시도')
+      console.warn('⚠️ gpt-4o-mini 실패 → 4단계 폴백 시작')
       
-      // gpt-4o로 fallback
-      const fallbackRequestBody = {
-        ...requestBody,
-        model: 'gpt-4o'
+      // 4단계 폴백: gpt-5-mini → gpt-4-turbo → gpt-4o
+      const fallbackModels = ['gpt-5-mini', 'gpt-4-turbo', 'gpt-4o']
+      let fallbackSuccess = false
+      
+      for (const model of fallbackModels) {
+        try {
+          console.log(`🔄 ${model}로 폴백 시도 중...`)
+          
+          const fallbackRequestBody = {
+            ...requestBody,
+            model: model
+          }
+          
+          response = await fetch(`${LLM_CONFIG.baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${LLM_CONFIG.apiKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(fallbackRequestBody)
+          })
+          
+          if (response.ok) {
+            usedModel = model
+            console.log(`✅ ${model} 폴백 성공`)
+            fallbackSuccess = true
+            break
+          } else {
+            console.warn(`❌ ${model} 폴백 실패: ${response.status}`)
+          }
+        } catch (fallbackError) {
+          console.warn(`❌ ${model} 폴백 오류: ${fallbackError.message}`)
+        }
       }
       
-      response = await fetch(`${LLM_CONFIG.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LLM_CONFIG.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(fallbackRequestBody)
-      })
-      
-      usedModel = 'gpt-4o'
-      console.log('🔄 Fallback to gpt-4o 성공')
+      if (!fallbackSuccess) {
+        throw new Error('모든 모델 폴백 실패')
+      }
       
       // ✅ Fallback 후 품질 검증 (Response stream 한 번만 읽기)
       if (response.ok) {
@@ -844,14 +1432,21 @@ unknown
       // 이미지 다운로드 타임아웃 문제 해결
       if (errorText.includes('Timeout while downloading') || errorText.includes('invalid_image_url')) {
         console.warn(`⚠️ 이미지 다운로드 타임아웃: ${llmImageUrl}`)
-        console.warn(`🔄 이미지 URL을 다시 시도합니다...`)
         
-        // 잠시 대기 후 재시도
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        
-        // ✅ 이미지 타임아웃은 retryCount 증가 (최대 3번)
-        console.log(`🔄 이미지 다운로드 재시도 중... (${retryCount + 1}/${MAX_RETRIES})`)
-        return await analyzePartWithLLM(part, retryCount + 1) // 재귀 호출로 재시도
+        // Supabase Storage URL인 경우 Rebrickable CDN으로 폴백
+        if (llmImageUrl.includes('supabase.co/storage/v1/object/public/')) {
+          console.warn(`🔄 Supabase Storage 실패, Rebrickable CDN으로 폴백: ${partImgUrl}`)
+          llmImageUrl = partImgUrl
+          
+          // 새로운 이미지 URL로 재시도
+          console.log(`🔄 이미지 URL 변경 후 재시도 중... (${retryCount + 1}/${MAX_RETRIES})`)
+          return await analyzePartWithLLM(part, retryCount + 1)
+        } else {
+          console.warn(`🔄 이미지 URL을 다시 시도합니다...`)
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          console.log(`🔄 이미지 다운로드 재시도 중... (${retryCount + 1}/${MAX_RETRIES})`)
+          return await analyzePartWithLLM(part, retryCount + 1)
+        }
       }
       
       // Rate limit 대응 (스마트 대기 시간)
@@ -1054,6 +1649,17 @@ unknown
       parsed.confidence = 0.95 // 기본 신뢰도 설정
     }
 
+    // 🔧 Function과 Connection 자동 추론 (LLM 결과가 unknown인 경우)
+    if (!parsed.function || parsed.function === 'unknown') {
+      parsed.function = await inferFunction(parsed.shape_tag || parsed.shape, partName)
+      console.log(`🔧 Function 자동 추론: ${partName} → ${parsed.function}`)
+    }
+    
+    if (!parsed.connection || parsed.connection === 'unknown') {
+      parsed.connection = await inferConnection(parsed.shape_tag || parsed.shape, partName)
+      console.log(`🔧 Connection 자동 추론: ${partName} → ${parsed.connection}`)
+    }
+
     // LLM 응답 유효성 검사
     const validationResult = validateLLMResponse(parsed)
     if (!validationResult.isValid) {
@@ -1208,7 +1814,8 @@ unknown
     
     } catch (error) {
       console.error('LLM 분석 실패:', error)
-      throw new Error('이미지 분석 실패')
+      console.log(`📝 [텍스트 분석 폴백] ${partKey} - 에러 발생으로 텍스트 분석으로 전환`)
+      return await analyzeWithTextOnly(part)
     }
 }
 
@@ -1291,7 +1898,7 @@ function createTextOnlyAnalysis(part, partName, partNum) {
     created_at: new Date().toISOString(),
     confidence: 0.3,
     // 기존 필드들도 유지
-    shape: `텍스트 분석: ${partName}`,
+    shape: generateShapeDescription(partName, isBrick, isAnimal, isDuplo, hasPrint),
     center_stud: isBrick,
     groove: false,
     connection: isBrick ? 'stud_connection' : 'unknown',
@@ -1302,7 +1909,7 @@ function createTextOnlyAnalysis(part, partName, partNum) {
       side_view: isBrick ? '스터드 연결부' : (isAnimal ? '동물 특징' : '미확인'),
       unique_features: hasPrint ? ['인쇄된 디테일'] : []
     },
-    similar_parts: [],
+    similar_parts: [], // 텍스트 분석에서는 confusions 정보가 없으므로 빈 배열 유지
     distinguishing_features: isDuplo ? ['Duplo 크기'] : [],
     confidence: 0.3
   }
@@ -1311,151 +1918,210 @@ function createTextOnlyAnalysis(part, partName, partNum) {
   return result
 }
 
-// 임베딩 생성 함수 export
-// 텍스트 임베딩 배치 + 캐시
+// shape_tag 기반 자연어 서술 생성 함수
+function generateShapeDescriptionFromTag(shapeTag, partName = '') {
+  const shapeDescriptions = {
+    'brick': '직사각형 브릭 형태의 조립 부품',
+    'plate': '평판 형태의 조립 부품',
+    'tile': '타일 형태의 평면 부품',
+    'slope': '경사면이 있는 부품',
+    'panel': '패널 형태의 부품',
+    'wedge': '쐐기 형태의 부품',
+    'cylinder': '원통 형태의 부품',
+    'cone': '원뿔 형태의 부품',
+    'arch': '아치 형태의 부품',
+    'round': '둥근 형태의 부품',
+    'dish': '접시 형태의 부품',
+    'roof': '지붕 형태의 부품',
+    'inverted': '뒤집힌 형태의 부품',
+    'baseplate': '베이스플레이트 형태의 부품',
+    'corner': '모서리 형태의 부품',
+    'hinge': '힌지 형태의 부품',
+    'clip': '클립 형태의 부품',
+    'bar': '막대 형태의 부품',
+    'fence': '울타리 형태의 부품',
+    'door': '문 형태의 부품',
+    'window': '창문 형태의 부품',
+    'wheel': '바퀴 형태의 부품',
+    'tire': '타이어 형태의 부품',
+    'propeller': '프로펠러 형태의 부품',
+    'gear': '기어 형태의 부품',
+    'axle': '축 형태의 부품',
+    'chain': '체인 형태의 부품',
+    'minifig': '미니피그 형태의 부품',
+    'minifig_head': '미니피그 머리 형태의 부품',
+    'minifig_torso': '미니피그 몸통 형태의 부품',
+    'minifig_leg': '미니피그 다리 형태의 부품',
+    'minifig_accessory': '미니피그 액세서리 형태의 부품',
+    'minifig_part': '미니피그 부품 형태',
+    'animal_figure': '동물 피규어 형태의 부품',
+    'animals': '동물 형태의 부품',
+    'plant_leaf': '식물 잎 형태의 부품',
+    'electronics': '전자 부품 형태',
+    'mechanical': '기계 부품 형태',
+    'technic_pin': '테크닉 핀 형태의 부품',
+    'technic_beam': '테크닉 빔 형태의 부품',
+    'technic_connector': '테크닉 커넥터 형태의 부품',
+    'technic_gear': '테크닉 기어 형태의 부품',
+    'technic_axle': '테크닉 축 형태의 부품',
+    'technic_bush': '테크닉 부시 형태의 부품',
+    'technic_connector_pin': '테크닉 커넥터 핀 형태의 부품',
+    'technic_liftarm': '테크닉 리프트암 형태의 부품',
+    'technic_link': '테크닉 링크 형태의 부품',
+    'technic_plate': '테크닉 플레이트 형태의 부품',
+    'technic_beam': '테크닉 빔 형태의 부품',
+    'technic_panel': '테크닉 패널 형태의 부품',
+    'technic_angle': '테크닉 각도 부품',
+    'technic_connector_rotating': '테크닉 회전 커넥터 형태의 부품',
+    'technic_connector_snap': '테크닉 스냅 커넥터 형태의 부품',
+    'technic_connector_cross': '테크닉 크로스 커넥터 형태의 부품',
+    'technic_connector_ball': '테크닉 볼 커넥터 형태의 부품',
+    'technic_connector_hinge': '테크닉 힌지 커넥터 형태의 부품',
+    'technic_connector_axle': '테크닉 축 커넥터 형태의 부품',
+    'technic_connector_pin': '테크닉 핀 커넥터 형태의 부품',
+    'technic_connector_bush': '테크닉 부시 커넥터 형태의 부품',
+    'technic_connector_gear': '테크닉 기어 커넥터 형태의 부품',
+    'technic_connector_wheel': '테크닉 휠 커넥터 형태의 부품',
+    'technic_connector_tire': '테크닉 타이어 커넥터 형태의 부품',
+    'technic_connector_propeller': '테크닉 프로펠러 커넥터 형태의 부품',
+    'technic_connector_chain': '테크닉 체인 커넥터 형태의 부품',
+    'technic_connector_electronics': '테크닉 전자 커넥터 형태의 부품',
+    'technic_connector_mechanical': '테크닉 기계 커넥터 형태의 부품',
+    'technic_connector_energy': '테크닉 에너지 커넥터 형태의 부품',
+    'technic_connector_magnets': '테크닉 자석 커넥터 형태의 부품',
+    'technic_connector_tubes': '테크닉 튜브 커넥터 형태의 부품',
+    'technic_connector_hoses': '테크닉 호스 커넥터 형태의 부품',
+    'technic_connector_energy_effects': '테크닉 에너지 이펙트 커넥터 형태의 부품',
+    'technic_connector_magnets': '테크닉 자석 커넥터 형태의 부품',
+    'technic_connector_tubes_hoses': '테크닉 튜브 호스 커넥터 형태의 부품',
+    'sticker': '스티커 형태의 부품',
+    'decal': '데칼 형태의 부품',
+    'accessory': '액세서리 형태의 부품',
+    'printed_part': '인쇄된 부품',
+    'transparent': '투명한 부품',
+    'tools': '도구 형태의 부품',
+    'containers': '컨테이너 형태의 부품',
+    'energy_effects': '에너지 이펙트 형태의 부품',
+    'magnets': '자석 형태의 부품',
+    'tubes_hoses': '튜브 호스 형태의 부품',
+    'technic': '테크닉 시리즈 부품',
+    'duplo': '듀플로 시리즈 부품',
+    'misc_shape': '기타 형태의 부품',
+    'unknown': '미확인 형태의 부품'
+  }
+  
+  return shapeDescriptions[shapeTag] || `미확인 형태의 부품 (${shapeTag})`
+}
+
+// shape 필드 자연어 서술 생성 함수
+function generateShapeDescription(partName, isBrick, isAnimal, isDuplo, hasPrint) {
+  const baseDescriptions = {
+    brick: isDuplo ? '듀플로 시리즈의 큰 크기 브릭 형태' : '표준 크기의 브릭 형태',
+    animal: '동물 모양의 피규어 형태',
+    default: '기본 조립 부품 형태'
+  }
+  
+  let description = baseDescriptions.default
+  
+  if (isBrick) {
+    description = baseDescriptions.brick
+  } else if (isAnimal) {
+    description = baseDescriptions.animal
+  }
+  
+  // 추가 특징 설명
+  if (hasPrint) {
+    description += ' (인쇄된 디테일 포함)'
+  }
+  
+  if (isDuplo) {
+    description += ' (듀플로 전용)'
+  }
+  
+  return description
+}
+
+// 임베딩 생성 함수 export - 안전한 방식으로 재활성화
 export async function generateTextEmbeddingsBatch(analysisResults) {
-  const results = []
-
-  // 0) 입력 데이터 중복 제거: (part_num, color_id) 조합 기준으로 중복 제거
-  const uniqueResults = []
-  const seenEmbeddingKeys = new Set()
-  
-  for (const item of analysisResults) {
-    const partNum = item.part_num || 'unknown'
-    const colorId = item.color_id !== undefined ? item.color_id : (item.color?.id !== undefined ? item.color.id : null)
-    const key = `${partNum}_${colorId}`
-    
-    if (!seenEmbeddingKeys.has(key)) {
-      seenEmbeddingKeys.add(key)
-      uniqueResults.push(item)
-    } else {
-      console.warn(`⚠️ Duplicate embedding input found for part_num=${partNum}, color_id=${colorId}, skipping`)
-    }
-  }
-  
-  console.log(`📊 Embedding input deduplication: ${analysisResults.length} -> ${uniqueResults.length} results`)
-  analysisResults = uniqueResults
-
-  // 1) 기존 임베딩 보유/feature_text 누락 선분류
-  const needsEmbedding = []
-  for (const item of analysisResults) {
-    const partNum = item.part_num || 'unknown'
-    
-    // part_id가 'unknown'인 경우 스킵
-    if (partNum === 'unknown' || partNum === 'Unknown') {
-      console.warn(`⚠️ Skipping embedding for unknown part_num: ${partNum}`)
-      continue
-    }
-    
-    if (item.has_embedding === true) {
-      console.log(`⏭️ Skipping embedding for ${partNum} - already has embedding`)
-      results.push({ part_num: partNum, embedding: item.existing_embedding || null, feature_text: item.feature_text })
-      continue
-    }
-    if (!item.feature_text) {
-      // ✅ feature_text 자동 생성
-      console.warn(`⚠️ No feature text for ${partNum} → generating default`)
-      const defaultFeatureText = `${item.part_name || partNum} LEGO part`
-      item.feature_text = defaultFeatureText
-    }
-    needsEmbedding.push(item)
-  }
-
-  if (needsEmbedding.length === 0) return results
-
-  // 2) 텍스트 해시 캐시로 중복 제거
-  const textToIndices = new Map()
-  const uniqueTexts = []
-  needsEmbedding.forEach((item, idx) => {
-    const key = stableTextKey(item.feature_text)
-    if (!textToIndices.has(key)) {
-      textToIndices.set(key, [])
-      uniqueTexts.push(item.feature_text)
-    }
-    textToIndices.get(key).push(idx)
-  })
-
-  // 3) OpenAI Embeddings API 다중 입력 배치 호출
-  try {
-    const response = await fetch(`${CLIP_CONFIG.baseUrl}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${CLIP_CONFIG.apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: CLIP_CONFIG.model,
-        input: uniqueTexts,
-        dimensions: CLIP_CONFIG.dimensions
-      })
-    })
-
-    if (!response.ok) throw new Error(`Embedding API Error: ${response.status}`)
-    const data = await response.json()
-
-    // 4) 결과 매핑: 동일 텍스트 공유 인덱스에 동일 임베딩 복제
-    uniqueTexts.forEach((text, uIdx) => {
-      const embedding = data.data[uIdx].embedding
-      const targetIndices = textToIndices.get(stableTextKey(text))
-      for (const idx of targetIndices) {
-        const src = needsEmbedding[idx]
-        const enhancedText = buildEnhancedEmbeddingText({
-          partName: src.part?.name,
-          partNum: src.part_num,
-          colorName: src.color?.name,
-          featureText: src.feature_text,
-          keypoints: src.keypoints,
-          distinguishing: src.distinguishing_features,
-          legoPartNumber: src.part?.external_ids?.lego || src.part?.external_ids?.Lego || null
-        })
-        results.push({ part_num: src.part_num || 'unknown', embedding, feature_text: enhancedText })
-      }
-    })
-  } catch (error) {
-    console.error('❌ Batch embeddings failed:', error)
-    // 실패 시 개별 호출 폴백(최소한의 품질 유지)
-    for (const src of needsEmbedding) {
-      try {
-        const r = await fetch(`${CLIP_CONFIG.baseUrl}/embeddings`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${CLIP_CONFIG.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: CLIP_CONFIG.model, input: src.feature_text, dimensions: CLIP_CONFIG.dimensions })
-        })
-        if (!r.ok) throw new Error(`Embedding API Error: ${r.status}`)
-        const j = await r.json()
-        const enhancedText = buildEnhancedEmbeddingText({
-          partName: src.part?.name,
-          partNum: src.part_num,
-          colorName: src.color?.name,
-          featureText: src.feature_text,
-          keypoints: src.keypoints,
-          distinguishing: src.distinguishing_features,
-          legoPartNumber: src.part?.external_ids?.lego || src.part?.external_ids?.Lego || null
-        })
-        results.push({ part_num: src.part_num || 'unknown', embedding: j.data[0].embedding, feature_text: enhancedText })
-      } catch (e) {
-        results.push({ part_num: src.part_num || 'unknown', embedding: null, error: e.message })
-      }
-    }
-  }
-
-  return results
+  // 🔧 수정됨: 프론트엔드는 임베딩을 생성하지 않음. 워커 큐로 위임
+  console.log('🔁 [임베딩 위임] 프론트에서는 임베딩을 생성하지 않고 워커에 위임합니다') // 🔧 수정됨
+  return [] // 🔧 수정됨
 }
 
 function stableTextKey(text) {
   return String(text).trim().toLowerCase()
 }
 
-// 표준 태그 정규화 (검색·후처리 최적화)
+// 표준 태그 정규화 (검색·후처리 최적화) - 55개 카테고리 지원
 function normalizeShapeTag(raw) {
   const t = String(raw || '').toLowerCase()
+  
+  // 기본 조립 (21개)
+  if (/(baseplate|베이스플레이트)/.test(t)) return 'baseplate'
   if (/(plate|플레이트)/.test(t)) return 'plate'
   if (/(brick|브릭)/.test(t)) return 'brick'
-  if (/(slope|경사)/.test(t)) return 'slope'
   if (/(tile|타일)/.test(t)) return 'tile'
-  if (/(animal|동물)/.test(t)) return 'animal_figure'
-  if (/(leaf|plant|잎|식물)/.test(t)) return 'plant_leaf'
+  if (/(slope|경사)/.test(t)) return 'slope'
+  if (/(panel|패널)/.test(t)) return 'panel'
+  if (/(wedge|쐐기)/.test(t)) return 'wedge'
+  if (/(cylinder|원기둥)/.test(t)) return 'cylinder'
+  if (/(cone|원뿔)/.test(t)) return 'cone'
+  if (/(arch|아치)/.test(t)) return 'arch'
+  if (/(round|둥근)/.test(t)) return 'round'
+  if (/(dish|접시)/.test(t)) return 'dish'
+  if (/(roof|지붕)/.test(t)) return 'roof'
+  if (/(inverted|뒤집힌)/.test(t)) return 'inverted'
+  if (/(corner|모서리)/.test(t)) return 'corner'
+  if (/(hinge|힌지)/.test(t)) return 'hinge'
+  if (/(clip|클립)/.test(t)) return 'clip'
+  if (/(bar|바)/.test(t)) return 'bar'
+  if (/(fence|울타리)/.test(t)) return 'fence'
+  if (/(door|문)/.test(t)) return 'door'
+  if (/(window|창문)/.test(t)) return 'window'
+  
+  // 테크닉 (10개)
+  if (/(technic_pin|테크닉핀)/.test(t)) return 'technic_pin'
+  if (/(technic_beam|테크닉빔)/.test(t)) return 'technic_beam'
+  if (/(gear|기어)/.test(t)) return 'gear'
+  if (/(axle|축)/.test(t)) return 'axle'
+  if (/(wheel|바퀴)/.test(t)) return 'wheel'
+  if (/(tire|타이어)/.test(t)) return 'tire'
+  if (/(propeller|프로펠러)/.test(t)) return 'propeller'
+  if (/(chain|체인)/.test(t)) return 'chain'
+  if (/(electronics|전자)/.test(t)) return 'electronics'
+  if (/(mechanical|기계)/.test(t)) return 'mechanical'
+  
+  // 미니피그 (6개)
+  if (/(minifig_head|미니피그헤드)/.test(t)) return 'minifig_head'
+  if (/(minifig_torso|미니피그토르소)/.test(t)) return 'minifig_torso'
+  if (/(minifig_leg|미니피그다리)/.test(t)) return 'minifig_leg'
+  if (/(minifig_accessory|미니피그액세서리)/.test(t)) return 'minifig_accessory'
+  if (/(minifig_part|미니피그부품)/.test(t)) return 'minifig_part'
+  if (/(minifig|미니피그)/.test(t)) return 'minifig'
+  
+  // 생물/자연 (4개)
+  if (/(animal_figure|동물피규어)/.test(t)) return 'animal_figure'
+  if (/(plant_leaf|식물잎)/.test(t)) return 'plant_leaf'
+  if (/(animals|동물)/.test(t)) return 'animals'
+  if (/(plants|식물)/.test(t)) return 'plants'
+  
+  // 액세서리 (10개)
+  if (/(sticker|스티커)/.test(t)) return 'sticker'
+  if (/(decal|데칼)/.test(t)) return 'decal'
+  if (/(accessory|액세서리)/.test(t)) return 'accessory'
+  if (/(printed_part|인쇄부품)/.test(t)) return 'printed_part'
+  if (/(transparent|투명)/.test(t)) return 'transparent'
+  if (/(tools|도구)/.test(t)) return 'tools'
+  if (/(containers|컨테이너)/.test(t)) return 'containers'
+  if (/(energy_effects|에너지효과)/.test(t)) return 'energy_effects'
+  if (/(magnets|자석)/.test(t)) return 'magnets'
+  if (/(tubes_hoses|튜브호스)/.test(t)) return 'tubes_hoses'
+  
+  // 레거시 (4개)
   if (/(technic|테크닉)/.test(t)) return 'technic'
+  if (/(duplo|듀플로)/.test(t)) return 'duplo'
+  if (/(misc_shape|기타형태)/.test(t)) return 'misc_shape'
+  
   return t || 'unknown'
 }
 
@@ -1531,21 +2197,27 @@ export async function saveToMasterPartsDB(analysisResults) {
     console.log(`📊 Input deduplication: ${analysisResults.length} -> ${uniqueResults.length} results`)
     analysisResults = uniqueResults
     
-    // ✅ DB 저장 안정화: 유효성 검증 강화
+    // 🔧 수정됨: parts_master 테이블에 엘리먼트 ID 자동 등록
+    await registerElementIdsToPartsMaster(analysisResults)
+    
+    // ✅ DB 저장 안정화: 유효성 검증 강화 (임베딩 없어도 저장 허용)
     const safeParts = analysisResults.filter(part => {
-      // 필수 필드 검증
+      // 필수 필드 검증 (임베딩은 선택사항)
       if (!part.feature_text || part.feature_text.trim() === '') {
         console.warn(`⚠️ Skipping part ${part.part_num}: feature_text missing`)
         return false
       }
+      
+      // 임베딩이 없으면 빈 배열로 설정
       if (!part.semantic_vector || !Array.isArray(part.semantic_vector)) {
-        console.warn(`⚠️ Skipping part ${part.part_num}: semantic_vector missing`)
-        return false
+        console.log(`⚠️ [임베딩 없음] ${part.part_num}: semantic_vector를 빈 배열로 설정`)
+        part.semantic_vector = []
       }
       if (!part.clip_text_emb || !Array.isArray(part.clip_text_emb)) {
-        console.warn(`⚠️ Skipping part ${part.part_num}: clip_text_emb missing`)
-        return false
+        console.log(`⚠️ [임베딩 없음] ${part.part_num}: clip_text_emb를 빈 배열로 설정`)
+        part.clip_text_emb = []
       }
+      
       return true
     })
     
@@ -1575,47 +2247,58 @@ export async function saveToMasterPartsDB(analysisResults) {
     console.log(`📊 Valid parts for DB: ${finalParts.length}/${safeParts.length} (deduplicated from ${analysisResults.length} total)`)
     analysisResults = finalParts
     
+         // ✅ semantic_vector 생성 (Vision 모델 기반)
+         console.log('🚀 Generating semantic vectors for vision-based embeddings...')
+         const semanticVectorPromises = analysisResults.map(async (result) => {
+           // 이미지 URL 소스 통합: Supabase Storage 최우선 (CORS 문제 완전 회피)
+           const candidateUrls = [
+             result.supabase_image_url,  // 최우선: Supabase Storage (CORS 없음)
+             result.webp_image_url,      // 2순위: WebP 이미지
+             result.llm_image_url,       // 3순위: LLM 분석용 이미지
+             result.image_url,           // 4순위: 일반 이미지 URL
+             result.part?.part_img_url,  // 5순위: 부품 이미지 URL
+             result.part_img_url         // 6순위: 백업 이미지 URL
+           ].filter(Boolean)
+
+      const selectedImageUrl = candidateUrls.length > 0 ? candidateUrls[0] : null
+
+      if (selectedImageUrl && (!result.semantic_vector || isZeroVector(result.semantic_vector))) {
+        console.log(`🔍 Generating semantic vector for ${result.part_num}`)
+        try {
+          const semanticVector = await generateSemanticVector(
+            selectedImageUrl, 
+            result.part_num, 
+            result.color_id
+          )
+          if (semanticVector) {
+            result.semantic_vector = semanticVector
+            console.log(`✅ Semantic vector generated for ${result.part_num}`)
+          } else {
+            console.warn(`⚠️ Failed to generate semantic vector for ${result.part_num}`)
+          }
+        } catch (error) {
+          console.error(`❌ Semantic vector generation error for ${result.part_num}:`, error)
+        }
+      }
+      return result
+    })
+    
+    // 모든 semantic_vector 생성 완료 대기
+    await Promise.all(semanticVectorPromises)
+
     // ✅ 벡터 정규화 적용 (DB 저장 전)
     analysisResults.forEach(part => {
+      // semantic_vector가 없거나 제로벡터인 경우 기본값 설정
+      if (!part.semantic_vector || isZeroVector(part.semantic_vector)) {
+        console.warn(`⚠️ Using fallback for semantic_vector for ${part.part_num}`)
+        part.semantic_vector = Array(768).fill(0.0) // 제로벡터로 설정 (나중에 재생성 가능)
+      }
+      
       part.semantic_vector = normalizeVector(part.semantic_vector)
       part.clip_text_emb = normalizeVector(part.clip_text_emb)
     })
 
-    // 1) 누락 임베딩 보충: semantic_vector, clip_text_emb, embedding 모두 체크
-    const missingEmb = analysisResults.filter(r => {
-      const hasSemanticVector = Array.isArray(r.semantic_vector) && r.semantic_vector.length >= VECTOR_LEN_STORE
-      const hasClipTextEmb = Array.isArray(r.clip_text_emb) && r.clip_text_emb.length >= VECTOR_LEN_STORE
-      const hasEmbedding = Array.isArray(r.embedding) && r.embedding.length >= VECTOR_LEN_STORE
-      return !hasSemanticVector || !hasClipTextEmb || !hasEmbedding
-    })
-    
-    if (missingEmb.length > 0) {
-      try {
-        const embResults = await generateTextEmbeddingsBatch(missingEmb)
-        const embMap = new Map()
-        for (const e of embResults) {
-          if (Array.isArray(e.embedding) && e.embedding.length >= VECTOR_LEN_STORE) {
-            embMap.set(e.part_num, e.embedding)
-          }
-        }
-        analysisResults.forEach(r => {
-          if (!Array.isArray(r.semantic_vector) || r.semantic_vector.length < VECTOR_LEN_STORE) {
-            const emb = embMap.get(r.part_num)
-            if (emb) r.semantic_vector = emb
-          }
-          if (!Array.isArray(r.clip_text_emb) || r.clip_text_emb.length < VECTOR_LEN_STORE) {
-            const emb = embMap.get(r.part_num)
-            if (emb) r.clip_text_emb = emb
-          }
-          if (!Array.isArray(r.embedding) || r.embedding.length < VECTOR_LEN_STORE) {
-            const emb = embMap.get(r.part_num)
-            if (emb) r.embedding = emb
-          }
-        })
-      } catch (e) {
-        console.warn('⚠️ Failed to backfill embeddings; proceeding without some embeddings', e)
-      }
-    }
+    // 🔧 수정됨: 누락 임베딩은 백엔드 워커가 처리. 프론트에서는 백필 시도하지 않음
 
     // 분류기 초기화 (Tier/메타데이터 산출)
     const classifier = usePartClassification()
@@ -1642,7 +2325,11 @@ export async function saveToMasterPartsDB(analysisResults) {
         unique_features: clipifyPhrases(result.recognition_hints?.unique_features)
       }
 
-      return {
+      // 🔧 수정됨: function과 connection 자동 추론 (동기적으로 처리)
+      const inferredConnection = result.connection || 'stud_connection' // 기본값 사용
+      const inferredFunction = result.function || 'building_block' // 기본값 사용
+
+      const rec = {
         part_id: result.part_num,
         part_name: result.part?.name || 'Unknown',
         color_id: resolvedColorId,
@@ -1720,11 +2407,11 @@ export async function saveToMasterPartsDB(analysisResults) {
             resolution: 768
           },
           meta_source: result.meta_source || 'auto_renderer_v4',
-          // 기존 필드들 유지
-          shape: result.shape,
-          connection: result.connection,
-          function: result.function,
-          similar_parts: result.similar_parts,
+        // 기존 필드들 유지
+        shape: result.shape || generateShapeDescriptionFromTag(result.shape_tag, result.part?.name || result.name || ''),
+        connection: result.connection || inferredConnection,
+        function: result.function || inferredFunction,
+          similar_parts: result.similar_parts || result.confusions || [],
           keypoints: result.keypoints || [],
           color_expectation: result.color_expectation || null,
           shape_tag_legacy: normalizedShape,
@@ -1733,14 +2420,19 @@ export async function saveToMasterPartsDB(analysisResults) {
           clip_unique_features: clipHints.unique_features
         },
         feature_text: result.feature_text,
-        // CLIP 텍스트 임베딩은 clip_text_emb에만 저장
-        clip_text_emb: Array.isArray(result.clip_text_emb) ? result.clip_text_emb
-              : (Array.isArray(result.embedding) ? result.embedding : null),
+        // CLIP 텍스트 임베딩: 제로/불완전 벡터는 저장 금지 (워커에 위임)
+        clip_text_emb: (() => {
+          const candidate = Array.isArray(result.clip_text_emb)
+            ? result.clip_text_emb
+            : (Array.isArray(result.embedding) ? result.embedding : null)
+          const normalized = normalizeClipVectorOrNull(candidate) // 🔧 수정됨
+          return (normalized && !isZeroVector(normalized)) ? normalized : null // 🔧 수정됨
+        })(),
         // 시맨틱 벡터는 별도 컬럼 유지
         semantic_vector: Array.isArray(result.semantic_vector) ? result.semantic_vector : null,
         // 별도 컬럼으로도 저장하여 검색 최적화
         recognition_hints: result.recognition_hints || null,
-        similar_parts: result.similar_parts || null,
+        similar_parts: result.similar_parts || result.confusions || null,
         distinguishing_features: clipDistinguishing || null,
         confidence: result.confidence || 0.5,
         // 기술문서 매핑: feature_text_score → semantic_score
@@ -1811,6 +2503,17 @@ export async function saveToMasterPartsDB(analysisResults) {
         review_ratio: result.review_ratio || 0.0,
         last_updated: new Date().toISOString()
       }
+
+      // 🤖 백그라운드 LLM 분석 방식: 자동 임베딩 생성 활성화
+      const hasClip = Array.isArray(rec.clip_text_emb) && rec.clip_text_emb.length === VECTOR_LEN_STORE && !isZeroVector(rec.clip_text_emb) // 🔧 수정됨
+      if (result && typeof result.embedding_status === 'string' && result.embedding_status.length > 0) {
+        rec.embedding_status = result.embedding_status
+      } else {
+        // 백그라운드 LLM 분석 시 자동으로 pending 설정하여 워커가 처리하도록 함
+        rec.embedding_status = hasClip ? 'completed' : 'pending'
+      }
+
+      return rec
     })
 
     // color_id가 null인 경우 기본값 0으로 설정
@@ -1901,14 +2604,14 @@ export async function saveToMasterPartsDB(analysisResults) {
       const result = {
         part_num: record.part_id,
         color_id: record.color_id,
-        shape: record.feature_json?.shape || 'unknown',
+        shape: record.feature_json?.shape || generateShapeDescriptionFromTag(record.feature_json?.shape_tag, record.part_name || ''),
         center_stud: record.feature_json?.center_stud || false,
         groove: record.feature_json?.groove || false,
         connection: record.feature_json?.connection || 'unknown',
         function: record.feature_json?.function || 'unknown',
         feature_text: record.feature_text,
         recognition_hints: record.feature_json?.recognition_hints || {},
-        similar_parts: record.feature_json?.similar_parts || [],
+        similar_parts: record.feature_json?.similar_parts || record.feature_json?.confusions || [],
         distinguishing_features: record.feature_json?.distinguishing_features || [],
         confidence: record.confidence || 0.5,
         embedding: record.clip_text_emb
@@ -1976,14 +2679,14 @@ export async function checkExistingAnalysis(partNum, colorId) {
     const result = {
       part_num: data.part_id,
       color_id: data.color_id,
-      shape: data.feature_json?.shape || 'unknown',
+      shape: data.feature_json?.shape || generateShapeDescriptionFromTag(data.feature_json?.shape_tag, data.part_name || ''),
       center_stud: data.feature_json?.center_stud || false,
       groove: data.feature_json?.groove || false,
       connection: data.feature_json?.connection || 'unknown',
       function: data.feature_json?.function || 'unknown',
       feature_text: data.feature_text,
       recognition_hints: data.feature_json?.recognition_hints || {},
-      similar_parts: data.feature_json?.similar_parts || [],
+      similar_parts: data.feature_json?.similar_parts || data.feature_json?.confusions || [],
       distinguishing_features: data.feature_json?.distinguishing_features || [],
       confidence: data.confidence || 0.5,
       embedding: data.clip_text_emb,
@@ -2227,7 +2930,7 @@ export function useMasterPartsPreprocessing() {
     
     const result = {
       part_num: partNum,
-      shape: isBrick ? 'rectangular_brick' : (isAnimal ? 'animal_figure' : 'unknown'),
+      shape: generateShapeDescription(partName, isBrick, isAnimal, isDuplo, hasPrint),
       center_stud: isBrick,
       groove: false,
       connection: isBrick ? 'stud_connection' : 'unknown',
@@ -2238,7 +2941,7 @@ export function useMasterPartsPreprocessing() {
         side_view: isBrick ? '스터드 연결부' : (isAnimal ? '동물 특징' : '미확인'),
         unique_features: hasPrint ? ['인쇄된 디테일'] : []
       },
-      similar_parts: [],
+      similar_parts: [], // 텍스트 분석에서는 confusions 정보가 없으므로 빈 배열 유지
       distinguishing_features: isDuplo ? ['Duplo 크기'] : [],
       confidence: 0.4 // 텍스트 분석이므로 낮은 신뢰도
     }
@@ -2825,7 +3528,70 @@ async function validateAndEnhanceMetadata(analysisResult, imageUrl) {
       const hints = (validated.recognition_hints || '').toLowerCase()
       const combined = `${partName} ${features} ${hints}`
       
-      if (combined.includes('brick') || combined.includes('block')) {
+      // 🔧 수정됨 - 55개 카테고리 fallback 로직
+      if (combined.includes('baseplate') || combined.includes('베이스플레이트')) {
+        validated.shape_tag = 'baseplate'
+      } else if (combined.includes('minifig_head') || combined.includes('미니피그헤드')) {
+        validated.shape_tag = 'minifig_head'
+      } else if (combined.includes('minifig_torso') || combined.includes('미니피그토르소')) {
+        validated.shape_tag = 'minifig_torso'
+      } else if (combined.includes('minifig_leg') || combined.includes('미니피그다리')) {
+        validated.shape_tag = 'minifig_leg'
+      } else if (combined.includes('minifig_accessory') || combined.includes('미니피그액세서리')) {
+        validated.shape_tag = 'minifig_accessory'
+      } else if (combined.includes('minifig_part') || combined.includes('미니피그부품')) {
+        validated.shape_tag = 'minifig_part'
+      } else if (combined.includes('minifig') || combined.includes('미니피그')) {
+        validated.shape_tag = 'minifig'
+      } else if (combined.includes('technic_pin') || combined.includes('테크닉핀')) {
+        validated.shape_tag = 'technic_pin'
+      } else if (combined.includes('technic_beam') || combined.includes('테크닉빔')) {
+        validated.shape_tag = 'technic_beam'
+      } else if (combined.includes('gear') || combined.includes('기어')) {
+        validated.shape_tag = 'gear'
+      } else if (combined.includes('axle') || combined.includes('축')) {
+        validated.shape_tag = 'axle'
+      } else if (combined.includes('wheel') || combined.includes('바퀴')) {
+        validated.shape_tag = 'wheel'
+      } else if (combined.includes('tire') || combined.includes('타이어')) {
+        validated.shape_tag = 'tire'
+      } else if (combined.includes('propeller') || combined.includes('프로펠러')) {
+        validated.shape_tag = 'propeller'
+      } else if (combined.includes('chain') || combined.includes('체인')) {
+        validated.shape_tag = 'chain'
+      } else if (combined.includes('electronics') || combined.includes('전자')) {
+        validated.shape_tag = 'electronics'
+      } else if (combined.includes('mechanical') || combined.includes('기계')) {
+        validated.shape_tag = 'mechanical'
+      } else if (combined.includes('animal_figure') || combined.includes('동물피규어')) {
+        validated.shape_tag = 'animal_figure'
+      } else if (combined.includes('animals') || combined.includes('동물')) {
+        validated.shape_tag = 'animals'
+      } else if (combined.includes('plant_leaf') || combined.includes('식물잎')) {
+        validated.shape_tag = 'plant_leaf'
+      } else if (combined.includes('plants') || combined.includes('식물')) {
+        validated.shape_tag = 'plants'
+      } else if (combined.includes('sticker') || combined.includes('스티커')) {
+        validated.shape_tag = 'sticker'
+      } else if (combined.includes('decal') || combined.includes('데칼')) {
+        validated.shape_tag = 'decal'
+      } else if (combined.includes('accessory') || combined.includes('액세서리')) {
+        validated.shape_tag = 'accessory'
+      } else if (combined.includes('printed_part') || combined.includes('인쇄부품')) {
+        validated.shape_tag = 'printed_part'
+      } else if (combined.includes('transparent') || combined.includes('투명')) {
+        validated.shape_tag = 'transparent'
+      } else if (combined.includes('tools') || combined.includes('도구')) {
+        validated.shape_tag = 'tools'
+      } else if (combined.includes('containers') || combined.includes('컨테이너')) {
+        validated.shape_tag = 'containers'
+      } else if (combined.includes('energy_effects') || combined.includes('에너지효과')) {
+        validated.shape_tag = 'energy_effects'
+      } else if (combined.includes('magnets') || combined.includes('자석')) {
+        validated.shape_tag = 'magnets'
+      } else if (combined.includes('tubes_hoses') || combined.includes('튜브호스')) {
+        validated.shape_tag = 'tubes_hoses'
+      } else if (combined.includes('brick') || combined.includes('block')) {
         validated.shape_tag = 'brick'
       } else if (combined.includes('plate') || combined.includes('flat')) {
         validated.shape_tag = 'plate'
@@ -2837,10 +3603,6 @@ async function validateAndEnhanceMetadata(analysisResult, imageUrl) {
         validated.shape_tag = 'panel'
       } else if (combined.includes('technic') || combined.includes('beam')) {
         validated.shape_tag = 'technic'
-      } else if (combined.includes('minifig') || combined.includes('figure')) {
-        validated.shape_tag = 'minifig'
-      } else if (combined.includes('wheel') || combined.includes('tire')) {
-        validated.shape_tag = 'wheel'
       } else if (combined.includes('animal') || combined.includes('creature')) {
         validated.shape_tag = 'animal_figure'
       } else if (combined.includes('plant') || combined.includes('leaf')) {

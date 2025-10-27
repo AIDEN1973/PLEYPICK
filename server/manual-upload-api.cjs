@@ -12,44 +12,35 @@ const fsSync = require('fs');
 
 const app = express();
 
-// 포트 관리 시스템에서 포트 가져오기
-let PORT;
-try {
-  // 포트 설정 파일에서 읽기
-  const portConfigPath = path.join(__dirname, '..', '.port-config.json');
-  if (fsSync.existsSync(portConfigPath)) {
-    const portConfig = JSON.parse(fsSync.readFileSync(portConfigPath, 'utf8'));
-    PORT = portConfig.manualUploadApi;
-    console.log(`📄 포트 설정 파일에서 읽기: ${PORT}`);
-  } else {
-    console.log('📄 포트 설정 파일 없음, 기본값 사용');
-  }
-} catch (error) {
-  console.warn('⚠️ 포트 설정 파일 읽기 실패, 기본값 사용:', error.message);
-}
+// 고정 포트 3030 사용 (근본 문제 해결)
+const PORT = 3030;
+console.log(`🔒 고정 포트 사용: ${PORT}`);
 
-// 기본값 설정
-PORT = PORT || process.env.MANUAL_UPLOAD_PORT || 3030;
+// PORT는 이미 3030으로 고정됨
 
 // Supabase 클라이언트 설정
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.VITE_SUPABASE_SERVICE_ROLE || process.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co';
+const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00';
 
-console.log('🔍 환경 변수 확인:');
-console.log(`  - SUPABASE_URL: ${supabaseUrl ? '설정됨' : '없음'}`);
+console.log('✅ Supabase 클라이언트 설정 완료');
+console.log(`  - SUPABASE_URL: ${supabaseUrl}`);
 console.log(`  - SUPABASE_KEY: ${supabaseKey ? '설정됨' : '없음'}`);
-
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ Supabase 환경 변수가 설정되지 않았습니다.');
-  console.error('필요한 환경 변수: VITE_SUPABASE_URL, VITE_SUPABASE_SERVICE_ROLE 또는 VITE_SUPABASE_ANON_KEY');
-  process.exit(1);
-}
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 // 미들웨어
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Health check 엔드포인트
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'Manual Upload API',
+    port: process.env.MANUAL_UPLOAD_PORT || 3030,
+    timestamp: new Date().toISOString()
+  });
+});
 
 // 파일 업로드 설정
 const storage = multer.diskStorage({

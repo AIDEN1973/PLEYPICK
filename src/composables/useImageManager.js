@@ -202,7 +202,7 @@ export function useImageManager() {
       
       // 2. Storage 버킷에서 직접 확인 (폴백)
       const fileName = `${partNum}_${colorId}.webp`
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
       const bucketName = 'lego_parts_images'
       const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
       

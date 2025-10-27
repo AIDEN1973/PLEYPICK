@@ -26,7 +26,7 @@ export function useLLMIntegration() {
         body: JSON.stringify({
           model: options.model || LLM_CONFIG.model,
           messages: messages,
-          max_tokens: options.maxTokens || LLM_CONFIG.maxTokens,
+          max_completion_tokens: options.maxTokens || LLM_CONFIG.maxTokens,
           temperature: options.temperature || LLM_CONFIG.temperature
         })
       })

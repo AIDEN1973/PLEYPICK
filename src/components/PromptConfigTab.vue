@@ -26,20 +26,24 @@
       >
         🧪 테스트
       </button>
-      <button 
-        :class="['sub-tab', { active: activeSubTab === 'presets' }]"
-        @click="activeSubTab = 'presets'"
-      >
-        📦 프리셋
-      </button>
     </div>
 
     <!-- 프롬프트 편집 탭 -->
     <div v-if="activeSubTab === 'prompt'" class="sub-tab-content">
       <div class="section">
-        <h2>프롬프트 템플릿</h2>
+        <div class="section-header">
+          <h2>AI 메타데이터 생성 프롬프트</h2>
+          <button 
+            @click="loadConfigFromDB" 
+            :disabled="loading"
+            class="btn btn-sm btn-secondary"
+          >
+            {{ loading ? '로딩 중...' : '🔄 DB에서 새로고침' }}
+          </button>
+        </div>
         <p class="description">
-          LLM에게 전달되는 프롬프트를 수정하세요. 변수: <code>${partName}</code>, <code>${partNum}</code>, <code>${colorName}</code>
+          레고 부품 이미지를 분석하여 메타데이터를 생성하는 프롬프트입니다. 
+          변수: <code>${partName}</code>, <code>${partNum}</code>, <code>${colorName}</code>
         </p>
         
         <div class="prompt-editor">
@@ -50,18 +54,18 @@
             placeholder="당신은 레고 부품 전문가입니다..."
           ></textarea>
 
-          <label>메인 프롬프트</label>
+          <label>메인 프롬프트 (55개 카테고리 포함)</label>
           <textarea 
             v-model="config.mainPrompt"
-            rows="15"
-            placeholder="이미지를 분석하여 JSON 형식으로 응답하세요..."
+            rows="20"
+            placeholder="레고 부품 정보를 분석하여 JSON 형식으로 응답하세요..."
           ></textarea>
 
           <label>필수 요구사항</label>
           <textarea 
             v-model="config.requirements"
-            rows="5"
-            placeholder="- shape_tag: 정확한 부품 유형 분류..."
+            rows="8"
+            placeholder="- shape_tag: 55개 카테고리 중 정확히 하나 선택..."
           ></textarea>
         </div>
 
@@ -81,11 +85,13 @@
           <div class="config-item">
             <label>모델</label>
             <select v-model="config.llm.model">
-              <option value="gpt-4o-mini">gpt-4o-mini (빠름, 저렴)</option>
-              <option value="gpt-4o">gpt-4o (고품질)</option>
-              <option value="gpt-4-turbo">gpt-4-turbo (균형)</option>
+              <option value="gpt-4o-mini">gpt-4o-mini (1차: 빠름, 저렴) - 권장</option>
+              <option value="gpt-5-mini">gpt-5-mini (2차: 향상된 성능)</option>
+              <option value="gpt-4-turbo">gpt-4-turbo (3차: 빠른 고품질)</option>
+              <option value="gpt-4o">gpt-4o (4차: 최고 품질, 비쌈)</option>
+              <option value="gpt-4o-2024-08-06">gpt-4o-2024-08-06 (대안: 최신)</option>
             </select>
-            <small>gpt-4o-mini 권장 (성능/비용 최적)</small>
+            <small>4단계 Fallback: gpt-4o-mini → gpt-5-mini → gpt-4-turbo → gpt-4o (자동 전환)</small>
           </div>
 
           <div class="config-item">
@@ -144,8 +150,17 @@
         <div class="cost-estimate">
           <h3>💰 예상 비용</h3>
           <p>모델: <strong>{{ config.llm.model }}</strong></p>
-          <p>부품당 비용: <strong>${{ estimateCost() }}</strong></p>
+          <p>부품당 비용: <strong>${{ estimateCost() }}</strong> (1K 토큰 기준)</p>
           <p>1000개 부품: <strong>${{ (estimateCost() * 1000).toFixed(2) }}</strong></p>
+          <p>10,000개 부품: <strong>${{ (estimateCost() * 10000).toFixed(2) }}</strong></p>
+          <div class="cost-note">
+            <small>
+              🔄 <strong>4단계 Fallback 시스템:</strong><br>
+              💡 1차: gpt-4o-mini ($0.15) → 2차: gpt-5-mini ($0.30) → 3차: gpt-4-turbo ($1.00) → 4차: gpt-4o ($2.50)<br>
+              💡 실패 시 자동으로 다음 모델로 전환 (사용자 개입 불필요)<br>
+              💡 실제 비용은 입력/출력 토큰 비율에 따라 달라짐
+            </small>
+          </div>
         </div>
       </div>
     </div>
@@ -295,33 +310,6 @@
       </div>
     </div>
 
-    <!-- 프리셋 탭 -->
-    <div v-if="activeSubTab === 'presets'" class="sub-tab-content">
-      <div class="section">
-        <h2>프리셋 관리</h2>
-        <p class="description">DB에 저장된 공개 프리셋 목록입니다.</p>
-
-        <div class="preset-list">
-          <div v-for="preset in presets" :key="preset.name" class="preset-card">
-            <div class="preset-header">
-              <h3>{{ preset.name }}</h3>
-              <div class="preset-tags">
-                <span v-for="tag in preset.tags" :key="tag" class="tag">{{ tag }}</span>
-              </div>
-            </div>
-            <p class="preset-desc">{{ preset.description }}</p>
-            <div class="preset-info">
-              <span>모델: {{ preset.config.llm.model }}</span>
-              <span>토큰: {{ preset.config.llm.maxTokens }}</span>
-              <span>Temperature: {{ preset.config.llm.temperature }}</span>
-            </div>
-            <button @click="loadPreset(preset)" class="btn btn-sm">
-              불러오기
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- 하단 액션 버튼 -->
     <div class="actions">
@@ -329,7 +317,7 @@
         🔄 기본값으로 초기화
       </button>
       <button @click="saveConfig" class="btn btn-primary" :disabled="saving">
-        {{ saving ? '저장 중...' : '💾 DB에 저장' }}
+        {{ saving ? '저장 중...' : '💾 설정 저장' }}
       </button>
     </div>
 
@@ -353,11 +341,11 @@ export default {
     const activeSubTab = ref('prompt')
     const saving = ref(false)
     const testing = ref(false)
+    const loading = ref(false)
     const successMessage = ref('')
     const errorMessage = ref('')
-    const presets = ref([])
     
-    // 기본 설정 (v2.1)
+    // 기본 설정 (v2.2 - 55개 카테고리)
     const defaultConfig = {
       systemPrompt: '당신은 레고 부품 전문가입니다. 이미지를 분석하여 JSON 형식으로 응답하세요.',
       mainPrompt: `레고 부품 정보:
@@ -369,7 +357,7 @@ export default {
 
 {
   "part_id": "\${partNum}",
-  "shape_tag": "아래 30개 옵션 중 하나 선택 (코드명으로)",
+  "shape_tag": "아래 55개 카테고리 옵션 중 하나 선택 (코드명으로)",
   "series": "system 또는 duplo, technic, bionicle, friends, city, star_wars, creator, ninjago 중 하나 (해당 없으면 system)",
   "stud_count_top": 상단 스터드 개수 (숫자),
   "tube_count_bottom": 하단 튜브 개수 (숫자),
@@ -385,17 +373,26 @@ export default {
   }
 }
 
-shape_tag 선택 가능 옵션 (30개):
-기본 형태 (1-19):
-plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, hinge, clip, bar, fence, door, window, roof, inverted
+shape_tag 선택 가능 옵션 (총 55개):
+기본 조립 부품 (21개):
+plate, brick, tile, slope, panel, wedge, cylinder, cone, arch, round, dish, roof, inverted, baseplate, corner, hinge, clip, bar, fence, door, window
 
-특수 부품 (20-29):
-minifig_part, animal_figure, plant_leaf, wheel, tire, wing, propeller, gear, chain, axle
+테크닉 부품 (10개):
+technic_pin, technic_beam, gear, axle, wheel, tire, propeller, chain, electronics, mechanical
 
-분류 불가:
-unknown`,
+미니피그 부품 (6개):
+minifig_head, minifig_torso, minifig_leg, minifig_accessory, minifig_part, minifig
+
+생물/자연 부품 (4개):
+animal_figure, plant_leaf, animals, plants
+
+스티커/액세서리 (10개):
+sticker, decal, accessory, printed_part, transparent, tools, containers, energy_effects, magnets, tubes_hoses
+
+레거시 호환 (4개):
+technic, duplo, misc_shape, unknown`,
       requirements: `필수 요구사항:
-- shape_tag: 위 30개 옵션 중 정확히 하나 선택 (코드명으로, 예: "plate", "brick", "gear")
+- shape_tag: 위 55개 카테고리 옵션 중 정확히 하나 선택 (코드명으로, 예: "plate", "brick", "gear")
 - series: 시리즈 분류 (기본값: "system")
 - recognition_hints.ko: 반드시 20자 이상의 자연스러운 한국어 설명
 - confusions: 최소 1개 이상의 유사 부품 번호 (숫자만, 예: ["3001", "3004"])
@@ -405,12 +402,12 @@ unknown`,
 - JSON 외 다른 텍스트 절대 금지 (\`\`\`json도 사용 금지)
 - 숫자 필드는 따옴표 없이 순수 숫자로 작성`,
       llm: {
-        model: 'gpt-4o-mini',
-        temperature: 0.0,
-        maxTokens: 300,
-        timeout: 8,
-        enableFallback: true,
-        jsonMode: true
+        model: 'gpt-4o-mini',        // 1차: 가장 저렴하고 빠름
+        temperature: 0.0,            // 결정론적 (일관된 결과)
+        maxTokens: 300,             // 토큰 제한
+        timeout: 8,                 // 8초 타임아웃
+        enableFallback: true,       // 3단계 Fallback 활성화
+        jsonMode: true              // JSON 모드 강제
       },
       validation: {
         requireRecognitionHints: true,
@@ -449,14 +446,17 @@ ${config.mainPrompt}
 ${config.requirements}`
     }
 
-    // 비용 추정
+    // 비용 추정 (4단계 Fallback 모델 기준)
     const estimateCost = () => {
       const costs = {
-        'gpt-4o-mini': 0.00015,
-        'gpt-4o': 0.0025,
-        'gpt-4-turbo': 0.001
+        'gpt-4o-mini': 0.00015,        // $0.15/1M 토큰 (1차: 가장 저렴)
+        'gpt-5-mini': 0.0003,          // $0.30/1M 토큰 (2차: 향상된 성능, 예상)
+        'gpt-4-turbo': 0.001,          // $1.00/1M 토큰 (3차: 빠른 고품질)
+        'gpt-4o': 0.0025,              // $2.50/1M 토큰 (4차: 최고 품질, 16배 비쌈)
+        'gpt-4o-2024-08-06': 0.0025,   // $2.50/1M 토큰 (대안: 최신)
+        'gpt-4-turbo-2024-04-09': 0.001 // $1.00/1M 토큰 (대안: 안정)
       }
-      return (costs[config.llm.model] || 0.0001).toFixed(5)
+      return (costs[config.llm.model] || 0.00015).toFixed(5)
     }
 
     // 테스트 실행
@@ -567,18 +567,10 @@ ${config.requirements}`
       }
     }
 
-    // 프리셋 로드 (LLM 설정만 변경, 프롬프트는 표준 유지)
-    const loadPreset = (preset) => {
-      // ✅ 프롬프트는 표준 유지, LLM 설정만 변경
-      config.llm = { ...config.llm, ...preset.config.llm }
-      config.validation = { ...config.validation, ...preset.config.validation }
-      
-      successMessage.value = `${preset.name} 프리셋의 LLM 설정을 불러왔습니다. (프롬프트는 표준 유지)`
-      setTimeout(() => { successMessage.value = '' }, 3000)
-    }
 
     // DB에서 설정 로드
     const loadConfigFromDB = async () => {
+      loading.value = true
       try {
         const { data, error } = await supabase
           .from('metadata_prompt_configs')
@@ -586,65 +578,43 @@ ${config.requirements}`
           .eq('id', 'active')
           .single()
         
-        if (error) throw error
+        if (error) {
+          console.warn('DB에서 설정을 찾을 수 없음, 기본값 사용:', error.message)
+          return
+        }
         
         if (data) {
-          config.systemPrompt = data.system_prompt
-          config.mainPrompt = data.main_prompt
-          config.requirements = data.requirements
-          config.llm.model = data.llm_model
-          config.llm.temperature = parseFloat(data.llm_temperature)
-          config.llm.maxTokens = data.llm_max_tokens
-          config.llm.timeout = data.llm_timeout
-          config.llm.enableFallback = data.llm_enable_fallback
-          config.llm.jsonMode = data.llm_json_mode
-          config.validation = data.validation_rules
+          config.systemPrompt = data.system_prompt || defaultConfig.systemPrompt
+          config.mainPrompt = data.main_prompt || defaultConfig.mainPrompt
+          config.requirements = data.requirements || defaultConfig.requirements
+          config.llm.model = data.llm_model || defaultConfig.llm.model
+          config.llm.temperature = parseFloat(data.llm_temperature) || defaultConfig.llm.temperature
+          config.llm.maxTokens = data.llm_max_tokens || defaultConfig.llm.maxTokens
+          config.llm.timeout = data.llm_timeout || defaultConfig.llm.timeout
+          config.llm.enableFallback = data.llm_enable_fallback !== undefined ? data.llm_enable_fallback : defaultConfig.llm.enableFallback
+          config.llm.jsonMode = data.llm_json_mode !== undefined ? data.llm_json_mode : defaultConfig.llm.jsonMode
+          config.validation = data.validation_rules || defaultConfig.validation
+          
+          console.log('✅ DB에서 프롬프트 설정 로드 성공')
         }
       } catch (error) {
         console.error('설정 로드 실패:', error)
+        errorMessage.value = 'DB에서 설정을 불러오는데 실패했습니다. 기본값을 사용합니다.'
+        setTimeout(() => { errorMessage.value = '' }, 5000)
+      } finally {
+        loading.value = false
       }
     }
 
-    // 프리셋 로드 (06a13fe 레거시 프리셋 제외)
-    const loadPresetsFromDB = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('metadata_prompt_presets')
-          .select('*')
-          .eq('is_public', true)
-          .not('name', 'ilike', '%06a13fe%')
-          .not('name', 'ilike', '%초기 비전%')
-          .not('name', 'ilike', '%legacy%')
-          .not('description', 'ilike', '%06a13fe%')
-          .not('description', 'ilike', '%초기 비전%')
-          .not('description', 'ilike', '%비전 테스트%')
-          .order('created_at', { ascending: false })
-        
-        if (error) throw error
-        
-        presets.value = (data || []).map(preset => ({
-          name: preset.name,
-          description: preset.description,
-          tags: preset.tags || [],
-          config: {
-            systemPrompt: preset.system_prompt,
-            mainPrompt: preset.main_prompt,
-            requirements: preset.requirements,
-            llm: preset.llm_config,
-            validation: preset.validation_rules
-          }
-        }))
-      } catch (error) {
-        console.error('프리셋 로드 실패:', error)
-      }
-    }
 
-    // ✅ 최적화: 초기화 시 데이터 로딩 병렬화
+    // 초기화 시 설정 로드
     onMounted(async () => {
-      await Promise.all([
-        loadConfigFromDB(),
-        loadPresetsFromDB()
-      ])
+      await loadConfigFromDB()
+      console.log('✅ DB에서 프롬프트 설정 로드 완료:', {
+        systemPrompt: config.systemPrompt,
+        mainPrompt: config.mainPrompt?.substring(0, 100) + '...',
+        requirements: config.requirements?.substring(0, 100) + '...'
+      })
     })
 
     return {
@@ -652,9 +622,9 @@ ${config.requirements}`
       config,
       saving,
       testing,
+      loading,
       successMessage,
       errorMessage,
-      presets,
       testPart,
       testResult,
       generateFullPrompt,
@@ -662,7 +632,7 @@ ${config.requirements}`
       runTest,
       saveConfig,
       resetToDefault,
-      loadPreset
+      loadConfigFromDB
     }
   }
 }
@@ -688,6 +658,10 @@ ${config.requirements}`
   padding: 8px 16px;
   background: none;
   border: none;
+}
+
+
+.sub-tab {
   border-bottom: 2px solid transparent;
   cursor: pointer;
   font-size: 0.9em;
@@ -706,6 +680,33 @@ ${config.requirements}`
 
 .sub-tab-content {
   animation: fadeIn 0.3s;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.section-header h2 {
+  margin-bottom: 0;
+}
+
+.cost-estimate {
+  margin-top: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border-left: 4px solid #3498db;
+}
+
+.cost-note {
+  margin-top: 10px;
+  padding: 8px;
+  background: #e8f4fd;
+  border-radius: 4px;
+  border-left: 3px solid #3498db;
 }
 
 @keyframes fadeIn {
@@ -938,66 +939,6 @@ ${config.requirements}`
   border-radius: 4px;
 }
 
-.preset-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 15px;
-  margin-top: 15px;
-}
-
-.preset-card {
-  padding: 15px;
-  background: #f8f9fa;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
-  transition: all 0.2s;
-}
-
-.preset-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  transform: translateY(-2px);
-}
-
-.preset-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.preset-header h3 {
-  font-size: 1.1em;
-  color: #2c3e50;
-  margin: 0;
-}
-
-.preset-tags {
-  display: flex;
-  gap: 4px;
-}
-
-.tag {
-  padding: 2px 8px;
-  background: #3498db;
-  color: white;
-  border-radius: 12px;
-  font-size: 0.75em;
-}
-
-.preset-desc {
-  color: #7f8c8d;
-  font-size: 0.9em;
-  margin-bottom: 10px;
-}
-
-.preset-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85em;
-  color: #95a5a6;
-  margin-bottom: 10px;
-}
 
 .actions {
   display: flex;

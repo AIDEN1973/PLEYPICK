@@ -53,11 +53,12 @@ temp/
 test_output/
 test_production/
 
-# 환경 변수
+# 환경 변수 (보안상 중요!)
 .env
 .env.local
 .env.production
-env.production.example
+# .env.example은 Git에 포함 (템플릿용)
+# env.production.example
 
 # IDE
 .vscode/

@@ -49,7 +49,7 @@ Edge/운영 권장: Essential JSON(E2) 사용, Full은 오프라인 QA·분석�
 
 품질: image_quality(ssim, snr 등) → 저장 시 image_quality_q, image_quality_snr로 요약/집계.
 
-임베딩: semantic_vector, clip_text_emb (각 768차원) — CLIP ViT-L/14 모델 기준. DB에는 VECTOR(768)로 저장, HNSW 인덱스 사용. (v2.1: text-embedding-3-small 1536차원 → CLIP 768차원으로 변경)
+임베딩: semantic_vector, clip_text_emb (각 768차원) — CLIP ViT-L/14 모델 기준. DB에는 VECTOR(768)로 저장, HNSW 인덱스 사용. 운영 시 CLIP 서비스(포트 3022) 우선 사용, OpenAI text-embedding-3-small(768)은 폴백용.
 
 3D/깊이/왜곡: PnP, depth validation, distortion 모델 등은 Full Meta(v1.6.1)로 유지(필요 시 DB로 투영).
 

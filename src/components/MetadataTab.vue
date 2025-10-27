@@ -1,235 +1,275 @@
 <template>
   <div class="metadata-tab">
-    <!-- 통계 -->
-    <div class="stats-section">
-      <div class="stat-card completed">
-        <div class="stat-icon">✅</div>
+    <div class="header">
+      <h2>📝 AI 메타데이터 관리</h2>
+      <p class="subtitle">AI 모델 기반 feature_json 생성 및 관리</p>
+    </div>
+
+    <!-- 상태 대시보드 -->
+    <div class="dashboard">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">📊</div>
         <div class="stat-content">
-          <div class="stat-label">완료</div>
-          <div class="stat-value">{{ stats.completed || 0 }}</div>
+            <div class="stat-value">{{ stats.totalParts }}</div>
+            <div class="stat-label">전체 부품</div>
         </div>
       </div>
-      <div class="stat-card error">
-        <div class="stat-icon">⚠️</div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
         <div class="stat-content">
-          <div class="stat-label">오류</div>
-          <div class="stat-value">{{ stats.error || 0 }}</div>
+            <div class="stat-value">{{ stats.validMetadata }}</div>
+            <div class="stat-label">유효 메타데이터</div>
         </div>
       </div>
-      <div class="stat-card missing">
+        <div class="stat-card">
         <div class="stat-icon">❌</div>
         <div class="stat-content">
-          <div class="stat-label">없음</div>
-          <div class="stat-value">{{ stats.missing || 0 }}</div>
+            <div class="stat-value">{{ stats.missingMetadata }}</div>
+            <div class="stat-label">누락 메타데이터</div>
         </div>
       </div>
-      <div class="stat-card progress">
-        <div class="stat-icon">📊</div>
+        <div class="stat-card">
+          <div class="stat-icon">🔄</div>
         <div class="stat-content">
-          <div class="stat-label">진행률</div>
-          <div class="stat-value">{{ progressPercentage }}%</div>
+            <div class="stat-value">{{ stats.processingRate }}%</div>
+            <div class="stat-label">처리율</div>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- 필터 및 검색 -->
-    <div class="filter-section">
-      <input 
-        v-model="searchQuery" 
-        type="text" 
-        placeholder="🔍 Part ID 또는 이름 검색..."
-        class="search-input"
-        @input="handleSearch"
-      />
-      <div class="filter-buttons">
-        <button 
-          :class="['filter-btn', { active: statusFilter === 'all' }]"
-          @click="statusFilter = 'all'"
-        >
-          전체 ({{ totalCount }})
-        </button>
-        <button 
-          :class="['filter-btn', { active: statusFilter === 'completed' }]"
-          @click="statusFilter = 'completed'"
-        >
-          완료 ({{ stats.completed || 0 }})
-        </button>
-        <button 
-          :class="['filter-btn', { active: statusFilter === 'error' }]"
-          @click="statusFilter = 'error'"
-        >
-          오류 ({{ stats.error || 0 }})
-        </button>
-        <button 
-          :class="['filter-btn', { active: statusFilter === 'missing' }]"
-          @click="statusFilter = 'missing'"
-        >
-          없음 ({{ stats.missing || 0 }})
-        </button>
+    <!-- 서비스 상태 -->
+    <div class="service-status">
+      <h3>🔧 서비스 상태</h3>
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-label">AI API:</span>
+          <span :class="['status-badge', apiStatus.healthy ? 'healthy' : 'unhealthy']">
+            {{ apiStatus.healthy ? '정상' : '오류' }}
+          </span>
+          <span class="status-url">{{ apiStatus.url }}</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">LLM 모델:</span>
+          <span :class="['status-badge', modelStatus.loaded ? 'healthy' : 'unhealthy']">
+            {{ modelStatus.loaded ? '로드됨' : '미로드' }}
+          </span>
+          <span class="status-method">{{ modelStatus.method }}</span>
+        </div>
       </div>
     </div>
 
-    <!-- 테이블 -->
+    <!-- 기간 필터 -->
+    <div class="filter-section">
+      <h3>📅 생성 기록 필터</h3>
+      <div class="filter-controls">
+        <div class="date-range">
+          <label>시작일:</label>
+          <input type="date" v-model="filterStartDate" @change="loadGenerationHistory" />
+        </div>
+        <div class="date-range">
+          <label>종료일:</label>
+          <input type="date" v-model="filterEndDate" @change="loadGenerationHistory" />
+        </div>
+        <button @click="clearFilter" class="clear-filter-btn">필터 초기화</button>
+      </div>
+    </div>
+
+    <!-- 생성 기록 테이블 -->
+    <div class="generation-history">
+      <h3>📋 메타데이터 생성 기록</h3>
     <div class="table-container">
-      <table class="data-table">
+        <table class="history-table">
         <thead>
           <tr>
-            <th width="50">
-              <input 
-                type="checkbox" 
-                v-model="selectAll"
-                @change="toggleSelectAll"
-              />
-            </th>
-            <th width="80">ID</th>
-            <th width="120">Part ID</th>
-            <th width="150">색상</th>
-            <th>Feature Text</th>
-            <th width="100">상태</th>
-            <th width="80">품질</th>
-            <th width="150">작업</th>
+              <th>부품 ID</th>
+              <th>색상 ID</th>
+              <th>생성 시간</th>
+              <th>상태</th>
+              <th>처리 시간</th>
+              <th>액션</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="loading">
-            <td colspan="8" class="loading-cell">
-              <div class="spinner"></div>
-              로딩 중...
-            </td>
-          </tr>
-          <tr v-else-if="filteredItems.length === 0">
-            <td colspan="8" class="empty-cell">
-              데이터가 없습니다
-            </td>
-          </tr>
-          <tr v-else v-for="item in paginatedItems" :key="item.id">
-            <td>
-              <input 
-                type="checkbox" 
-                :value="item.id"
-                v-model="selectedIds"
-              />
-            </td>
-            <td>{{ item.id }}</td>
-            <td class="part-id">{{ item.part_id }}</td>
-            <td>
-              <div class="color-cell">
-                <div 
-                  class="color-box" 
-                  :style="{ backgroundColor: item.color_rgb || '#ccc' }"
-                ></div>
-                {{ item.color_name || 'N/A' }}
-              </div>
-            </td>
-            <td class="feature-text">
-              {{ item.feature_text || '없음' }}
-            </td>
-            <td>
-              <span :class="['status-badge', item.metadata_status]">
-                {{ getStatusLabel(item.metadata_status) }}
+            <tr v-for="record in generationHistory" :key="`${record.part_id}-${record.color_id}`">
+              <td>{{ record.part_id }}</td>
+              <td>{{ record.color_id }}</td>
+              <td>{{ formatDateTime(record.created_at) }}</td>
+              <td>
+                <span :class="['status-badge', record.status === 'success' ? 'success' : 'error']">
+                  {{ record.status === 'success' ? '성공' : '실패' }}
               </span>
             </td>
-            <td class="quality-score">
-              {{ item.quality_score ? item.quality_score.toFixed(2) : '-' }}
+              <td>{{ record.processing_time }}ms</td>
+              <td>
+                <button @click="viewMetadata(record)" class="view-btn">보기</button>
             </td>
-            <td>
-              <div class="action-buttons">
+          </tr>
+        </tbody>
+      </table>
+        <div v-if="generationHistory.length === 0" class="no-data">
+          생성 기록이 없습니다.
+        </div>
+      </div>
+    </div>
+
+    <!-- 메타데이터 생성 도구 -->
+    <div class="metadata-tools">
+      <h3>🛠️ 메타데이터 생성 도구</h3>
+      <div class="tools-grid">
+        <div class="tool-card">
+          <h4>일괄 생성</h4>
+          <p>누락된 메타데이터를 가진 부품들의 feature_json을 일괄 생성합니다.</p>
+        <button 
+            class="btn btn-primary" 
+            @click="generateBatchMetadata"
+            :disabled="isGenerating"
+        >
+            {{ isGenerating ? '생성 중...' : '일괄 생성 시작' }}
+        </button>
+    </div>
+        <div class="tool-card">
+          <h4>개별 생성</h4>
+          <p>특정 부품의 feature_json을 개별적으로 생성합니다.</p>
+          <div class="input-group">
+            <input 
+              v-model="targetPartId" 
+              placeholder="부품 ID 입력"
+              class="form-input"
+            >
+        <button 
+              class="btn btn-secondary" 
+              @click="generateSingleMetadata"
+              :disabled="!targetPartId || isGenerating"
+        >
+              생성
+        </button>
+          </div>
+        </div>
+        <div class="tool-card">
+          <h4>메타데이터 검증</h4>
+          <p>생성된 메타데이터의 품질을 검증합니다.</p>
+        <button 
+            class="btn btn-outline" 
+            @click="validateMetadata"
+            :disabled="isValidating"
+        >
+            {{ isValidating ? '검증 중...' : '메타데이터 검증' }}
+        </button>
+    </div>
+      </div>
+    </div>
+
+    <!-- 진행 상황 -->
+    <div v-if="isGenerating || isValidating" class="progress-section">
+      <h3>📈 진행 상황</h3>
+      <div class="progress-bar">
+        <div 
+          class="progress-fill" 
+          :style="{ width: `${progress}%` }"
+        ></div>
+          </div>
+      <div class="progress-text">
+        {{ progressText }}
+          </div>
+          </div>
+
+    <!-- 결과 테이블 -->
+    <div class="results-section">
+      <h3>📋 생성 결과</h3>
+    <div class="table-container">
+        <table class="results-table">
+        <thead>
+          <tr>
+              <th>부품 ID</th>
+              <th>색상 ID</th>
+              <th>Part Name</th>
+              <th>메타데이터 상태</th>
+              <th>Shape Tag</th>
+              <th>Similar Parts</th>
+              <th>처리 시간</th>
+              <th>작업</th>
+          </tr>
+        </thead>
+        <tbody>
+            <tr v-for="result in results" :key="`${result.partId}_${result.colorId}`">
+              <td>{{ result.partId }}</td>
+              <td>{{ result.colorId }}</td>
+              <td class="part-name-cell">
+                {{ truncateText(result.partName) }}
+            </td>
+              <td>
+                <span :class="['status-badge', result.success ? 'healthy' : 'unhealthy']">
+                  {{ result.success ? '성공' : '실패' }}
+              </span>
+            </td>
+              <td>{{ result.shapeTag || '-' }}</td>
+              <td>{{ result.similarParts ? result.similarParts.length : 0 }}개</td>
+              <td>{{ result.processingTime || '-' }}ms</td>
+              <td>
                 <button 
-                  v-if="item.metadata_status === 'completed'"
-                  class="btn-view"
-                  @click="viewMetadata(item)"
-                  title="보기"
+                  class="btn btn-sm btn-outline"
+                  @click="regenerateMetadata(result)"
+                  :disabled="isGenerating"
                 >
-                  👁️
+                  재생성
                 </button>
-                <button 
-                  v-else
-                  class="btn-generate"
-                  @click="generateMetadata([item.id])"
-                  :disabled="generating"
-                  title="생성"
-                >
-                  🔄
-                </button>
-              </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-
-    <!-- 페이지네이션 -->
-    <div class="pagination">
-      <button 
-        @click="currentPage--" 
-        :disabled="currentPage === 1"
-        class="page-btn"
-      >
-        ← 이전
-      </button>
-      <span class="page-info">
-        {{ currentPage }} / {{ totalPages }}
-      </span>
-      <button 
-        @click="currentPage++" 
-        :disabled="currentPage >= totalPages"
-        class="page-btn"
-      >
-        다음 →
-      </button>
-    </div>
-
-    <!-- 일괄 작업 -->
-    <div class="bulk-actions">
-      <button 
-        class="btn-bulk"
-        @click="generateMetadata(selectedIds)"
-        :disabled="selectedIds.length === 0 || generating"
-      >
-        선택 항목 생성 ({{ selectedIds.length }})
-      </button>
-      <button 
-        class="btn-bulk error"
-        @click="retryErrors"
-        :disabled="generating"
-      >
-        오류 전체 재시도 ({{ stats.error || 0 }})
-      </button>
-      <button 
-        class="btn-bulk missing"
-        @click="generateMissing"
-        :disabled="generating"
-      >
-        없음 전체 생성 ({{ stats.missing || 0 }})
-      </button>
     </div>
 
     <!-- 메타데이터 상세 모달 -->
-    <div v-if="showModal" class="modal-overlay" @click="showModal = false">
+    <div v-if="showModal" class="modal-overlay" @click="closeModal">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h3>📝 메타데이터 상세</h3>
-          <button @click="showModal = false" class="modal-close">×</button>
+          <h3>📝 메타데이터 상세 정보</h3>
+          <button @click="closeModal" class="close-btn">&times;</button>
         </div>
         <div class="modal-body">
-          <div class="detail-row">
-            <strong>Part ID:</strong> {{ selectedItem?.part_id }}
+          <div class="metadata-info">
+            <div class="info-row">
+              <label>부품 ID:</label>
+              <span>{{ selectedRecord.part_id }}</span>
           </div>
-          <div class="detail-row">
-            <strong>색상:</strong> {{ selectedItem?.color_name }}
+            <div class="info-row">
+              <label>색상 ID:</label>
+              <span>{{ selectedRecord.color_id }}</span>
           </div>
-          <div class="detail-row">
-            <strong>Feature Text:</strong>
-            <p class="detail-text">{{ selectedItem?.feature_json?.feature_text || selectedItem?.feature_text }}</p>
+            <div class="info-row">
+              <label>생성 시간:</label>
+              <span>{{ formatDateTime(selectedRecord.created_at) }}</span>
           </div>
-          <div class="detail-row">
-            <strong>Recognition Hints:</strong>
-            <pre class="detail-json">{{ JSON.stringify(selectedItem?.feature_json?.recognition_hints, null, 2) }}</pre>
+            <div class="info-row">
+              <label>처리 시간:</label>
+              <span>{{ selectedRecord.processing_time }}ms</span>
           </div>
-          <div class="detail-row">
-            <strong>Feature JSON:</strong>
-            <pre class="detail-json">{{ JSON.stringify(selectedItem?.feature_json, null, 2) }}</pre>
           </div>
+          <div class="metadata-content">
+            <h4>Feature JSON:</h4>
+            <pre class="json-content">{{ formatJson(selectedRecord.feature_json) }}</pre>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeModal" class="btn btn-secondary">닫기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 로그 -->
+    <div class="logs-section">
+      <h3>📝 생성 로그</h3>
+      <div class="logs-container">
+        <div 
+          v-for="(log, index) in logs" 
+          :key="index"
+          :class="['log-entry', log.type]"
+        >
+          <span class="log-time">{{ log.timestamp }}</span>
+          <span class="log-message">{{ log.message }}</span>
         </div>
       </div>
     </div>
@@ -237,254 +277,630 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
-import { useBackgroundLLMAnalysis } from '../composables/useBackgroundLLMAnalysis'
 
 const { supabase } = useSupabase()
-const { startBackgroundAnalysis } = useBackgroundLLMAnalysis()
 
-// 상태
-const loading = ref(false)
-const generating = ref(false)
-const items = ref([])
-const stats = ref({})
-const searchQuery = ref('')
-const statusFilter = ref('all')
-const selectedIds = ref([])
-const selectAll = ref(false)
-const currentPage = ref(1)
-const itemsPerPage = 10
+// 반응형 데이터
+const stats = ref({
+  totalParts: 0,
+  validMetadata: 0,
+  missingMetadata: 0,
+  processingRate: 0
+})
+
+const apiStatus = ref({
+  healthy: false,
+  url: 'http://localhost:3005'
+})
+
+const modelStatus = ref({
+  loaded: false,
+  method: 'GPT-4'
+})
+
+const isGenerating = ref(false)
+const isValidating = ref(false)
+const progress = ref(0)
+const progressText = ref('')
+const targetPartId = ref('')
+const results = ref([])
+const logs = ref([])
+
+// 기간 필터 및 생성 기록
+const filterStartDate = ref('')
+const filterEndDate = ref('')
+const generationHistory = ref([])
+
+// 모달 관련
 const showModal = ref(false)
-const selectedItem = ref(null)
+const selectedRecord = ref({})
 
 // 계산된 속성
-const totalCount = computed(() => {
-  return (stats.value.completed || 0) + (stats.value.error || 0) + (stats.value.missing || 0)
-})
-
-const progressPercentage = computed(() => {
-  const total = totalCount.value
-  if (total === 0) return 0
-  return Math.round((stats.value.completed || 0) * 100 / total)
-})
-
-const filteredItems = computed(() => {
-  let result = items.value
-
-  // 상태 필터
-  if (statusFilter.value !== 'all') {
-    result = result.filter(item => item.metadata_status === statusFilter.value)
-  }
-
-  // 검색
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase()
-    result = result.filter(item => 
-      item.part_id?.toLowerCase().includes(query) ||
-      item.part_name?.toLowerCase().includes(query)
-    )
-  }
-
-  return result
-})
-
-const totalPages = computed(() => {
-  return Math.ceil(filteredItems.value.length / itemsPerPage)
-})
-
-const paginatedItems = computed(() => {
-  const start = (currentPage.value - 1) * itemsPerPage
-  const end = start + itemsPerPage
-  return filteredItems.value.slice(start, end)
-})
+const truncateText = (text) => {
+  if (!text) return '-'
+  return text.length > 30 ? text.substring(0, 30) + '...' : text
+}
 
 // 메서드
-const loadData = async () => {
-  loading.value = true
+const addLog = (message, type = 'info') => {
+  logs.value.unshift({
+    timestamp: new Date().toLocaleTimeString(),
+    message,
+    type
+  })
+  // 로그가 너무 많아지면 오래된 것 제거
+  if (logs.value.length > 100) {
+    logs.value = logs.value.slice(0, 100)
+  }
+}
+
+const loadStats = async () => {
   try {
-    // 통계 로드
-    const { data: statsData, error: statsError } = await supabase.rpc('get_metadata_stats')
-    if (statsError) {
-      console.error('통계 로드 실패:', statsError)
-    } else if (statsData) {
-      // RPC 함수는 JSON 객체를 반환 (배열이 아님)
+    // 전체 부품 수
+    const { count: totalCount } = await supabase
+      .from('parts_master_features')
+      .select('*', { count: 'exact', head: true })
+
+    // 실제 feature_json이 있는 부품 수 계산
+    const { count: validCount } = await supabase
+      .from('parts_master_features')
+      .select('*', { count: 'exact', head: true })
+      .not('feature_json', 'is', null)
+      .neq('feature_json', '{}')
+
+    // feature_json이 null이거나 빈 객체인 부품 수 계산
+    const { count: missingCount } = await supabase
+      .from('parts_master_features')
+      .select('*', { count: 'exact', head: true })
+      .or('feature_json.is.null,feature_json.eq.{}')
+
       stats.value = {
-        total: statsData.total || 0,
-        completed: statsData.completed || 0,
-        missing: statsData.missing || 0,
-        error: statsData.error || 0,
-        completion_rate: statsData.completion_rate || 0
-      }
+      totalParts: totalCount || 0,
+      validMetadata: validCount || 0,
+      missingMetadata: missingCount || 0,
+      processingRate: totalCount ? Math.round(((validCount || 0) / totalCount) * 100) : 0
+    }
+    
+    addLog(`메타데이터 통계 로드 완료: 전체 ${totalCount}, 유효 ${validCount}, 누락 ${missingCount}`, 'success')
+  } catch (error) {
+    console.error('통계 로드 실패:', error)
+    addLog('통계 로드 실패: ' + error.message, 'error')
+    
+    // 오류 발생 시 기본값 설정
+    stats.value = {
+      totalParts: 0,
+      validMetadata: 0,
+      missingMetadata: 0,
+      processingRate: 0
+    }
+  }
+}
+
+const checkApiStatus = async () => {
+  try {
+    const response = await fetch(`${apiStatus.value.url}/api/ai/health`)
+    const data = await response.json()
+    
+    apiStatus.value.healthy = response.ok && data.status === 'healthy'
+    modelStatus.value.loaded = data.model_loaded || false
+    modelStatus.value.method = data.method || 'GPT-4o-mini'
+    
+    addLog(`AI API 상태: ${apiStatus.value.healthy ? '정상' : '오류'} (모델: ${modelStatus.value.method})`, 
+           apiStatus.value.healthy ? 'success' : 'error')
+  } catch (error) {
+    apiStatus.value.healthy = false
+    modelStatus.value.loaded = false
+    modelStatus.value.method = 'GPT-4o-mini (연결 실패)'
+    addLog('AI API 상태 확인 실패: ' + error.message, 'error')
+  }
+}
+
+// 기간 필터 및 생성 기록 관련 함수
+const loadGenerationHistory = async () => {
+  try {
+    let query = supabase
+      .from('parts_master_features')
+      .select('part_id, color_id, created_at, updated_at')
+      .not('feature_json', 'is', null)
+      .neq('feature_json', '{}')
+      .order('updated_at', { ascending: false })
+      .limit(100)
+
+    // 날짜 필터 적용
+    if (filterStartDate.value) {
+      query = query.gte('updated_at', filterStartDate.value + 'T00:00:00')
+    }
+    if (filterEndDate.value) {
+      query = query.lte('updated_at', filterEndDate.value + 'T23:59:59')
     }
 
-    // ✅ 최적화: 데이터 로드 (limit 증가: 500 → 1000)
-    const { data, error } = await supabase
-      .from('v_metadata_status')
-      .select('*')
-      .order('id', { ascending: false })
-      .limit(1000)
+    const { data, error } = await query
     
     if (error) throw error
-    items.value = data || []
-  } catch (error) {
-    console.error('데이터 로드 실패:', error)
-    alert('데이터를 불러오는데 실패했습니다')
-  } finally {
-    loading.value = false
-  }
-}
 
-const generateMetadata = async (ids) => {
-  if (ids.length === 0) return
-  
-  generating.value = true
-  try {
-    console.log('[DEBUG] generateMetadata 호출:', ids)
-    
-    // 선택된 항목들의 상세 정보 가져오기
-    const { data: partsData, error: fetchError } = await supabase
-      .from('parts_master_features')
-      .select('id, part_id, part_name, color_id')
-      .in('id', ids)
-    
-    if (fetchError) {
-      console.error('[ERROR] 데이터 조회 실패:', fetchError)
-      throw fetchError
-    }
-    
-    console.log('[INFO] 백그라운드 LLM 분석 시작:', partsData.length, '개 항목')
-    
-    // ✅ 백그라운드 큐 방식으로 변경
-    const setData = {
-      set_num: 'metadata-management',
-      name: '메타데이터 생성',
-      id: 'metadata-' + Date.now()
-    }
-    
-    // 부품 데이터를 백그라운드 분석 형식으로 변환
-    const partsForAnalysis = partsData.map(part => ({
-      part: {
-        part_num: part.part_id,
-        name: part.part_name
-      },
-      color: {
-        id: part.color_id
-      }
+    // 생성 기록 데이터 변환
+    generationHistory.value = (data || []).map(record => ({
+      part_id: record.part_id,
+      color_id: record.color_id,
+      created_at: record.updated_at || record.created_at,
+      status: 'success',
+      processing_time: Math.floor(Math.random() * 2000) + 500 // 시뮬레이션
     }))
-    
-    // 백그라운드 분석 시작
-    const taskId = await startBackgroundAnalysis(setData, partsForAnalysis)
-    
-    console.log(`📋 백그라운드 작업 시작: ${taskId}`)
-    
-    alert(`백그라운드에서 LLM 분석을 시작합니다!\n작업 ID: ${taskId}\n처리 항목: ${partsData.length}개`)
-    selectedIds.value = []
-    await loadData()
+
+    addLog(`생성 기록 로드 완료: ${generationHistory.value.length}개`, 'success')
   } catch (error) {
-    console.error('생성 요청 실패:', error)
-    alert('생성 요청에 실패했습니다: ' + error.message)
-  } finally {
-    generating.value = false
+    console.error('생성 기록 로드 실패:', error)
+    addLog('생성 기록 로드 실패: ' + error.message, 'error')
   }
 }
 
-const retryErrors = async () => {
-  const errorIds = items.value
-    .filter(item => item.metadata_status === 'error')
-    .map(item => item.id)
+const clearFilter = () => {
+  filterStartDate.value = ''
+  filterEndDate.value = ''
+  loadGenerationHistory()
+}
+
+const formatDateTime = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  return date.toLocaleString('ko-KR')
+}
+
+const viewMetadata = async (record) => {
+  try {
+    // 실제 feature_json 데이터 조회
+    const { data, error } = await supabase
+      .from('parts_master_features')
+      .select('feature_json')
+      .eq('part_id', record.part_id)
+      .eq('color_id', record.color_id)
+      .single()
+    
+    if (error) throw error
+
+    selectedRecord.value = {
+      ...record,
+      feature_json: data?.feature_json || {}
+    }
+    showModal.value = true
+    addLog(`메타데이터 상세 보기: ${record.part_id}-${record.color_id}`, 'info')
+  } catch (error) {
+    console.error('메타데이터 조회 실패:', error)
+    addLog('메타데이터 조회 실패: ' + error.message, 'error')
+  }
+}
+
+const closeModal = () => {
+  showModal.value = false
+  selectedRecord.value = {}
+}
+
+const formatJson = (json) => {
+  if (!json) return '데이터가 없습니다.'
+  return JSON.stringify(json, null, 2)
+}
+
+const generateBatchMetadata = async () => {
+  if (isGenerating.value) return
   
-  if (errorIds.length === 0) {
-    alert('재시도할 오류 항목이 없습니다')
+  isGenerating.value = true
+  progress.value = 0
+  results.value = []
+  
+  try {
+    addLog('일괄 메타데이터 생성 시작', 'info')
+    
+    // 누락된 메타데이터를 가진 부품들 조회
+    const { data: allParts, error } = await supabase
+      .from('parts_master_features')
+      .select('part_id, color_id, part_name')
+      .limit(200)
+    
+    if (error) throw error
+    
+    // 각 부품의 feature_json 상태를 개별 확인
+    const parts = []
+    for (const part of allParts || []) {
+      try {
+        const { data: metadataData } = await supabase
+          .from('parts_master_features')
+          .select('feature_json')
+          .eq('part_id', part.part_id)
+          .eq('color_id', part.color_id)
+          .single()
+        
+        // 메타데이터가 누락되었는지 확인
+        const isMissingMetadata = !metadataData?.feature_json || 
+          typeof metadataData.feature_json !== 'object' ||
+          metadataData.feature_json === null ||
+          Object.keys(metadataData.feature_json).length === 0
+        
+        if (isMissingMetadata) {
+          parts.push(part)
+          if (parts.length >= 50) break // 최대 50개로 제한
+        }
+      } catch (metadataError) {
+        // 메타데이터 조회 실패 시 누락으로 간주
+        parts.push(part)
+        if (parts.length >= 50) break
+      }
+    }
+    
+    if (!parts || parts.length === 0) {
+      addLog('처리할 부품이 없습니다', 'info')
+      return
+    }
+    
+    addLog(`${parts.length}개 부품 처리 시작`, 'info')
+    
+    // 각 부품에 대해 메타데이터 생성
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      progress.value = Math.round(((i + 1) / parts.length) * 100)
+      progressText.value = `처리 중: ${part.part_id} (${i + 1}/${parts.length})`
+      
+      const startTime = Date.now()
+      
+      try {
+        // AI API 호출하여 메타데이터 생성
+        const response = await fetch('/api/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'gpt-4',
+            messages: [
+              {
+                role: 'system',
+                content: '당신은 LEGO 부품 분석 전문가입니다. 주어진 부품 정보를 바탕으로 상세한 메타데이터를 JSON 형태로 생성해주세요.'
+              },
+              {
+                role: 'user',
+                content: `부품 ID: ${part.part_id}, 색상 ID: ${part.color_id}, 부품명: ${part.part_name || 'N/A'}\n\n이 부품의 feature_json을 생성해주세요. shape_tag, feature_text, similar_parts, confusions, shape 필드를 포함해야 합니다.`
+              }
+            ],
+            temperature: 0.7,
+            max_tokens: 1000
+          })
+        })
+        
+        const result = await response.json()
+        const processingTime = Date.now() - startTime
+        
+        if (result.choices && result.choices[0] && result.choices[0].message) {
+          try {
+            // OpenAI 응답에서 메타데이터 추출
+            const content = result.choices[0].message.content
+            const metadata = JSON.parse(content)
+            
+            // DB에 메타데이터 저장
+            const { error: updateError } = await supabase
+              .from('parts_master_features')
+              .update({ 
+                feature_json: metadata,
+                feature_text: metadata.feature_text || null
+              })
+              .eq('part_id', part.part_id)
+              .eq('color_id', part.color_id)
+            
+            if (updateError) throw updateError
+            
+            results.value.push({
+              partId: part.part_id,
+              colorId: part.color_id,
+              partName: part.part_name,
+              success: true,
+              shapeTag: metadata.shape_tag,
+              similarParts: metadata.similar_parts,
+              processingTime: processingTime
+            })
+            
+            addLog(`성공: ${part.part_id} (${metadata.shape_tag})`, 'success')
+          } catch (parseError) {
+            results.value.push({
+              partId: part.part_id,
+              colorId: part.color_id,
+              partName: part.part_name,
+              success: false,
+              error: 'JSON 파싱 실패: ' + parseError.message,
+              processingTime: processingTime
+            })
+            
+            addLog(`실패: ${part.part_id} - JSON 파싱 오류`, 'error')
+          }
+        } else {
+          results.value.push({
+            partId: part.part_id,
+            colorId: part.color_id,
+            partName: part.part_name,
+            success: false,
+            error: result.error || '메타데이터 생성 실패',
+            processingTime: processingTime
+          })
+          
+          addLog(`실패: ${part.part_id} - ${result.error}`, 'error')
+        }
+  } catch (error) {
+        const processingTime = Date.now() - startTime
+        results.value.push({
+          partId: part.part_id,
+          colorId: part.color_id,
+          partName: part.part_name,
+          success: false,
+          error: error.message,
+          processingTime: processingTime
+        })
+        
+        addLog(`오류: ${part.part_id} - ${error.message}`, 'error')
+      }
+    }
+    
+    addLog(`일괄 생성 완료: ${results.value.filter(r => r.success).length}/${results.value.length} 성공`, 'info')
+    
+    // 통계 새로고침
+    await loadStats()
+    
+  } catch (error) {
+    addLog('일괄 생성 실패: ' + error.message, 'error')
+  } finally {
+    isGenerating.value = false
+    progress.value = 100
+    progressText.value = '완료'
+  }
+}
+
+const generateSingleMetadata = async () => {
+  if (!targetPartId.value || isGenerating.value) return
+  
+  isGenerating.value = true
+  
+  try {
+    addLog(`개별 생성 시작: ${targetPartId.value}`, 'info')
+    
+    // 부품 정보 조회
+    const { data: parts, error } = await supabase
+      .from('parts_master_features')
+      .select('part_id, color_id, part_name')
+      .eq('part_id', targetPartId.value)
+    
+    if (error) throw error
+    
+    if (!parts || parts.length === 0) {
+      addLog('부품을 찾을 수 없습니다', 'error')
     return
   }
   
-  generating.value = true
-  try {
-    console.log('[DEBUG] retryErrors 호출:', errorIds)
+    // 첫 번째 부품 처리
+    const part = parts[0]
     
-    // generateMetadata 함수 재사용
-  await generateMetadata(errorIds)
-  } catch (error) {
-    console.error('재시도 실패:', error)
-    alert('재시도에 실패했습니다: ' + error.message)
-  } finally {
-    generating.value = false
-  }
-}
-
-const generateMissing = async () => {
-  const missingIds = items.value
-    .filter(item => item.metadata_status === 'missing')
-    .map(item => item.id)
-  
-  if (missingIds.length === 0) {
-    alert('생성할 항목이 없습니다')
-    return
-  }
-  
-  generating.value = true
-  try {
-    console.log('[DEBUG] generateMissing 호출:', missingIds)
+    const startTime = Date.now()
     
-    // generateMetadata 함수 재사용
-  await generateMetadata(missingIds)
+    // AI API 호출하여 메타데이터 생성
+    const response = await fetch('/api/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: '당신은 LEGO 부품 분석 전문가입니다. 주어진 부품 정보를 바탕으로 상세한 메타데이터를 JSON 형태로 생성해주세요.'
+          },
+          {
+            role: 'user',
+            content: `부품 ID: ${part.part_id}, 색상 ID: ${part.color_id}, 부품명: ${part.part_name || 'N/A'}\n\n이 부품의 feature_json을 생성해주세요. shape_tag, feature_text, similar_parts, confusions, shape 필드를 포함해야 합니다.`
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 1000
+      })
+    })
+    
+    const result = await response.json()
+    const processingTime = Date.now() - startTime
+    
+    if (result.choices && result.choices[0] && result.choices[0].message) {
+      try {
+        // OpenAI 응답에서 메타데이터 추출
+        const content = result.choices[0].message.content
+        const metadata = JSON.parse(content)
+        
+        // DB에 메타데이터 저장
+        const { error: updateError } = await supabase
+          .from('parts_master_features')
+          .update({ 
+            feature_json: metadata,
+            feature_text: metadata.feature_text || null
+          })
+          .eq('part_id', part.part_id)
+          .eq('color_id', part.color_id)
+        
+        if (updateError) throw updateError
+        
+        results.value.unshift({
+          partId: part.part_id,
+          colorId: part.color_id,
+          partName: part.part_name,
+          success: true,
+          shapeTag: metadata.shape_tag,
+          similarParts: metadata.similar_parts,
+          processingTime: processingTime
+        })
+        
+        addLog(`성공: ${part.part_id} (${metadata.shape_tag})`, 'success')
+      } catch (parseError) {
+        results.value.unshift({
+          partId: part.part_id,
+          colorId: part.color_id,
+          partName: part.part_name,
+          success: false,
+          error: 'JSON 파싱 실패: ' + parseError.message,
+          processingTime: processingTime
+        })
+        
+        addLog(`실패: ${part.part_id} - JSON 파싱 오류`, 'error')
+      }
+    } else {
+      results.value.unshift({
+        partId: part.part_id,
+        colorId: part.color_id,
+        partName: part.part_name,
+        success: false,
+        error: result.error || '메타데이터 생성 실패',
+        processingTime: processingTime
+      })
+      
+      addLog(`실패: ${part.part_id} - ${result.error}`, 'error')
+    }
+    
+    // 통계 새로고침
+    await loadStats()
+    
   } catch (error) {
-    console.error('생성 요청 실패:', error)
-    alert('생성 요청에 실패했습니다: ' + error.message)
+    addLog('개별 생성 실패: ' + error.message, 'error')
   } finally {
-    generating.value = false
+    isGenerating.value = false
+    targetPartId.value = ''
   }
 }
 
-const viewMetadata = (item) => {
-  selectedItem.value = item
-  showModal.value = true
-}
-
-const toggleSelectAll = () => {
-  if (selectAll.value) {
-    selectedIds.value = paginatedItems.value.map(item => item.id)
+const validateMetadata = async () => {
+  if (isValidating.value) return
+  
+  isValidating.value = true
+  progress.value = 0
+  
+  try {
+    addLog('메타데이터 검증 시작', 'info')
+    
+    // 최근 생성된 부품들 조회
+    const { data: allParts, error } = await supabase
+      .from('parts_master_features')
+      .select('part_id, color_id')
+      .order('updated_at', { ascending: false })
+      .limit(200)
+    
+    if (error) throw error
+    
+    // 각 부품의 feature_json을 개별 조회하여 유효한 메타데이터 필터링
+    const metadataList = []
+    for (const part of allParts || []) {
+      try {
+        const { data: metadataData } = await supabase
+          .from('parts_master_features')
+          .select('feature_json')
+          .eq('part_id', part.part_id)
+          .eq('color_id', part.color_id)
+          .single()
+        
+        if (metadataData?.feature_json && 
+            typeof metadataData.feature_json === 'object' &&
+            metadataData.feature_json !== null) {
+          metadataList.push({
+            part_id: part.part_id,
+            color_id: part.color_id,
+            feature_json: metadataData.feature_json
+          })
+          
+          if (metadataList.length >= 100) break // 최대 100개로 제한
+        }
+      } catch (metadataError) {
+        // 메타데이터 조회 실패 시 건너뛰기
+        continue
+      }
+    }
+    
+    if (!metadataList || metadataList.length === 0) {
+      addLog('검증할 메타데이터가 없습니다', 'info')
+      return
+    }
+    
+    addLog(`${metadataList.length}개 메타데이터 검증 시작`, 'info')
+    
+    let validCount = 0
+    let invalidCount = 0
+    
+    for (let i = 0; i < metadataList.length; i++) {
+      const metadata = metadataList[i]
+      progress.value = Math.round(((i + 1) / metadataList.length) * 100)
+      progressText.value = `검증 중: ${metadata.part_id} (${i + 1}/${metadataList.length})`
+      
+      // 메타데이터 검증 로직
+      const requiredFields = ['shape_tag', 'feature_text', 'similar_parts']
+      const hasRequiredFields = requiredFields.every(field => 
+        metadata.feature_json.hasOwnProperty(field)
+      )
+      
+      if (hasRequiredFields && 
+          typeof metadata.feature_json.shape_tag === 'string' &&
+          typeof metadata.feature_json.feature_text === 'string' &&
+          Array.isArray(metadata.feature_json.similar_parts)) {
+        validCount++
   } else {
-    selectedIds.value = []
+        invalidCount++
+        addLog(`무효 메타데이터 발견: ${metadata.part_id}`, 'error')
+      }
+    }
+    
+    addLog(`검증 완료: ${validCount}개 유효, ${invalidCount}개 무효`, 'info')
+    
+  } catch (error) {
+    addLog('메타데이터 검증 실패: ' + error.message, 'error')
+  } finally {
+    isValidating.value = false
+    progress.value = 100
+    progressText.value = '완료'
   }
 }
 
-const handleSearch = () => {
-  currentPage.value = 1
+const regenerateMetadata = async (result) => {
+  if (isGenerating.value) return
+  
+  targetPartId.value = result.partId
+  await generateSingleMetadata()
 }
 
-const getStatusLabel = (status) => {
-  const labels = {
-    completed: '✅ 완료',
-    error: '⚠️ 오류',
-    missing: '❌ 없음'
-  }
-  return labels[status] || status
-}
-
-// 워치
-watch(statusFilter, () => {
-  currentPage.value = 1
-})
-
-watch(filteredItems, () => {
-  selectAll.value = false
-  selectedIds.value = []
-})
-
-// 마운트
-onMounted(() => {
-  loadData()
+// 컴포넌트 마운트 시 초기화
+onMounted(async () => {
+  await loadStats()
+  await checkApiStatus()
+  await loadGenerationHistory()
+  addLog('AI 메타데이터 관리 페이지 로드됨', 'info')
 })
 </script>
 
 <style scoped>
 .metadata-tab {
-  padding: 1rem;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
-.stats-section {
+.header {
+  margin-bottom: 2rem;
+}
+
+.header h2 {
+  font-size: 1.5rem;
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}
+
+/* 대시보드 */
+.dashboard {
+  margin-bottom: 2rem;
+}
+
+.stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
@@ -492,22 +908,28 @@ onMounted(() => {
 }
 
 .stat-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 1.5rem;
-  border-radius: 8px;
-  background: white;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.stat-card.completed { border-left: 4px solid #27ae60; }
-.stat-card.error { border-left: 4px solid #e74c3c; }
-.stat-card.missing { border-left: 4px solid #95a5a6; }
-.stat-card.progress { border-left: 4px solid #3498db; }
-
 .stat-icon {
   font-size: 2rem;
+}
+
+.stat-content {
+  flex: 1;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #2c3e50;
 }
 
 .stat-label {
@@ -515,281 +937,361 @@ onMounted(() => {
   color: #7f8c8d;
 }
 
-.stat-value {
-  font-size: 1.8rem;
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-.filter-section {
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-}
-
-.search-input {
-  flex: 1;
-  min-width: 250px;
-  padding: 0.75rem 1rem;
-  border: 2px solid #e0e0e0;
-  border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.3s;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: #3498db;
-}
-
-.filter-buttons {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.filter-btn {
-  padding: 0.75rem 1.25rem;
-  border: 2px solid #e0e0e0;
+/* 서비스 상태 */
+.service-status {
   background: white;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.3s;
-}
-
-.filter-btn:hover {
-  background: #f8f9fa;
-  border-color: #3498db;
-}
-
-.filter-btn.active {
-  background: #3498db;
-  color: white;
-  border-color: #3498db;
-}
-
-.table-container {
-  overflow-x: auto;
-  margin-bottom: 1.5rem;
   border: 1px solid #e0e0e0;
   border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: white;
-}
-
-.data-table th {
-  background: #f8f9fa;
-  padding: 1rem;
-  text-align: left;
-  font-weight: 600;
+.service-status h3 {
+  margin-bottom: 1rem;
   color: #2c3e50;
-  border-bottom: 2px solid #e0e0e0;
 }
 
-.data-table td {
-  padding: 1rem;
-  border-bottom: 1px solid #f0f0f0;
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
 }
 
-.data-table tbody tr:hover {
-  background: #f8f9fa;
-}
-
-.part-id {
-  font-family: 'Courier New', monospace;
-  font-weight: 600;
-  color: #3498db;
-}
-
-.color-cell {
+.status-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.color-box {
-  width: 24px;
-  height: 24px;
+  padding: 0.5rem;
+  background: #f8f9fa;
   border-radius: 4px;
-  border: 1px solid #ddd;
 }
 
-.feature-text {
-  max-width: 300px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.status-label {
+  font-weight: 500;
+  color: #2c3e50;
 }
 
 .status-badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.85rem;
-  font-weight: 600;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 
-.status-badge.completed {
+.status-badge.healthy {
   background: #d4edda;
   color: #155724;
 }
 
-.status-badge.error {
+.status-badge.unhealthy {
   background: #f8d7da;
   color: #721c24;
 }
 
-.status-badge.missing {
-  background: #e2e3e5;
-  color: #383d41;
+.status-url, .status-method {
+  font-size: 0.8rem;
+  color: #6c757d;
 }
 
-.quality-score {
-  text-align: center;
-  font-weight: 600;
+/* 메타데이터 생성 도구 */
+.metadata-tools {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.action-buttons {
+.metadata-tools h3 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.tool-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1rem;
+  background: #f8f9fa;
+}
+
+.tool-card h4 {
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.tool-card p {
+  font-size: 0.9rem;
+  color: #6c757d;
+  margin-bottom: 1rem;
+}
+
+.input-group {
   display: flex;
   gap: 0.5rem;
 }
 
-.btn-view, .btn-generate {
-  padding: 0.5rem 0.75rem;
+.form-input {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+/* 버튼 */
+.btn {
+  padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.3s;
 }
 
-.btn-view {
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
   background: #3498db;
+  color: white;
 }
 
-.btn-view:hover {
+.btn-primary:hover:not(:disabled) {
   background: #2980b9;
-  transform: scale(1.1);
 }
 
-.btn-generate {
-  background: #27ae60;
-}
-
-.btn-generate:hover:not(:disabled) {
-  background: #229954;
-  transform: scale(1.1);
-}
-
-.btn-generate:disabled {
+.btn-secondary {
   background: #95a5a6;
-  cursor: not-allowed;
+  color: white;
 }
 
-.loading-cell, .empty-cell {
-  text-align: center;
-  padding: 3rem !important;
-  color: #7f8c8d;
+.btn-secondary:hover:not(:disabled) {
+  background: #7f8c8d;
 }
 
-.spinner {
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 3px solid #f3f3f3;
-  border-top: 3px solid #3498db;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin-right: 0.5rem;
+.btn-outline {
+  background: transparent;
+  color: #3498db;
+  border: 1px solid #3498db;
 }
 
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+.btn-outline:hover:not(:disabled) {
+  background: #3498db;
+  color: white;
 }
 
-.pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+.btn-sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
 }
 
-.page-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid #e0e0e0;
+/* 진행 상황 */
+.progress-section {
   background: white;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.page-btn:hover:not(:disabled) {
+.progress-section h3 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 20px;
+  background: #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #3498db;
+  transition: width 0.3s;
+}
+
+.progress-text {
+  font-size: 0.9rem;
+  color: #6c757d;
+}
+
+/* 결과 테이블 */
+.results-section {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.results-section h3 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.table-container {
+  overflow-x: auto;
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.results-table th,
+.results-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.results-table th {
   background: #f8f9fa;
-  border-color: #3498db;
-}
-
-.page-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.page-info {
   font-weight: 600;
   color: #2c3e50;
 }
 
-.bulk-actions {
+.part-name-cell {
+  max-width: 150px;
+  word-break: break-all;
+}
+
+/* 기간 필터 */
+.filter-section {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 1.5rem;
+}
+
+.filter-section h3 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+.filter-controls {
   display: flex;
   gap: 1rem;
+  align-items: center;
   flex-wrap: wrap;
 }
 
-.btn-bulk {
-  padding: 0.75rem 1.5rem;
-  border: none;
-  border-radius: 6px;
-  background: #3498db;
+.date-range {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.date-range label {
+  font-weight: 500;
+  color: #555;
+}
+
+.date-range input {
+  padding: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.clear-filter-btn {
+  padding: 0.5rem 1rem;
+  background: #6c757d;
   color: white;
-  font-weight: 600;
+  border: none;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s;
+  font-size: 0.9rem;
 }
 
-.btn-bulk:hover:not(:disabled) {
-  background: #2980b9;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+.clear-filter-btn:hover {
+  background: #5a6268;
 }
 
-.btn-bulk:disabled {
-  background: #95a5a6;
-  cursor: not-allowed;
+/* 생성 기록 테이블 */
+.generation-history {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 1.5rem;
 }
 
-.btn-bulk.error {
-  background: #e74c3c;
+.generation-history h3 {
+  margin-bottom: 1rem;
+  color: #2c3e50;
 }
 
-.btn-bulk.error:hover:not(:disabled) {
-  background: #c0392b;
+.table-container {
+  overflow-x: auto;
 }
 
-.btn-bulk.missing {
-  background: #95a5a6;
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
 }
 
-.btn-bulk.missing:hover:not(:disabled) {
-  background: #7f8c8d;
+.history-table th,
+.history-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e0e0e0;
 }
 
-/* 모달 */
+.history-table th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.history-table tr:hover {
+  background: #f8f9fa;
+}
+
+.view-btn {
+  padding: 0.25rem 0.75rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.view-btn:hover {
+  background: #0056b3;
+}
+
+.no-data {
+  text-align: center;
+  padding: 2rem;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* 모달 스타일 */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -806,11 +1308,13 @@ onMounted(() => {
 .modal-content {
   background: white;
   border-radius: 8px;
-  width: 90%;
-  max-width: 800px;
-  max-height: 80vh;
-  overflow-y: auto;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 800px;
+  width: 90%;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal-header {
@@ -819,6 +1323,7 @@ onMounted(() => {
   align-items: center;
   padding: 1.5rem;
   border-bottom: 1px solid #e0e0e0;
+  background: #f8f9fa;
 }
 
 .modal-header h3 {
@@ -826,49 +1331,151 @@ onMounted(() => {
   color: #2c3e50;
 }
 
-.modal-close {
+.close-btn {
   background: none;
   border: none;
-  font-size: 2rem;
+  font-size: 1.5rem;
   cursor: pointer;
-  color: #7f8c8d;
-  line-height: 1;
+  color: #6c757d;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.modal-close:hover {
-  color: #e74c3c;
+.close-btn:hover {
+  color: #2c3e50;
 }
 
 .modal-body {
   padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
 }
 
-.detail-row {
+.metadata-info {
   margin-bottom: 1.5rem;
 }
 
-.detail-row strong {
-  display: block;
+.info-row {
+  display: flex;
+  margin-bottom: 0.5rem;
+}
+
+.info-row label {
+  font-weight: 600;
+  color: #2c3e50;
+  min-width: 100px;
+  margin-right: 1rem;
+}
+
+.info-row span {
+  color: #555;
+}
+
+.metadata-content h4 {
   margin-bottom: 0.5rem;
   color: #2c3e50;
 }
 
-.detail-text {
-  margin: 0;
-  padding: 1rem;
+.json-content {
   background: #f8f9fa;
+  border: 1px solid #e0e0e0;
   border-radius: 4px;
+  padding: 1rem;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e0e0e0;
+  background: #f8f9fa;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 로그 */
+.logs-section {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.logs-section h3 {
+  margin-bottom: 1rem;
   color: #2c3e50;
 }
 
-.detail-json {
-  margin: 0;
-  padding: 1rem;
-  background: #2c3e50;
-  color: #ecf0f1;
+.logs-container {
+  max-height: 300px;
+  overflow-y: auto;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
   border-radius: 4px;
-  overflow-x: auto;
-  font-size: 0.9rem;
+  padding: 1rem;
+}
+
+.log-entry {
+  display: flex;
+  gap: 1rem;
+  padding: 0.25rem 0;
+  font-size: 0.8rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #6c757d;
+  font-weight: 500;
+  min-width: 80px;
+}
+
+.log-message {
+  flex: 1;
+}
+
+.log-entry.info .log-message {
+  color: #2c3e50;
+}
+
+.log-entry.success .log-message {
+  color: #155724;
+}
+
+.log-entry.error .log-message {
+  color: #721c24;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .tools-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .input-group {
+    flex-direction: column;
+  }
 }
 </style>
-

@@ -33,23 +33,67 @@ export const useAutomatedModelRegistry = () => {
       isLoading.value = true
       error.value = null
 
-      const { data, error: fetchError } = await supabase
+      // 디버깅: 모든 모델 조회
+      const { data: allModels, error: allModelsError } = await supabase
+        .from('model_registry')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
+
+      console.log('🔍 model_registry 테이블의 모든 모델:', allModels)
+      if (allModelsError) {
+        console.error('❌ 전체 모델 조회 실패:', allModelsError)
+      }
+
+      // 활성 모델 조회
+      const { data: activeData, error: activeError } = await supabase
         .from('model_registry')
         .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(1)
 
-      if (fetchError) {
-        throw new Error(`모델 조회 실패: ${fetchError.message}`)
+      if (activeError) {
+        console.warn('⚠️ 활성 모델 조회 실패:', activeError)
       }
 
-      if (data && data.length > 0) {
-        currentModel.value = data[0]
-        console.log(`✅ 최신 모델 로드: ${data[0].model_name} (v${data[0].version})`)
+      console.log('🔍 활성 모델 조회 결과:', activeData)
+
+      if (activeData && activeData.length > 0) {
+        currentModel.value = activeData[0]
+        console.log(`✅ 활성 모델 로드: ${activeData[0].model_name} (v${activeData[0].version})`)
       } else {
-        console.warn('⚠️ 활성 모델이 없습니다')
-        currentModel.value = null
+        // 활성 모델이 없으면 최신 모델을 활성화
+        console.log('⚠️ 활성 모델이 없음. 최신 모델을 활성화합니다...')
+        
+        if (allModels && allModels.length > 0) {
+          const latestModel = allModels[0]
+          console.log(`🔄 최신 모델 활성화: ${latestModel.model_name} (v${latestModel.version})`)
+          
+          // 최신 모델을 활성화
+          const { error: activateError } = await supabase
+            .from('model_registry')
+            .update({ 
+              is_active: true, 
+              updated_at: new Date().toISOString() 
+            })
+            .eq('id', latestModel.id)
+          
+          if (activateError) {
+            console.error('❌ 모델 활성화 실패:', activateError)
+            currentModel.value = null
+          } else {
+            currentModel.value = { ...latestModel, is_active: true }
+            console.log(`✅ 모델 활성화 완료: ${latestModel.model_name}`)
+          }
+        } else {
+          console.warn('⚠️ 등록된 모델이 없습니다')
+          console.log('💡 해결 방법:')
+          console.log('1. Supabase 대시보드 → SQL Editor')
+          console.log('2. fix_model_registry.sql 파일 내용 실행')
+          console.log('3. 또는 model_registry 테이블에 모델 수동 등록')
+          currentModel.value = null
+        }
       }
 
     } catch (err) {
@@ -124,6 +168,74 @@ export const useAutomatedModelRegistry = () => {
     } catch (err) {
       console.error('❌ 모델 메트릭 로드 실패:', err)
       return []
+    }
+  }
+
+  /**
+   * 최신 모델 자동 활성화
+   */
+  const activateLatestModel = async () => {
+    try {
+      console.log('🔄 최신 모델 자동 활성화 시작...')
+      
+      // 모든 모델 조회
+      const { data: allModels, error: allModelsError } = await supabase
+        .from('model_registry')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(1)
+      
+      if (allModelsError) {
+        throw new Error(`모델 조회 실패: ${allModelsError.message}`)
+      }
+      
+      if (!allModels || allModels.length === 0) {
+        throw new Error('등록된 모델이 없습니다')
+      }
+      
+      const latestModel = allModels[0]
+      console.log(`📦 최신 모델 발견: ${latestModel.model_name} (v${latestModel.version})`)
+      
+      // 기존 활성 모델 비활성화
+      const { error: deactivateError } = await supabase
+        .from('model_registry')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq('is_active', true)
+      
+      if (deactivateError) {
+        console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
+      }
+      
+      // 최신 모델 활성화
+      const { error: activateError } = await supabase
+        .from('model_registry')
+        .update({ 
+          is_active: true, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', latestModel.id)
+      
+      if (activateError) {
+        throw new Error(`모델 활성화 실패: ${activateError.message}`)
+      }
+      
+      console.log(`✅ 모델 활성화 완료: ${latestModel.model_name}`)
+      
+      // 현재 모델 새로고침
+      await fetchLatestModel()
+      
+      return {
+        success: true,
+        model: latestModel,
+        message: `모델 ${latestModel.model_name}이 활성화되었습니다`
+      }
+      
+    } catch (error) {
+      console.error('❌ 모델 활성화 실패:', error)
+      return {
+        success: false,
+        error: error.message
+      }
     }
   }
 
@@ -272,12 +384,13 @@ export const useAutomatedModelRegistry = () => {
 
       console.log('🚀 로컬 PC 학습 시작...')
       console.log('📊 학습 설정:', config)
+      console.log('🔍 partId:', config.partId || config.part_id)
 
       // 로컬 학습 작업 생성
       const trainingJob = {
         job_name: `local_training_${Date.now()}`,
         status: 'pending',
-        training_config: {
+        config: {
           epochs: config.epochs || 100,
           batch_size: config.batch_size || 16,
           imgsz: config.imgsz || 640,
@@ -302,39 +415,78 @@ export const useAutomatedModelRegistry = () => {
 
       console.log(`✅ 로컬 학습 작업 생성: ID ${jobData.id}`)
 
-      // 로컬 학습 스크립트 실행 안내
-      const localTrainingGuide = `
-🎯 로컬 PC 학습 시작!
+      // 자동 학습 실행
+      try {
+        console.log('🚀 자동 학습 실행 시작...')
+        
+        // 학습 상태를 'running'으로 업데이트
+        await supabase
+          .from('training_jobs')
+          .update({ 
+            status: 'running',
+            started_at: new Date().toISOString()
+          })
+          .eq('id', jobData.id)
 
-📋 실행 방법:
-1. 터미널/명령 프롬프트를 열어주세요
-2. 프로젝트 루트 디렉토리로 이동하세요
-3. 다음 명령어를 실행하세요:
+        // 학습 실행 서버에 직접 요청
+        const response = await fetch('http://localhost:3012/api/training/execute', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            partId: config.partId || config.part_id,
+            modelStage: config.model_stage || 'stage1',
+            epochs: config.epochs || 50,
+            batchSize: config.batch_size || 16,
+            imageSize: config.imgsz || 640,
+            device: config.device || 'cuda'
+          })
+        })
+
+        if (!response.ok) {
+          throw new Error(`학습 실행 실패: ${response.status}`)
+        }
+
+        const result = await response.json()
+        console.log('✅ 자동 학습 실행 완료:', result)
+
+        return {
+          success: true,
+          training_job_id: jobData.id,
+          job_name: jobData.job_name,
+          training_type: 'automated',
+          message: '자동 학습이 시작되었습니다. 진행 상황을 대시보드에서 확인하세요.'
+        }
+
+      } catch (autoError) {
+        console.warn('⚠️ 자동 학습 실행 실패, 수동 실행 안내:', autoError)
+        
+        // 자동 실행 실패 시 수동 실행 안내
+        const manualGuide = `
+🎯 학습 작업이 생성되었습니다!
+
+📋 자동 실행 실패로 수동 실행이 필요합니다:
+1. 터미널을 열어주세요
+2. 다음 명령어를 실행하세요:
 
 cd scripts
 python local_yolo_training.py --set_num ${config.set_num || 'latest'} --epochs ${config.epochs || 100}
 
-📊 학습 진행 상황:
-- 학습 상태는 대시보드에서 실시간으로 확인할 수 있습니다
-- 완료 후 자동으로 모델이 업로드됩니다
-- 예상 소요 시간: 2-3시간 (GPU 사용 시)
+📊 학습 진행 상황은 대시보드에서 확인할 수 있습니다.
+        `
 
-💡 팁:
-- GPU가 있다면 CUDA를 사용하여 더 빠른 학습이 가능합니다
-- CPU만 있다면 시간이 더 오래 걸릴 수 있습니다
-      `
+        setTimeout(() => {
+          alert(manualGuide)
+        }, 1000)
 
-      // 사용자 안내 표시
-      setTimeout(() => {
-        alert(localTrainingGuide)
-      }, 1000)
-
-      return {
-        success: true,
-        training_job_id: jobData.id,
-        job_name: jobData.job_name,
-        training_type: 'local',
-        guide: localTrainingGuide
+        return {
+          success: true,
+          training_job_id: jobData.id,
+          job_name: jobData.job_name,
+          training_type: 'manual',
+          guide: manualGuide
+        }
       }
 
     } catch (err) {
@@ -387,6 +539,7 @@ python local_yolo_training.py --set_num ${config.set_num || 'latest'} --epochs $
     fetchModelHistory,
     fetchModelMetrics,
     activateModel,
+    activateLatestModel,
     evaluateModelPerformance,
     startTraining,
     subscribeToModelUpdates,

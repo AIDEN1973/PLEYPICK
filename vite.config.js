@@ -1,41 +1,37 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
-import fs from 'fs'
+import { getIntegratedConfig, validateConfig, printConfig } from './src/config/env.js'
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  // 통합 설정 로드
+  const config = getIntegratedConfig(mode)
   
-  // 통합 포트 관리 시스템에서 포트 읽기 (프론트엔드는 항상 3000 고정)
-  const getPortConfig = () => {
-    try {
-      const portConfigFile = resolve(process.cwd(), '.port-config.json')
-      if (fs.existsSync(portConfigFile)) {
-        const portConfig = JSON.parse(fs.readFileSync(portConfigFile, 'utf8'))
-        console.log('📄 포트 설정 파일에서 읽기 성공')
-        // 프론트엔드는 항상 3000으로 고정
-        portConfig.frontend = 3000
-        return portConfig
-      }
-    } catch (error) {
-      console.warn('포트 설정 파일을 읽을 수 없습니다:', error.message)
-    }
-    
-    // 기본 포트 설정 (프론트엔드는 항상 3000)
-    const defaultConfig = {
-      frontend: 3000,  // 항상 3000 고정
-      trainingApi: 3010,
-      syntheticApi: 3011,
-      worker: 3020,
-      manualUploadApi: 3030,
-      monitoring: 3040
-    }
-    
-    console.log('📄 기본 포트 설정 사용 (프론트엔드: 3000 고정)')
-    return defaultConfig
+  // 설정 검증
+  if (!validateConfig(config)) {
+    throw new Error('설정 검증 실패')
   }
   
-  const portConfig = getPortConfig()
+  // 개발 환경에서만 설정 출력
+  if (config.isDevelopment) {
+    printConfig(config)
+  }
+  
+  const portConfig = config.ports
+  
+  // 프록시 로거 생성 함수
+  const createProxyLogger = (name) => (proxy, _options) => {
+    proxy.on('error', (err, _req, _res) => {
+      console.log(`❌ ${name} proxy error:`, err.message)
+    })
+    proxy.on('proxyReq', (proxyReq, req, _res) => {
+      console.log(`📤 ${name} Request:`, req.method, req.url)
+    })
+    proxy.on('proxyRes', (proxyRes, req, _res) => {
+      const status = proxyRes.statusCode >= 400 ? '❌' : '✅'
+      console.log(`${status} ${name} Response:`, proxyRes.statusCode, req.url)
+    })
+  }
   
   return {
     plugins: [vue()],
@@ -44,9 +40,17 @@ export default defineConfig(({ mode }) => {
         '@': resolve(__dirname, 'src')
       }
     },
+    // API 파일 처리를 위한 추가 설정
+    build: {
+      rollupOptions: {
+        external: ['dotenv']
+      }
+    },
     optimizeDeps: {
-      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs'],
-      exclude: []
+      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web'],
+      exclude: [],
+      needsInterop: ['onnxruntime-web'], // 🔧 수정됨: onnxruntime-web ESM/CJS 혼합 해결
+      force: true // 🔧 수정됨: 의존성 강제 재최적화
     },
     define: {
       __VUE_OPTIONS_API__: true,
@@ -55,117 +59,59 @@ export default defineConfig(({ mode }) => {
     server: {
       port: portConfig.frontend,
       strictPort: true,
-      host: 'localhost',
+      host: '0.0.0.0',
       proxy: {
         '/api/upload/proxy-image': {
-          target: 'http://localhost:3004',
+          target: `http://localhost:${portConfig.webpApi}`,
           changeOrigin: true,
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('webp proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending WebP Proxy Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received WebP Proxy Response:', proxyRes.statusCode, req.url);
-            });
-          },
+          configure: createProxyLogger('WebP')
         },
         '/api/proxy': {
           target: 'https://cdn.rebrickable.com',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/proxy/, ''),
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending Request to the Target:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received Response from the Target:', proxyRes.statusCode, req.url);
-            });
-          },
-        },
-        '/api/openai': {
-          target: 'https://api.openai.com',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/openai/, ''),
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('OpenAI proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending OpenAI Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received OpenAI Response:', proxyRes.statusCode, req.url);
-            });
-          },
-        },
-        '/api/upload': {
-          target: 'https://vanessa2.godohosting.com',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/upload/, ''),
-          configure: (proxy, _options) => {
-            console.log('Configuring /api/upload proxy');
-            proxy.on('error', (err, _req, _res) => {
-              console.log('upload proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending Upload Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received Upload Response:', proxyRes.statusCode, req.url);
-            });
-          },
+          configure: createProxyLogger('Rebrickable')
         },
         '/api/synthetic': {
           target: `http://localhost:${portConfig.syntheticApi}`,
           changeOrigin: true,
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('synthetic API proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending Synthetic API Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received Synthetic API Response:', proxyRes.statusCode, req.url);
-            });
-          },
-        },
-        '/api/dataset': {
-          target: `http://localhost:${portConfig.syntheticApi}`,
-          changeOrigin: true,
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('dataset API proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending Dataset API Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received Dataset API Response:', proxyRes.statusCode, req.url);
-            });
-          },
+          configure: createProxyLogger('Synthetic')
         },
         '/api/manual-upload': {
           target: `http://localhost:${portConfig.manualUploadApi}`,
           changeOrigin: true,
-          configure: (proxy, _options) => {
-            proxy.on('error', (err, _req, _res) => {
-              console.log('manual upload API proxy error', err);
-            });
-            proxy.on('proxyReq', (proxyReq, req, _res) => {
-              console.log('Sending Manual Upload API Request:', req.method, req.url);
-            });
-            proxy.on('proxyRes', (proxyRes, req, _res) => {
-              console.log('Received Manual Upload API Response:', proxyRes.statusCode, req.url);
-            });
-          },
-        }
+          configure: createProxyLogger('ManualUpload')
+        },
+        '/api/ai': {
+          target: `http://localhost:${portConfig.aiApi}`,
+          changeOrigin: true,
+          configure: createProxyLogger('AI')
+        },
+        '/api/openai': {
+          target: `http://localhost:${portConfig.frontend}`,
+          changeOrigin: true,
+          configure: createProxyLogger('OpenAI')
+        },
+        '/api/system': {
+          target: `http://localhost:${portConfig.frontend}`,
+          changeOrigin: true,
+          configure: createProxyLogger('System')
+        },
+        '/api/proxy-image': {
+          target: `http://localhost:${portConfig.frontend}`,
+          changeOrigin: true,
+          configure: createProxyLogger('ProxyImage')
+        },
+               '/api/semantic-vector': {
+                 target: `http://localhost:${portConfig.semanticVectorApi || 3022}`,
+                 changeOrigin: true,
+                 configure: createProxyLogger('SemanticVector')
+               },
+               '/api/port-status': {
+                 target: `http://localhost:${portConfig.monitoring || 3040}`,
+                 changeOrigin: true,
+                 configure: createProxyLogger('PortStatus')
+               }
       }
     }
   }

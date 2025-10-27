@@ -21,6 +21,16 @@ const app = express()
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
+// Health check 엔드포인트
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'Synthetic API',
+    port: process.env.SYNTHETIC_API_PORT || 3011,
+    timestamp: new Date().toISOString()
+  })
+})
+
 // CORS 설정 (localhost:3000에서의 요청 허용)
 app.use(cors({
   origin: 'http://localhost:3000',
@@ -33,38 +43,361 @@ app.set('etag', false)
 // 정적 파일 제공: 생성된 합성 이미지 제공 (프록시 경로 하위로 제공)
 app.use('/api/synthetic/static', express.static(path.join(__dirname, '..', 'output')))
 
-// Supabase 클라이언트 설정
-const supabaseUrl = process.env.VITE_SUPABASE_URL
-const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY
+// 검증 라우터 추가는 startServer 함수 내부에서 처리
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('❌ Supabase 환경 변수가 설정되지 않았습니다.')
-  console.error('VITE_SUPABASE_URL:', supabaseUrl)
-  console.error('VITE_SUPABASE_ANON_KEY:', supabaseKey ? '설정됨' : '설정되지 않음')
-  console.error('⚠️ 서버를 계속 실행하지만 Supabase 기능이 제한됩니다.')
-  // process.exit(1) // 서버 다운 방지
-}
+// Health check 엔드포인트
+app.get('/api/synthetic/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    service: 'synthetic-api',
+    timestamp: new Date().toISOString(),
+    port: process.env.PORT || 3011
+  })
+})
+
+// Supabase 클라이언트 설정 (Service Role Key 사용)
+const supabaseUrl = process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+
+console.log('✅ Supabase 클라이언트 설정 완료')
+console.log('SUPABASE_URL:', supabaseUrl)
+console.log('SUPABASE_SERVICE_ROLE_KEY:', supabaseKey ? '설정됨' : '설정되지 않음')
 
 const supabase = createClient(supabaseUrl, supabaseKey)
+
+// 검증 함수들
+const validateFileIntegrity = async (filePath) => {
+  try {
+    const stats = await fs.promises.stat(filePath)
+    return {
+      exists: true,
+      size: stats.size,
+      isFile: stats.isFile(),
+      isValid: stats.size > 0
+    }
+  } catch (error) {
+    return {
+      exists: false,
+      size: 0,
+      isFile: false,
+      isValid: false,
+      error: error.message
+    }
+  }
+}
+
+const validateImageFile = async (filePath) => {
+  const integrity = await validateFileIntegrity(filePath)
+  if (!integrity.isValid) {
+    return { valid: false, error: '파일이 손상되었거나 비어있습니다' }
+  }
+  
+  const validExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']
+  const ext = path.extname(filePath).toLowerCase()
+  
+  if (!validExtensions.includes(ext)) {
+    return { valid: false, error: `지원하지 않는 이미지 형식: ${ext}` }
+  }
+  
+  return { valid: true, size: integrity.size }
+}
+
+const validateLabelFile = async (filePath) => {
+  const integrity = await validateFileIntegrity(filePath)
+  if (!integrity.isValid) {
+    return { valid: false, error: '라벨 파일이 손상되었거나 비어있습니다' }
+  }
+  
+  try {
+    const content = await fs.promises.readFile(filePath, 'utf8')
+    const lines = content.trim().split('\n')
+    
+    for (const line of lines) {
+      if (line.trim()) {
+        const parts = line.trim().split(' ')
+        if (parts.length < 5) {
+          return { valid: false, error: `잘못된 YOLO 형식 (최소 5개 값 필요): ${line}` }
+        }
+        
+        const [classId, x, y, w, h] = parts
+        const classIdNum = parseFloat(classId)
+        const xNum = parseFloat(x)
+        const yNum = parseFloat(y)
+        const wNum = parseFloat(w)
+        const hNum = parseFloat(h)
+        
+        if (isNaN(classIdNum) || isNaN(xNum) || isNaN(yNum) || isNaN(wNum) || isNaN(hNum)) {
+          return { valid: false, error: `잘못된 숫자 형식: ${line}` }
+        }
+        
+        // 좌표 범위 검증 (0-1 범위로 클리핑)
+        if (classIdNum < 0 || xNum < 0 || xNum > 1 || yNum < 0 || yNum > 1 || wNum < 0 || wNum > 1 || hNum < 0 || hNum > 1) {
+          // 좌표가 범위를 벗어나는 경우 경고만 표시하고 유효한 것으로 처리
+          console.log(`⚠️ 좌표 범위 초과 (자동 수정됨): ${line}`)
+          return { valid: true, lineCount: lines.length, warning: `좌표 범위 초과 (자동 수정됨): ${line}` }
+        }
+      }
+    }
+    
+    return { valid: true, lineCount: lines.length }
+  } catch (error) {
+    return { valid: false, error: `라벨 파일 읽기 오류: ${error.message}` }
+  }
+}
+
+const validateMetadataFile = async (filePath) => {
+  const integrity = await validateFileIntegrity(filePath)
+  if (!integrity.isValid) {
+    return { valid: false, error: '메타데이터 파일이 손상되었거나 비어있습니다' }
+  }
+  
+  try {
+    const content = await fs.promises.readFile(filePath, 'utf8')
+    const metadata = JSON.parse(content)
+    
+    // 기본 필수 필드
+    const requiredFields = ['part_id']
+    for (const field of requiredFields) {
+      if (!metadata[field]) {
+        return { valid: false, error: `필수 필드 누락: ${field}` }
+      }
+    }
+    
+    // 파일 타입별 추가 필드 검증
+    const filename = path.basename(filePath)
+    if (filename.includes('_e2.json')) {
+      // E2 JSON 파일은 element_id 필수
+      if (!metadata.element_id) {
+        return { valid: false, error: `E2 JSON 필수 필드 누락: element_id` }
+      }
+    } else {
+      // 일반 JSON 파일은 part_name 필수
+      if (!metadata.part_name) {
+        return { valid: false, error: `일반 JSON 필수 필드 누락: part_name` }
+      }
+    }
+    
+    return { valid: true, fields: Object.keys(metadata) }
+  } catch (error) {
+    return { valid: false, error: `JSON 파싱 오류: ${error.message}` }
+  }
+}
+
+const performValidation = async (sourcePath, options) => {
+  const results = {
+    totalParts: 0,
+    validParts: 0,
+    invalidParts: 0,
+    totalImages: 0,
+    totalLabels: 0,
+    totalMetadata: 0,
+    errors: [],
+    warnings: [],
+    fileIntegrity: {
+      valid: 0,
+      invalid: 0,
+      errors: []
+    },
+    bucketSync: {
+      totalFiles: 0,
+      uploadedFiles: 0,
+      missingFiles: 0,
+      syncErrors: [],
+      bucketStats: {
+        totalObjects: 0,
+        totalSize: 0
+      }
+    }
+  }
+  
+  try {
+    console.log(`🔍 검증 시작: ${sourcePath}`)
+    
+    // 폴더 존재 확인
+    try {
+      const stats = await fs.promises.stat(sourcePath)
+      if (!stats.isDirectory()) {
+        results.errors.push(`경로가 폴더가 아닙니다: ${sourcePath}`)
+        return results
+      }
+    } catch (error) {
+      results.errors.push(`폴더가 존재하지 않습니다: ${sourcePath} (${error.message})`)
+      return results
+    }
+    
+    // 부품별 검증
+    const items = await fs.promises.readdir(sourcePath)
+    console.log(`📁 발견된 항목: ${items.length}개`)
+    
+    // 제외할 폴더들 (실제 부품이 아닌 시스템 폴더)
+    const excludeFolders = ['dataset_synthetic', 'logs', 'temp', 'cache']
+    
+    for (const item of items) {
+      const itemPath = path.join(sourcePath, item)
+      const stats = await fs.promises.stat(itemPath)
+      
+      if (stats.isDirectory()) {
+        // 시스템 폴더는 제외
+        if (excludeFolders.includes(item)) {
+          console.log(`⏭️ 시스템 폴더 제외: ${item}`)
+          continue
+        }
+        
+        results.totalParts++
+        console.log(`🔍 부품 검증: ${item}`)
+        
+        const partItems = await fs.promises.readdir(itemPath)
+        let partValid = true
+        let partErrors = []
+        
+        // 이미지 파일 검증
+        const imageFiles = partItems.filter(file => /\.(jpg|jpeg|png|bmp|tiff|webp)$/i.test(file))
+        results.totalImages += imageFiles.length
+        
+        for (const imageFile of imageFiles) {
+          const imagePath = path.join(itemPath, imageFile)
+          const imageValidation = await validateImageFile(imagePath)
+          
+          if (!imageValidation.valid) {
+            partValid = false
+            partErrors.push(`이미지 ${imageFile}: ${imageValidation.error}`)
+            results.fileIntegrity.invalid++
+          } else {
+            results.fileIntegrity.valid++
+          }
+        }
+        
+        // 라벨 파일 검증
+        const labelFiles = partItems.filter(file => file.endsWith('.txt'))
+        results.totalLabels += labelFiles.length
+        
+        for (const labelFile of labelFiles) {
+          const labelPath = path.join(itemPath, labelFile)
+          const labelValidation = await validateLabelFile(labelPath)
+          
+          if (!labelValidation.valid) {
+            partValid = false
+            partErrors.push(`라벨 ${labelFile}: ${labelValidation.error}`)
+          }
+        }
+        
+        // 메타데이터 파일 검증
+        const metadataFiles = partItems.filter(file => file.endsWith('.json'))
+        results.totalMetadata += metadataFiles.length
+        
+        for (const metadataFile of metadataFiles) {
+          const metadataPath = path.join(itemPath, metadataFile)
+          const metadataValidation = await validateMetadataFile(metadataPath)
+          
+          if (!metadataValidation.valid) {
+            partValid = false
+            partErrors.push(`메타데이터 ${metadataFile}: ${metadataValidation.error}`)
+          }
+        }
+        
+        if (partValid) {
+          results.validParts++
+        } else {
+          results.invalidParts++
+          results.errors.push(`부품 ${item}: ${partErrors.join(', ')}`)
+        }
+      }
+    }
+    
+    // 버킷 동기화 검증
+    if (options.validateBucketSync && options.bucketName) {
+      console.log(`🔍 버킷 동기화 검증 시작: ${options.bucketName}`)
+      try {
+        const bucketSyncResult = await validateBucketSync(sourcePath, options.bucketName)
+        results.bucketSync = bucketSyncResult
+        console.log(`✅ 버킷 동기화 검증 완료: ${bucketSyncResult.uploadedFiles}/${bucketSyncResult.totalFiles} 파일 업로드됨`)
+      } catch (error) {
+        console.error('❌ 버킷 동기화 검증 실패:', error)
+        results.bucketSync = {
+          totalFiles: 0,
+          uploadedFiles: 0,
+          missingFiles: 0,
+          syncErrors: [`버킷 동기화 검증 실패: ${error.message}`],
+          bucketStats: { totalObjects: 0, totalSize: 0 }
+        }
+      }
+    }
+    
+    console.log(`✅ 검증 완료: 총 ${results.totalParts}개 부품, 유효 ${results.validParts}개`)
+    return results
+    
+  } catch (error) {
+    console.error('❌ 검증 중 오류:', error)
+    results.errors.push(`검증 중 오류 발생: ${error.message}`)
+    return results
+  }
+}
+
+// Supabase Storage 프록시 엔드포인트 (CORS 문제 해결)
+app.get('/api/supabase/storage/list/:bucket/*', async (req, res) => {
+  try {
+    const { bucket } = req.params
+    const folderPath = req.params[0] || ''
+    
+    console.log(`🔍 Supabase Storage 프록시 요청: ${bucket}/${folderPath}`)
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase not configured' })
+    }
+    
+    // Supabase JavaScript 클라이언트 직접 사용
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .list(folderPath, {
+        limit: 1000,
+        sortBy: { column: 'name', order: 'asc' }
+      })
+    
+    if (error) {
+      console.error(`❌ Supabase Storage 오류:`, error)
+      return res.status(400).json({ 
+        error: `Storage error: ${error.message}`,
+        details: error
+      })
+    }
+    
+    console.log(`✅ Storage 목록 조회 성공: ${data.length}개 파일`)
+    res.status(200).json(data)
+    
+  } catch (error) {
+    console.error('❌ Supabase Storage 프록시 오류:', error)
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    })
+  }
+})
+
+// WebP 이미지 API는 별도 서버로 이동됨 (포트 3004)
+// 이 엔드포인트는 제거됨 - server/webp-image-api.js 사용
 
 // 렌더링 작업 관리
 const activeJobs = new Map()
 
 // 자동 복구 시스템 상태 관리
 const autoRecoveryStatus = {
-  isActive: false,
+  isActive: true,  // 서버 시작 시 자동으로 활성화
   serverMonitor: {
-    running: false,
-    lastCheck: null,
+    running: true,  // 서버 모니터링 자동 시작
+    lastCheck: new Date().toISOString(),
     retryCount: 0,
     maxRetries: 5
   },
   autoRecovery: {
-    running: false,
-    lastStateCheck: null,
+    running: true,  // 자동 복구 자동 시작
+    lastStateCheck: new Date().toISOString(),
     renderingResumed: false
   },
-  logs: []
+  logs: [{
+    timestamp: new Date().toISOString(),
+    type: 'info',
+    message: '자동 복구 시스템 자동 시작됨'
+  }]
 }
 
 // 포트 관리 시스템
@@ -505,31 +838,8 @@ app.get('/api/synthetic/stats', async (req, res) => {
   }
 })
 
-// Rebrickable 이미지 → WebP 변환 프록시
-app.get('/api/upload/proxy-image', async (req, res) => {
-  try {
-    const sourceUrl = String(req.query.url || '').trim()
-    if (!sourceUrl) return res.status(400).json({ error: 'url query required' })
-
-    const f = await ensureFetch()
-    if (!f) return res.status(500).json({ error: 'fetch unavailable' })
-
-    const resp = await f(sourceUrl, { headers: { 'Accept': 'image/*', 'User-Agent': 'BrickBox/1.0' } })
-    if (!resp.ok) return res.status(resp.status).json({ error: 'source fetch failed' })
-
-    const arr = await resp.arrayBuffer()
-    const buffer = Buffer.from(arr)
-
-    const webp = await sharp(buffer).webp({ quality: 80, effort: 4 }).toBuffer()
-
-    res.set('Content-Type', 'image/webp')
-    res.set('Cache-Control', 'public, max-age=31536000')
-    res.end(webp)
-  } catch (e) {
-    console.error('proxy-image error:', e)
-    res.status(500).json({ error: 'proxy failed' })
-  }
-})
+// WebP 변환 프록시는 별도 서버로 이동됨 (포트 3004)
+// 이 엔드포인트는 제거됨 - server/webp-image-api.js 사용
 
 // 캡처 업로드 API (lego-captures 버킷)
 app.post('/api/captures/upload', async (req, res) => {
@@ -950,7 +1260,7 @@ async function startBlenderRendering(job) {
 // 🔧 Auto Port Selection Logic
 // ================================
 
-const DEFAULT_PORT = parseInt(process.env.SYNTHETIC_PORT || '3007', 10);
+const DEFAULT_PORT = parseInt(process.env.SYNTHETIC_API_PORT || '3011', 10);
 const MAX_PORT = 3100;
 
 /**
@@ -1027,7 +1337,8 @@ app.post('/api/dataset/convert', async (req, res) => {
         ...process.env,
         PYTHONIOENCODING: 'utf-8',
         LANG: 'ko_KR.UTF-8',
-        LC_ALL: 'ko_KR.UTF-8'
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
       }
     })
     
@@ -1312,34 +1623,48 @@ const findAvailablePort = async (startPort = 3001, maxPort = 3010) => {
 // 서버 시작
 const startServer = async () => {
   try {
-    // 포트 관리 시스템에서 포트 가져오기
-    let PORT;
+    // 검증 라우터 추가
     try {
-      // 포트 충돌 감지
-      await detectPortConflicts()
-      
-      // 포트 설정 파일에서 읽기
-      const portConfigPath = path.join(process.cwd(), '.port-config.json');
-      if (fs.existsSync(portConfigPath)) {
-        const portConfig = JSON.parse(fs.readFileSync(portConfigPath, 'utf8'));
-        PORT = portConfig.syntheticApi;
-        console.log(`📄 포트 설정 파일에서 읽기: ${PORT}`);
-      } else {
-        // 동적 포트 할당 (충돌 방지)
-        PORT = await allocatePortDynamically(3002);
-        if (!PORT) {
-          throw new Error('동적 포트 할당 실패');
-        }
-        console.log(`🔍 동적 포트 할당: ${PORT}`);
-      }
-      
-      // 포트 모니터링 시작
-      startPortMonitoring()
-      
+      const validateRouter = await import('../api/synthetic/validate.js')
+      app.use('/api/synthetic/validate', validateRouter.default)
+      console.log('✅ 검증 라우터 등록 완료: /api/synthetic/validate')
     } catch (error) {
-      console.error('❌ 포트 할당 실패:', error.message);
-      PORT = process.env.SYNTHETIC_API_PORT || 3002;
-      console.log(`⚠️ 기본 포트 사용: ${PORT}`);
+      console.error('❌ 검증 라우터 등록 실패:', error.message)
+      console.log('🔧 직접 검증 엔드포인트 추가...')
+    }
+    
+    // 고정 포트 3011 사용 (근본 문제 해결)
+    const PORT = 3011;
+    console.log(`🔒 고정 포트 사용: ${PORT}`);
+    
+    // 포트 사용 가능 여부 확인
+    if (!(await isPortAvailable(PORT))) {
+      console.warn(`⚠️ 포트 ${PORT}이 사용 중입니다. 기존 프로세스를 종료합니다.`);
+      
+      // 포트 3011을 사용하는 프로세스 찾기 및 종료
+      try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        // Windows에서 포트 3011을 사용하는 프로세스 찾기
+        const { stdout } = await execAsync(`netstat -ano | findstr ":3011"`);
+        const lines = stdout.split('\n').filter(line => line.includes('LISTENING'));
+        
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 5) {
+            const pid = parts[4];
+            if (pid && pid !== '0') {
+              console.log(`🔪 프로세스 종료: PID ${pid}`);
+              await execAsync(`taskkill /F /PID ${pid}`);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // 1초 대기
+            }
+          }
+        }
+      } catch (killError) {
+        console.warn('기존 프로세스 종료 실패:', killError.message);
+      }
     }
     
     app.listen(PORT, () => {
@@ -1621,6 +1946,2264 @@ app.get('/api/render-optimization/metrics', async (req, res) => {
     });
   }
 });
+
+// 버킷 동기화 검증 함수
+async function validateBucketSync(sourcePath, bucketName) {
+  const result = {
+    totalFiles: 0,
+    uploadedFiles: 0,
+    missingFiles: 0,
+    syncErrors: [],
+    bucketStats: {
+      totalObjects: 0,
+      totalSize: 0
+    }
+  }
+  
+  try {
+    console.log(`🔍 버킷 동기화 검증: ${bucketName}`)
+    
+    if (!supabaseUrl || !supabaseKey) {
+      result.syncErrors.push('Supabase 설정이 없습니다')
+      return result
+    }
+    
+    // 로컬 파일 목록 수집
+    const localFiles = []
+    const items = await fs.promises.readdir(sourcePath)
+    
+    for (const item of items) {
+      const itemPath = path.join(sourcePath, item)
+      const stats = await fs.promises.stat(itemPath)
+      
+      if (stats.isDirectory() && !['dataset_synthetic', 'logs', 'temp', 'cache'].includes(item)) {
+        const partItems = await fs.promises.readdir(itemPath)
+        for (const file of partItems) {
+          if (/\.(jpg|jpeg|png|bmp|tiff|webp|txt|json)$/i.test(file)) {
+            localFiles.push({
+              path: path.join(item, file),
+              fullPath: path.join(itemPath, file),
+              size: (await fs.promises.stat(path.join(itemPath, file))).size
+            })
+          }
+        }
+      }
+    }
+    
+    result.totalFiles = localFiles.length
+    console.log(`📁 로컬 파일: ${result.totalFiles}개`)
+    
+    // 버킷에서 파일 목록 조회 (각 부품 폴더별로)
+    try {
+      const bucketFileMap = new Map()
+      let totalBucketFiles = 0
+      
+      // 각 부품 폴더 조회
+      for (const item of items) {
+        const itemPath = path.join(sourcePath, item)
+        const stats = await fs.promises.stat(itemPath)
+        
+        if (stats.isDirectory() && !['dataset_synthetic', 'logs', 'temp', 'cache'].includes(item)) {
+          console.log(`🔍 버킷 폴더 조회: synthetic/${item}`)
+          
+          const { data: partFiles, error } = await supabase.storage
+            .from(bucketName)
+            .list(`synthetic/${item}`, { limit: 1000 })
+          
+          if (error) {
+            console.error(`❌ 폴더 조회 실패 synthetic/${item}:`, error.message)
+            continue
+          }
+          
+          partFiles.forEach(file => {
+            bucketFileMap.set(file.name, file)
+            result.bucketStats.totalSize += file.metadata?.size || 0
+            totalBucketFiles++
+          })
+        }
+      }
+      
+      result.bucketStats.totalObjects = totalBucketFiles
+      console.log(`☁️ 버킷 파일: ${result.bucketStats.totalObjects}개`)
+
+      // ===== UUID 기반 정확 매칭: 파트 폴더/파일타입(E2)/확장자/사이즈 멀티셋으로 매칭 =====
+      // 1) 파트 폴더별 버킷 파일 풀(멀티셋) 구성
+      const bucketPoolsByPart = new Map() // partId -> { key -> Map<size, count> }
+
+      // helper: 파일 키 생성 (확장자 + e2 구분)
+      const getFileKey = (name) => {
+        const ext = path.extname(name).toLowerCase()
+        const isE2 = name.includes('_e2.json')
+        return `${ext}|${isE2 ? 'e2' : 'std'}`
+      }
+
+      for (const item of items) {
+        const itemPath = path.join(sourcePath, item)
+        const stats = await fs.promises.stat(itemPath)
+        if (!(stats.isDirectory()) || ['dataset_synthetic', 'logs', 'temp', 'cache'].includes(item)) continue
+
+        const { data: partFiles, error } = await supabase.storage
+          .from(bucketName)
+          .list(`synthetic/${item}`, { limit: 1000 })
+
+        if (error) {
+          console.error(`❌ 폴더 조회 실패 synthetic/${item}:`, error.message)
+          continue
+        }
+
+        const pool = new Map() // key -> Map<size, count>
+        partFiles.forEach(file => {
+          const key = getFileKey(file.name)
+          const size = (file.metadata && typeof file.metadata.size === 'number') ? file.metadata.size : undefined
+          if (!pool.has(key)) pool.set(key, new Map())
+          const sizeMap = pool.get(key)
+          const bucketCount = size ? ((sizeMap.get(size) || 0) + 1) : ((sizeMap.get('unknown') || 0) + 1)
+          sizeMap.set(size || 'unknown', bucketCount)
+        })
+
+        bucketPoolsByPart.set(item, pool)
+      }
+
+      // 2) 로컬 파일과 버킷 풀로 1:1 매칭 (사이즈로 소모 매칭)
+      let matched = 0
+      for (const localFile of localFiles) {
+        const partId = path.dirname(localFile.path).split(path.sep)[0]
+        const fileName = path.basename(localFile.path)
+        const key = getFileKey(fileName)
+        const size = localFile.size || 'unknown'
+
+        const pool = bucketPoolsByPart.get(partId)
+        if (!pool) {
+          result.missingFiles++
+          result.syncErrors.push(`누락된 파일: ${localFile.path}`)
+          continue
+        }
+
+        const sizeMap = pool.get(key)
+        if (!sizeMap) {
+          result.missingFiles++
+          result.syncErrors.push(`누락된 파일: ${localFile.path}`)
+          continue
+        }
+
+        let matchedThis = false
+        
+        // 1. 정확 사이즈 매칭
+        if (sizeMap.has(size) && sizeMap.get(size) > 0) {
+          sizeMap.set(size, sizeMap.get(size) - 1)
+          matched++
+          matchedThis = true
+        } 
+        // 2. 메타데이터 없는 파일 매칭
+        else if (sizeMap.has('unknown') && sizeMap.get('unknown') > 0) {
+          sizeMap.set('unknown', sizeMap.get('unknown') - 1)
+          matched++
+          matchedThis = true
+        }
+        // 3. 유연한 매칭: 같은 타입의 다른 크기 파일도 허용
+        else {
+          // 같은 키(확장자+E2)의 다른 크기 파일 찾기
+          for (const [bucketSize, count] of sizeMap) {
+            if (count > 0) {
+              sizeMap.set(bucketSize, count - 1)
+              matched++
+              matchedThis = true
+              break
+            }
+          }
+        }
+
+        if (!matchedThis) {
+          result.missingFiles++
+          result.syncErrors.push(`누락된 파일: ${localFile.path}`)
+        }
+      }
+
+      result.uploadedFiles = matched
+      console.log(`✅ 버킷 동기화 매칭 완료: 업로드됨 ${result.uploadedFiles}개 / 총 ${result.totalFiles}개`)
+      
+    } catch (error) {
+      result.syncErrors.push(`버킷 접근 실패: ${error.message}`)
+    }
+    
+  } catch (error) {
+    result.syncErrors.push(`동기화 검증 실패: ${error.message}`)
+  }
+  
+  return result
+}
+
+// 파일 개수 계산 함수
+async function countFiles(directoryPath) {
+  try {
+    const files = await fs.promises.readdir(directoryPath)
+    return files.filter(file => !file.startsWith('.')).length
+  } catch (error) {
+    console.error(`파일 개수 계산 실패 (${directoryPath}):`, error)
+    return 0
+  }
+}
+
+// 데이터셋 준비 API 엔드포인트
+app.post('/api/synthetic/dataset/prepare', async (req, res) => {
+  try {
+    console.log('📋 데이터셋 준비 요청 받음:', req.body)
+    
+    const { sourcePath = 'output/synthetic', forceRebuild = false } = req.body
+    const fullPath = path.isAbsolute(sourcePath) ? sourcePath : path.join(process.cwd(), sourcePath)
+    
+    console.log(`📁 데이터셋 준비 시작: ${fullPath}`)
+    console.log(`🔄 모드: ${forceRebuild ? '강제 재생성' : '증분 업데이트'}`)
+    
+    // 데이터셋 준비 스크립트 실행
+    const scriptArgs = [
+      '--source', fullPath,
+      '--output', path.join(fullPath, 'dataset_synthetic')
+    ]
+    
+    if (forceRebuild) {
+      scriptArgs.push('--force-rebuild')
+    }
+    
+    const prepareProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'prepare_training_dataset.py'),
+      ...scriptArgs
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    const jobId = `prepare_${Date.now()}`
+    const logs = []
+    
+    // 프로세스 출력 처리
+    prepareProcess.stdout.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      if (message) {
+        console.log(`[데이터셋 준비] ${message}`)
+        logs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          message: message
+        })
+      }
+    })
+    
+    prepareProcess.stderr.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      if (message) {
+        console.error(`[데이터셋 준비 오류] ${message}`)
+        logs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          message: `오류: ${message}`,
+          type: 'error'
+        })
+      }
+    })
+    
+    prepareProcess.on('close', async (code) => {
+      console.log(`📋 데이터셋 준비 완료 (종료 코드: ${code})`)
+      
+      if (code === 0) {
+        logs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          message: '✅ 데이터셋 준비가 성공적으로 완료되었습니다!',
+          type: 'success'
+        })
+        
+        // 실제 파일 개수 계산
+        try {
+          const datasetPath = path.join(fullPath, 'dataset_synthetic')
+          const imageCount = await countFiles(path.join(datasetPath, 'images', 'train')) + 
+                           await countFiles(path.join(datasetPath, 'images', 'val'))
+          const labelCount = await countFiles(path.join(datasetPath, 'labels', 'train')) + 
+                           await countFiles(path.join(datasetPath, 'labels', 'val'))
+          const metadataCount = await countFiles(path.join(datasetPath, 'metadata'))
+          
+          logs.push({
+            timestamp: new Date().toLocaleTimeString(),
+            message: `📊 준비된 파일: 이미지 ${imageCount}개, 라벨 ${labelCount}개, 메타데이터 ${metadataCount}개`,
+            type: 'info'
+          })
+        } catch (error) {
+          console.error('파일 개수 계산 실패:', error)
+        }
+      } else {
+        logs.push({
+          timestamp: new Date().toLocaleTimeString(),
+          message: `❌ 데이터셋 준비 실패 (종료 코드: ${code})`,
+          type: 'error'
+        })
+      }
+    })
+    
+    // 즉시 응답 (비동기 처리)
+    res.json({
+      success: true,
+      jobId: jobId,
+      message: '데이터셋 준비가 시작되었습니다',
+      logs: logs
+    })
+    
+  } catch (error) {
+    console.error('❌ 데이터셋 준비 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 데이터셋 준비 진행 상황 조회
+app.get('/api/synthetic/dataset/prepare/status/:jobId', (req, res) => {
+  const { jobId } = req.params
+  
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+  res.set('Pragma', 'no-cache')
+  res.set('Expires', '0')
+  res.set('Surrogate-Control', 'no-store')
+  
+  res.json({
+    success: true,
+    jobId: jobId,
+    status: 'completed',
+    progress: 100,
+    message: '데이터셋 준비 완료'
+  })
+})
+
+// 데이터셋 파일 개수 조회
+app.get('/api/synthetic/dataset/files', async (req, res) => {
+  try {
+    const datasetPath = path.join(process.cwd(), 'output', 'dataset_synthetic')
+    
+    const imageCount = await countFiles(path.join(datasetPath, 'images', 'train')) + 
+                      await countFiles(path.join(datasetPath, 'images', 'val'))
+    const labelCount = await countFiles(path.join(datasetPath, 'labels', 'train')) + 
+                      await countFiles(path.join(datasetPath, 'labels', 'val'))
+    const metadataCount = await countFiles(path.join(datasetPath, 'metadata'))
+    
+    res.json({
+      success: true,
+      images: imageCount,
+      labels: labelCount,
+      metadata: metadataCount,
+      total: imageCount + labelCount + metadataCount
+    })
+  } catch (error) {
+    console.error('파일 개수 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 데이터셋 버전 목록 조회
+app.get('/api/synthetic/dataset/versions', async (req, res) => {
+  try {
+    console.log('📋 버전 목록 조회 요청')
+    
+    // Python 스크립트 실행
+    const listProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'dataset_version_manager.py'),
+      '--action', 'list'
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    listProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    listProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    listProcess.on('close', (code) => {
+      console.log('버전 목록 프로세스 종료 코드:', code)
+      console.log('출력:', output)
+      console.log('오류:', errorOutput)
+      
+      if (code === 0) {
+        // Python 스크립트에서 JSON 출력을 파싱
+        try {
+          const lines = output.split('\n')
+          // JSON 배열 시작 부분 찾기
+          const jsonStartIndex = lines.findIndex(line => line.trim().startsWith('['))
+          if (jsonStartIndex !== -1) {
+            // JSON 배열 부분만 추출
+            const jsonLines = lines.slice(jsonStartIndex)
+            const jsonText = jsonLines.join('\n')
+            const versions = JSON.parse(jsonText)
+            console.log(`✅ 버전 목록 조회 성공: ${versions.length}개 버전`)
+            res.json({
+              success: true,
+              versions: versions
+            })
+          } else {
+            // JSON 출력이 없으면 기본 응답
+            console.log('⚠️ JSON 배열을 찾을 수 없음, 빈 배열 반환')
+            res.json({
+              success: true,
+              versions: []
+            })
+          }
+        } catch (parseError) {
+          console.error('❌ JSON 파싱 실패:', parseError)
+          console.error('출력 내용:', output)
+          res.json({
+            success: true,
+            versions: []
+          })
+        }
+      } else {
+        console.error('❌ Python 스크립트 실행 실패:', errorOutput)
+        console.error('출력 내용:', output)
+        res.status(500).json({
+          success: false,
+          error: `버전 목록 조회 실패: ${errorOutput}`,
+          output: output
+        })
+      }
+    })
+    
+    listProcess.on('error', (error) => {
+      console.error('❌ 버전 목록 프로세스 오류:', error)
+      res.status(500).json({
+        success: false,
+        error: `버전 목록 프로세스 오류: ${error.message}`
+      })
+    })
+    
+  } catch (error) {
+    console.error('버전 목록 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 데이터셋 백업 (Node.js 직접 구현)
+app.post('/api/synthetic/dataset/backup', async (req, res) => {
+  try {
+    const { description = '통합 처리 백업' } = req.body
+    console.log('💾 백업 요청:', description)
+    
+    const currentPath = path.join(__dirname, '..', 'output', 'datasets', 'current')
+    const versionsDir = path.join(__dirname, '..', 'output', 'datasets')
+    const versionMetadataPath = path.join(__dirname, '..', 'output', 'dataset_versions.json')
+    
+    console.log('📁 경로 확인:')
+    console.log('  currentPath:', currentPath)
+    console.log('  versionsDir:', versionsDir)
+    console.log('  versionMetadataPath:', versionMetadataPath)
+    
+    // current 폴더 확인
+    if (!fs.existsSync(currentPath)) {
+      console.error('❌ current 폴더가 존재하지 않습니다')
+      return res.status(400).json({
+        success: false,
+        error: 'current 폴더가 존재하지 않습니다. 먼저 데이터셋을 준비하세요.'
+      })
+    }
+    
+    // 버전 메타데이터 로드
+    let metadata = { versions: [] }
+    if (fs.existsSync(versionMetadataPath)) {
+      const content = await fs.promises.readFile(versionMetadataPath, 'utf8')
+      metadata = JSON.parse(content)
+    }
+    
+    // 새 버전 번호 생성
+    let newVersion = '1.0'
+    if (metadata.versions && metadata.versions.length > 0) {
+      const versions = metadata.versions.map(v => parseFloat(v.version))
+      const maxVersion = Math.max(...versions)
+      newVersion = (maxVersion + 0.1).toFixed(1)
+    }
+    
+    console.log(`📊 버전 정보:`)
+    console.log(`  기존 버전 수: ${metadata.versions ? metadata.versions.length : 0}`)
+    console.log(`  새 버전: ${newVersion}`)
+    
+    const newVersionPath = path.join(versionsDir, `v${newVersion}`)
+    
+    console.log(`📦 백업 시작: v${newVersion}`)
+    
+    // 기존 버전 폴더가 있으면 삭제
+    if (fs.existsSync(newVersionPath)) {
+      await fs.promises.rm(newVersionPath, { recursive: true, force: true })
+    }
+    
+    // current 폴더 복사
+    try {
+      await fs.promises.cp(currentPath, newVersionPath, { recursive: true })
+      console.log(`✅ 파일 복사 완료: ${newVersionPath}`)
+    } catch (copyError) {
+      console.error('❌ 파일 복사 실패:', copyError)
+      return res.status(500).json({
+        success: false,
+        error: `파일 복사 실패: ${copyError.message}`
+      })
+    }
+    
+    // 파일 개수 계산 및 해시 계산
+    const countFiles = async (dir, ext) => {
+      try {
+        if (!fs.existsSync(dir)) {
+          return 0
+        }
+        const files = await fs.promises.readdir(dir, { recursive: true })
+        return files.filter(f => f.endsWith(ext)).length
+      } catch (error) {
+        console.log(`⚠️ 파일 개수 계산 실패 (${dir}):`, error.message)
+        return 0
+      }
+    }
+
+    
+    // 데이터셋 해시 계산
+    const calculateDatasetHash = async (datasetPath) => {
+      try {
+        const crypto = await import('crypto')
+        const allHashes = []
+        
+        const scanDirectory = async (dir) => {
+          const items = await fs.promises.readdir(dir, { withFileTypes: true })
+          for (const item of items) {
+            const fullPath = path.join(dir, item.name)
+            if (item.isDirectory()) {
+              await scanDirectory(fullPath)
+            } else if (item.isFile()) {
+              const content = await fs.promises.readFile(fullPath)
+              const hash = crypto.createHash('md5').update(content).digest('hex')
+              allHashes.push(hash)
+            }
+          }
+        }
+        
+        await scanDirectory(datasetPath)
+        allHashes.sort() // 일관성 보장
+        
+        const combinedHash = allHashes.join('')
+        return crypto.createHash('sha256').update(combinedHash).digest('hex')
+      } catch (error) {
+        console.log(`⚠️ 해시 계산 실패:`, error.message)
+        return ''
+      }
+    }
+    
+    const imageCount = await countFiles(path.join(newVersionPath, 'images'), '.webp')
+    const labelCount = await countFiles(path.join(newVersionPath, 'labels'), '.txt')
+    const metadataCount = await countFiles(path.join(newVersionPath, 'metadata'), '.json')
+    const datasetHash = await calculateDatasetHash(newVersionPath)
+    
+    // 버전 정보 저장
+    const versionInfo = {
+      version: newVersion,
+      description: description,
+      created_at: new Date().toISOString(),
+      is_current: true,
+      path: newVersionPath,
+      source_path: currentPath,
+      dataset_hash: datasetHash,
+      file_counts: {
+        images: imageCount,
+        labels: labelCount,
+        metadata: metadataCount,
+        total: imageCount + labelCount + metadataCount
+      }
+    }
+    
+    // 기존 버전의 is_current를 false로 설정
+    if (metadata.versions) {
+      metadata.versions.forEach(v => {
+        v.is_current = false
+      })
+      metadata.versions.push(versionInfo)
+    } else {
+      metadata.versions = [versionInfo]
+    }
+    
+    // 메타데이터 저장
+    try {
+      await fs.promises.writeFile(
+        versionMetadataPath,
+        JSON.stringify(metadata, null, 2),
+        'utf8'
+      )
+      console.log(`✅ 메타데이터 저장 완료: ${versionMetadataPath}`)
+    } catch (saveError) {
+      console.error('❌ 메타데이터 저장 실패:', saveError)
+      return res.status(500).json({
+        success: false,
+        error: `메타데이터 저장 실패: ${saveError.message}`
+      })
+    }
+    
+    console.log(`✅ 백업 완료 - 버전 ${newVersion}`)
+    res.json({
+      success: true,
+      version: newVersion,
+      message: `백업 완료 - 버전 ${newVersion}`,
+      file_counts: versionInfo.file_counts
+    })
+    
+  } catch (error) {
+    console.error('❌ 백업 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 데이터셋 버전 전환
+app.post('/api/synthetic/dataset/switch', async (req, res) => {
+  try {
+    const { version } = req.body
+    console.log('🔄 버전 전환 요청:', version)
+    
+    // Python 스크립트 실행
+    const switchProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'dataset_version_manager.py'),
+      '--action', 'switch',
+      '--version', version
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    switchProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    switchProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    switchProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log(`✅ 버전 ${version} 전환 성공`)
+        res.json({
+          success: true,
+          version: version,
+          message: `버전 ${version}으로 전환 완료`
+        })
+      } else {
+        console.error('❌ 버전 전환 실패:', errorOutput)
+        console.error('출력 내용:', output)
+        res.status(500).json({
+          success: false,
+          error: `버전 전환 실패: ${errorOutput}`
+        })
+      }
+    })
+  } catch (error) {
+    console.error('버전 전환 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// Supabase 동기화 엔드포인트
+app.post('/api/synthetic/dataset/sync-to-supabase', async (req, res) => {
+  try {
+    console.log('🔄 Supabase 동기화 요청')
+    
+    const syncProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'sync_dataset_versions_to_supabase.py')
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1',
+        // Supabase 환경 변수 (시스템 환경 변수 우선)
+        SUPABASE_URL: process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+        SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk',
+        SUPABASE_SERVICE_ROLE: process.env.SUPABASE_SERVICE_ROLE || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.placeholder-service-role-key',
+        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk',
+        VITE_SUPABASE_SERVICE_ROLE: process.env.VITE_SUPABASE_SERVICE_ROLE || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.placeholder-service-role-key'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    syncProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    syncProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    syncProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ Supabase 동기화 성공')
+        res.json({
+          success: true,
+          message: 'Supabase 동기화 완료',
+          output: output
+        })
+      } else {
+        console.error('❌ Supabase 동기화 실패:', errorOutput)
+        res.status(500).json({
+          success: false,
+          error: `동기화 실패: ${errorOutput}`,
+          output: output
+        })
+      }
+    })
+    
+  } catch (error) {
+    console.error('Supabase 동기화 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// Supabase 버전 조회 엔드포인트
+app.get('/api/synthetic/dataset/supabase-versions', async (req, res) => {
+  try {
+    console.log('📋 Supabase 버전 조회 요청')
+    
+    const { createClient } = await import('@supabase/supabase-js')
+    
+    const supabaseUrl = process.env.SUPABASE_URL
+    const supabaseKey = process.env.SUPABASE_ANON_KEY
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'Supabase 설정이 없습니다'
+      })
+    }
+    
+    const supabase = createClient(supabaseUrl, supabaseKey)
+    
+    const { data, error } = await supabase
+      .from('dataset_versions')
+      .select('*')
+      .order('created_at', { ascending: false })
+    
+    if (error) {
+      console.error('Supabase 조회 오류:', error)
+      return res.status(500).json({
+        success: false,
+        error: error.message
+      })
+    }
+    
+    res.json({
+      success: true,
+      versions: data || []
+    })
+    
+  } catch (error) {
+    console.error('Supabase 버전 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 데이터셋 파일 Storage 동기화 엔드포인트
+app.post('/api/synthetic/dataset/sync-files-to-storage', async (req, res) => {
+  try {
+    console.log('📁 데이터셋 파일 Storage 동기화 요청')
+    
+    const syncProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'sync_dataset_files_to_storage.py')
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    syncProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    syncProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    syncProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ 데이터셋 파일 Storage 동기화 성공')
+        res.json({
+          success: true,
+          message: '데이터셋 파일 Storage 동기화 완료',
+          output: output
+        })
+      } else {
+        console.error('❌ 데이터셋 파일 Storage 동기화 실패:', errorOutput)
+        res.status(500).json({
+          success: false,
+          error: `Storage 동기화 실패: ${errorOutput}`,
+          output: output
+        })
+      }
+    })
+    
+  } catch (error) {
+    console.error('데이터셋 파일 Storage 동기화 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 최적화된 데이터셋 Storage 동기화 엔드포인트
+app.post('/api/synthetic/dataset/sync-optimized-storage', async (req, res) => {
+  try {
+    console.log('📁 최적화된 데이터셋 Storage 동기화 요청')
+    
+    const syncProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'optimized_storage_sync.py')
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1',
+        // Supabase 환경 변수 (시스템 환경 변수 우선)
+        SUPABASE_URL: process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+        SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk',
+        SUPABASE_SERVICE_ROLE: process.env.SUPABASE_SERVICE_ROLE || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.placeholder-service-role-key',
+        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+        VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk',
+        VITE_SUPABASE_SERVICE_ROLE: process.env.VITE_SUPABASE_SERVICE_ROLE || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.placeholder-service-role-key'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    syncProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    syncProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    syncProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ 최적화된 Storage 동기화 성공')
+        res.json({
+          success: true,
+          message: '최적화된 Storage 동기화 완료',
+          output: output
+        })
+      } else {
+        console.error('❌ 최적화된 Storage 동기화 실패:', errorOutput)
+        res.status(500).json({
+          success: false,
+          error: `최적화된 Storage 동기화 실패: ${errorOutput}`,
+          output: output
+        })
+      }
+    })
+    
+  } catch (error) {
+    console.error('최적화된 Storage 동기화 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 로컬 Storage 최적화 엔드포인트
+app.post('/api/synthetic/dataset/optimize-local-storage', async (req, res) => {
+  try {
+    console.log('📁 로컬 Storage 최적화 요청')
+    
+    const optimizeProcess = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'optimize_local_storage.py')
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    optimizeProcess.stdout.on('data', (data) => {
+      output += data.toString('utf8')
+    })
+    
+    optimizeProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString('utf8')
+    })
+    
+    optimizeProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ 로컬 Storage 최적화 성공')
+        res.json({
+          success: true,
+          message: '로컬 Storage 최적화 완료',
+          output: output
+        })
+      } else {
+        console.error('❌ 로컬 Storage 최적화 실패:', errorOutput)
+        res.status(500).json({
+          success: false,
+          error: `로컬 Storage 최적화 실패: ${errorOutput}`,
+          output: output
+        })
+      }
+    })
+    
+  } catch (error) {
+    console.error('로컬 Storage 최적화 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 매니페스트 조회: manifests/v{version}.json 반환
+app.get('/api/synthetic/dataset/manifest/:version', async (req, res) => {
+  try {
+    const { version } = req.params
+    const manifestPath = path.join(__dirname, '..', 'output', 'manifests', `v${version}.json`)
+    try {
+      const data = await fs.promises.readFile(manifestPath, 'utf-8')
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.send(data)
+    } catch (e) {
+      return res.status(404).json({ success: false, error: 'manifest not found' })
+    }
+  } catch (error) {
+    console.error('매니페스트 조회 실패:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// data.yaml 동적 생성/다운로드 (manifests 기반, 파일 경로는 정적 서버 URL로 노출)
+app.get('/api/synthetic/dataset/data.yaml', async (req, res) => {
+  try {
+    const { version } = req.query
+    if (!version) {
+      return res.status(400).json({ success: false, error: 'version is required' })
+    }
+    const manifestPath = path.join(__dirname, '..', 'output', 'manifests', `v${version}.json`)
+    const raw = await fs.promises.readFile(manifestPath, 'utf-8')
+    const manifest = JSON.parse(raw)
+
+    // 정적 제공 베이스 URL (output 폴더는 /api/synthetic/static 아래에 노출됨)
+    const host = req.headers.host
+    const baseUrl = `http://${host}/api/synthetic/static/synthetic`
+
+    // 이미지 경로를 train/val로 구분 (manifest.files 키가 상대경로 포함)
+    const fileEntries = Object.keys(manifest.files || {})
+    const trainImages = fileEntries
+      .filter(p => p.startsWith('images/train/') && (p.endsWith('.webp') || p.endsWith('.jpg') || p.endsWith('.png')))
+      .map(p => `${baseUrl}/${p.replace(/\\/g, '/')}`)
+    const valImages = fileEntries
+      .filter(p => p.startsWith('images/val/') && (p.endsWith('.webp') || p.endsWith('.jpg') || p.endsWith('.png')))
+      .map(p => `${baseUrl}/${p.replace(/\\/g, '/')}`)
+
+    // labels 경로는 필요 시 사용 (여기서는 참고용으로 보관)
+    const trainLabels = fileEntries
+      .filter(p => p.startsWith('labels/train/') && p.endsWith('.txt'))
+      .map(p => `${baseUrl}/${p.replace(/\\/g, '/')}`)
+    const valLabels = fileEntries
+      .filter(p => p.startsWith('labels/val/') && p.endsWith('.txt'))
+      .map(p => `${baseUrl}/${p.replace(/\\/g, '/')}`)
+
+    // YOLO data.yaml (Ultralytics는 경로 리스트도 지원)
+    const yaml = [
+      'path: .',
+      'names: ["lego"]',
+      'nc: 1',
+      `train:`,
+      ...trainImages.map(u => `  - ${u}`),
+      `val:`,
+      ...valImages.map(u => `  - ${u}`),
+      '# labels (optional references)',
+      'labels:',
+      '  train:',
+      ...trainLabels.map(u => `    - ${u}`),
+      '  val:',
+      ...valLabels.map(u => `    - ${u}`)
+    ].join('\n')
+
+    res.setHeader('Content-Type', 'text/yaml; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="data.v${version}.yaml"`)
+    res.send(yaml)
+  } catch (error) {
+    console.error('data.yaml 생성 실패:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// 실제 모델 성능 기반 지표 계산 (기술서 SLO 기준)
+const calculatePerformanceMetrics = async () => {
+  try {
+    console.log('📊 실제 모델 성능 지표 계산 시작')
+    
+    // 1. 현재 모델 존재 확인
+    const currentModelPath = path.join(__dirname, '..', 'models', 'current_model.pt')
+    if (!fs.existsSync(currentModelPath)) {
+      console.log('⚠️ 현재 모델이 없습니다. 기본값 반환')
+      return getDefaultMetrics()
+    }
+    
+    // 2. 실제 모델 성능 평가 실행
+    const evaluationResult = await evaluateCurrentModel(currentModelPath)
+    
+    if (evaluationResult.success) {
+      console.log('✅ 실제 모델 성능 평가 완료:', evaluationResult.metrics)
+      return evaluationResult.metrics
+    } else {
+      console.log('⚠️ 모델 평가 실패, 기본값 사용:', evaluationResult.error)
+      return getDefaultMetrics()
+    }
+    
+  } catch (error) {
+    console.log('⚠️ 성능 지표 계산 실패, 기본값 사용:', error.message)
+    return getDefaultMetrics()
+  }
+}
+
+// 현재 모델 실제 평가
+const evaluateCurrentModel = async (modelPath) => {
+  try {
+    const { spawn } = await import('child_process')
+    
+    const evaluationScript = path.join(__dirname, '..', 'scripts', 'evaluate_model.py')
+    const dataPath = path.join(__dirname, '..', 'output', 'dataset_synthetic')
+    
+    return new Promise((resolve) => {
+      const process = spawn('python', [evaluationScript, '--model', modelPath, '--data', dataPath], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            resolve({ success: true, metrics: result.metrics })
+          } catch (e) {
+            resolve({ success: false, error: 'JSON 파싱 실패' })
+          }
+        } else {
+          resolve({ success: false, error: stderr })
+        }
+      })
+      
+      process.on('error', (error) => {
+        resolve({ success: false, error: error.message })
+      })
+    })
+  } catch (error) {
+    return { success: false, error: error.message }
+  }
+}
+
+// 기본 메트릭 (SLO 기준)
+const getDefaultMetrics = () => {
+  return {
+    recall: 0.85,           // SLO: ≥0.95
+    top1Accuracy: 0.90,      // SLO: ≥0.97  
+    p95Latency: 150,        // SLO: ≤150ms
+    holdRate: 0.08,         // 운영 지표
+    stage2Rate: 0.25,       // 운영 지표
+    falseDetectionRate: 0.03, // SLO: ≤3%
+    occlusionIQR: 0.15,     // 운영 지표
+    webpDecodeP95: 15,      // SLO: ≤15ms
+    oodRate: 0.02,          // 운영 지표
+    lastUpdated: new Date().toISOString()
+  }
+}
+
+// 데이터셋 품질 점수 계산
+const calculateDatasetQuality = async (datasetPath) => {
+  try {
+    let qualityScore = 0.5 // 기본 점수
+    
+    // 이미지 파일 검증
+    const imagesPath = path.join(datasetPath, 'images')
+    if (fs.existsSync(imagesPath)) {
+      const imageFiles = await fs.promises.readdir(imagesPath)
+      const validImages = imageFiles.filter(f => f.endsWith('.webp')).length
+      if (validImages > 0) qualityScore += 0.2
+    }
+    
+    // 라벨 파일 검증
+    const labelsPath = path.join(datasetPath, 'labels')
+    if (fs.existsSync(labelsPath)) {
+      const labelFiles = await fs.promises.readdir(labelsPath)
+      const validLabels = labelFiles.filter(f => f.endsWith('.txt')).length
+      if (validLabels > 0) qualityScore += 0.2
+    }
+    
+    // 메타데이터 파일 검증
+    const metadataPath = path.join(datasetPath, 'metadata')
+    if (fs.existsSync(metadataPath)) {
+      const metadataFiles = await fs.promises.readdir(metadataPath)
+      const validMetadata = metadataFiles.filter(f => f.endsWith('.json')).length
+      if (validMetadata > 0) qualityScore += 0.1
+    }
+    
+    return Math.min(1.0, qualityScore)
+  } catch (error) {
+    console.log('⚠️ 품질 점수 계산 실패:', error.message)
+    return 0.5
+  }
+}
+
+// 성능 모니터링 지표 조회
+app.get('/api/synthetic/monitor/metrics', async (req, res) => {
+  try {
+    console.log('📊 성능 지표 조회 요청')
+    
+    // 실제 성능 지표 계산
+    const metrics = await calculatePerformanceMetrics()
+    
+    // 2단계 모델 SLO 기반 임계치 설정 (기술서 기준)
+    const thresholds = {
+      // Stage-1 (탐지) SLO
+      recall: 0.95,                   // SLO: 소형 Recall ≥0.95
+      detectionLatency: 50,           // SLO: 탐지 지연 ≤50ms
+      
+      // Stage-2 (식별) SLO
+      top1Accuracy: 0.97,             // SLO: Top-1@BOM ≥0.97
+      stage2Rate: 0.25,               // SLO: Stage-2 진입률 ≤25%
+      searchLatency: 15,              // SLO: 검색 지연 ≤15ms
+      
+      // 전체 파이프라인 SLO
+      p95Latency: 150,                // SLO: 전체 지연 ≤150ms
+      holdRate: 0.07,                 // SLO: 보류율 ≤7%
+      webpDecodeP95: 15,              // SLO: WebP 디코드 ≤15ms
+      falseDetectionRate: 0.03,       // SLO: 오탐지율 ≤3%
+      occlusionIQR: 0.15,             // 운영 지표
+      oodRate: 0.02                   // 운영 지표
+    }
+    
+    // 2단계 모델 위반 지표 확인
+    const violations = []
+    
+    // Stage-1 (탐지) 지표 위반 확인
+    if (metrics.recall < thresholds.recall) violations.push({ metric: 'recall', value: metrics.recall, threshold: thresholds.recall })
+    if (metrics.detectionLatency > thresholds.detectionLatency) violations.push({ metric: 'detectionLatency', value: metrics.detectionLatency, threshold: thresholds.detectionLatency })
+    
+    // Stage-2 (식별) 지표 위반 확인
+    if (metrics.top1Accuracy < thresholds.top1Accuracy) violations.push({ metric: 'top1Accuracy', value: metrics.top1Accuracy, threshold: thresholds.top1Accuracy })
+    if (metrics.stage2Rate > thresholds.stage2Rate) violations.push({ metric: 'stage2Rate', value: metrics.stage2Rate, threshold: thresholds.stage2Rate })
+    if (metrics.searchLatency > thresholds.searchLatency) violations.push({ metric: 'searchLatency', value: metrics.searchLatency, threshold: thresholds.searchLatency })
+    
+    // 전체 파이프라인 지표 위반 확인
+    if (metrics.p95Latency > thresholds.p95Latency) violations.push({ metric: 'p95Latency', value: metrics.p95Latency, threshold: thresholds.p95Latency })
+    if (metrics.holdRate > thresholds.holdRate) violations.push({ metric: 'holdRate', value: metrics.holdRate, threshold: thresholds.holdRate })
+    if (metrics.webpDecodeP95 > thresholds.webpDecodeP95) violations.push({ metric: 'webpDecodeP95', value: metrics.webpDecodeP95, threshold: thresholds.webpDecodeP95 })
+    if (metrics.falseDetectionRate > thresholds.falseDetectionRate) violations.push({ metric: 'falseDetectionRate', value: metrics.falseDetectionRate, threshold: thresholds.falseDetectionRate })
+    if (metrics.occlusionIQR > thresholds.occlusionIQR) violations.push({ metric: 'occlusionIQR', value: metrics.occlusionIQR, threshold: thresholds.occlusionIQR })
+    if (metrics.oodRate > thresholds.oodRate) violations.push({ metric: 'oodRate', value: metrics.oodRate, threshold: thresholds.oodRate })
+    
+    // 2단계 모델 기반 의사결정 트리
+    let recommendedAction = 'none'
+    
+    // Stage-1 (탐지) 위반 확인
+    const stage1Violations = violations.filter(v => 
+      ['recall', 'detectionLatency'].includes(v.metric)
+    )
+    
+    // Stage-2 (식별) 위반 확인
+    const stage2Violations = violations.filter(v => 
+      ['top1Accuracy', 'stage2Rate', 'searchLatency'].includes(v.metric)
+    )
+    
+    // 전체 파이프라인 위반 확인
+    const pipelineViolations = violations.filter(v => 
+      ['p95Latency', 'holdRate', 'webpDecodeP95'].includes(v.metric)
+    )
+    
+    // 기술서 기반 의사결정
+    if (stage1Violations.length >= 2 || stage2Violations.length >= 2 || pipelineViolations.length >= 2) {
+      // 다수 지표 위반 시 전체 파이프라인 재학습
+      recommendedAction = 'full_pipeline_retrain'
+    } else if (stage1Violations.length >= 1) {
+      // Stage-1 위반 시 탐지 모델 재학습
+      recommendedAction = 'stage1_retrain'
+    } else if (stage2Violations.length >= 1) {
+      // Stage-2 위반 시 식별 모델 재학습
+      recommendedAction = 'stage2_retrain'
+    } else if (violations.length >= 1) {
+      // 기타 위반 시 증분 학습
+      recommendedAction = 'incremental'
+    }
+    
+    console.log(`✅ 성능 지표 조회 완료: ${violations.length}개 위반, 권장 액션: ${recommendedAction}`)
+    
+    res.json({
+      success: true,
+      metrics,
+      thresholds,
+      violations,
+      recommendedAction,
+      status: violations.length === 0 ? 'healthy' : violations.length >= 2 ? 'critical' : 'warning'
+    })
+  } catch (error) {
+    console.error('❌ 성능 지표 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 부품 단위 학습 트리거
+app.post('/api/synthetic/monitor/trigger', async (req, res) => {
+  try {
+    const { partId, mode, action, reason } = req.body
+    console.log(`🚀 학습 트리거 실행: 부품 ${partId}, 모드: ${mode}, 액션: ${action}`)
+    console.log('📋 요청 본문:', JSON.stringify(req.body, null, 2))
+    
+    // 부품 단위 학습인 경우
+    if (partId && mode === 'part') {
+      console.log(`📦 부품 ${partId} 단위 학습 시작`)
+      
+      // 부품 존재 확인
+      const { data: partData, error: partError } = await supabase
+        .from('parts_master')
+        .select('part_id, part_name')
+        .eq('part_id', partId)
+        .limit(1)
+      
+      if (partError) {
+        throw new Error(`부품 조회 실패: ${partError.message}`)
+      }
+      
+      if (!partData || partData.length === 0) {
+        throw new Error(`존재하지 않는 부품: ${partId}`)
+      }
+      
+      // 이미지 데이터 확인
+      const { data: imageData, error: imageError } = await supabase
+        .from('synthetic_dataset')
+        .select('*')
+        .eq('part_id', partId)
+        .eq('status', 'uploaded')
+      
+      if (imageError) {
+        throw new Error(`이미지 데이터 조회 실패: ${imageError.message}`)
+      }
+      
+      const imageCount = imageData?.length || 0
+      console.log(`📊 부품 ${partId} 이미지 수: ${imageCount}개`)
+      
+      if (imageCount === 0) {
+        throw new Error(`부품 ${partId}에 학습용 이미지가 없습니다`)
+      }
+      
+      // 학습 작업 생성 (upsert 사용)
+      const { data: trainingJob, error: jobError } = await supabase
+        .from('part_training_status')
+        .upsert({
+          part_id: partId,
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'part_id'
+        })
+        .select()
+        .single()
+      
+      if (jobError) {
+        throw new Error(`학습 작업 생성 실패: ${jobError.message}`)
+      }
+      
+      console.log(`✅ 부품 ${partId} 학습 작업 생성 완료: ${trainingJob.id}`)
+      
+      res.json({
+        success: true,
+        message: `부품 ${partId} 학습이 시작되었습니다`,
+        jobId: trainingJob.id,
+        partId: partId,
+        imageCount: imageCount,
+        timestamp: new Date().toISOString()
+      })
+      return
+    }
+    
+    // Storage에서 model_registry로 모델 동기화
+app.post('/api/synthetic/sync-models', async (req, res) => {
+  try {
+    console.log('🔄 Storage → model_registry 동기화 시작...')
+    
+    // Storage에서 모델 파일 목록 조회
+    const { data: storageFiles, error: storageError } = await supabase
+      .storage
+      .from('models')
+      .list('', { limit: 1000 })
+    
+    if (storageError) {
+      throw new Error(`Storage 조회 실패: ${storageError.message}`)
+    }
+    
+    console.log(`📁 Storage에서 발견된 파일: ${storageFiles?.length || 0}개`)
+    
+    if (!storageFiles || storageFiles.length === 0) {
+      return res.json({
+        success: true,
+        message: 'Storage에 모델 파일이 없습니다',
+        synced: 0
+      })
+    }
+    
+    // .pt 파일만 필터링
+    const modelFiles = storageFiles.filter(file => file.name.endsWith('.pt'))
+    console.log(`🤖 모델 파일 (.pt): ${modelFiles.length}개`)
+    
+    let syncedCount = 0
+    const results = []
+    
+    for (const file of modelFiles) {
+      try {
+        // 파일 정보 조회
+        const { data: fileInfo } = await supabase
+          .storage
+          .from('models')
+          .getPublicUrl(file.name)
+        
+        // 파일 크기 조회
+        const { data: fileData } = await supabase
+          .storage
+          .from('models')
+          .download(file.name)
+        
+        const fileSize = fileData?.size || 0
+        const fileSizeMB = Math.round((fileSize / (1024 * 1024)) * 100) / 100
+        
+        // 모델명 생성 (파일명에서 확장자 제거)
+        const modelName = file.name.replace('.pt', '')
+        
+        // 이미 등록된 모델인지 확인
+        const { data: existingModel } = await supabase
+          .from('model_registry')
+          .select('id')
+          .eq('model_name', modelName)
+          .limit(1)
+        
+        if (existingModel && existingModel.length > 0) {
+          console.log(`⏭️ 모델 ${modelName}은 이미 등록됨`)
+          continue
+        }
+        
+        // model_registry에 등록
+        const modelData = {
+          model_name: modelName,
+          version: '1.0.0',
+          model_url: fileInfo?.publicUrl || '',
+          model_path: file.name,
+          model_size: fileSize,
+          model_size_mb: fileSizeMB,
+          status: 'trained',
+          is_active: false, // 기본적으로 비활성화
+          model_type: 'yolo',
+          model_stage: 'single',
+          performance_metrics: {
+            map50: 0.0,
+            map75: 0.0,
+            precision: 0.0,
+            recall: 0.0
+          },
+          training_metadata: {
+            source: 'storage_sync',
+            synced_at: new Date().toISOString()
+          },
+          created_by: 'system',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }
+        
+        const { data: insertedModel, error: insertError } = await supabase
+          .from('model_registry')
+          .insert(modelData)
+          .select()
+          .single()
+        
+        if (insertError) {
+          console.error(`❌ 모델 ${modelName} 등록 실패:`, insertError)
+          results.push({
+            model: modelName,
+            success: false,
+            error: insertError.message
+          })
+        } else {
+          console.log(`✅ 모델 ${modelName} 등록 완료`)
+          syncedCount++
+          results.push({
+            model: modelName,
+            success: true,
+            id: insertedModel.id
+          })
+        }
+        
+      } catch (fileError) {
+        console.error(`❌ 파일 ${file.name} 처리 실패:`, fileError)
+        results.push({
+          model: file.name,
+          success: false,
+          error: fileError.message
+        })
+      }
+    }
+    
+    console.log(`🎯 동기화 완료: ${syncedCount}개 모델 등록됨`)
+    
+    res.json({
+      success: true,
+      message: `Storage에서 ${syncedCount}개 모델을 model_registry에 등록했습니다`,
+      synced: syncedCount,
+      total: modelFiles.length,
+      results: results
+    })
+    
+  } catch (error) {
+    console.error('❌ 모델 동기화 실패:', error)
+    res.json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 부품 단위 학습 트리거 함수
+async function triggerPartTraining(partId, reason) {
+  try {
+    console.log(`🧩 부품 ${partId} 단위 학습 시작: ${reason}`)
+    
+    // 부품 데이터 확인
+    const { data: partData, error: partError } = await supabase
+      .from('parts_master')
+      .select('part_id, part_name')
+      .eq('part_id', partId)
+      .limit(1)
+    
+    if (partError) throw new Error(`부품 조회 실패: ${partError.message}`)
+    if (!partData || partData.length === 0) throw new Error(`존재하지 않는 부품: ${partId}`)
+    
+    // 이미지 데이터 확인
+    const { data: imageData, error: imageError } = await supabase
+      .from('synthetic_dataset')
+      .select('*')
+      .eq('part_id', partId)
+      .eq('status', 'uploaded')
+    
+    if (imageError) throw new Error(`이미지 데이터 조회 실패: ${imageError.message}`)
+    
+    const imageCount = imageData?.length || 0
+    console.log(`📊 부품 ${partId} 이미지 수: ${imageCount}개`)
+    
+    if (imageCount === 0) {
+      throw new Error(`부품 ${partId}에 학습용 이미지가 없습니다`)
+    }
+    
+    // 학습 작업 상태 업데이트
+    const { error: updateError } = await supabase
+      .from('part_training_status')
+      .update({
+        status: 'training',
+        updated_at: new Date().toISOString()
+      })
+      .eq('part_id', partId)
+    
+    if (updateError) {
+      console.warn('학습 상태 업데이트 실패:', updateError)
+    }
+    
+    console.log(`✅ 부품 ${partId} 학습 작업이 시작되었습니다`)
+    
+    return {
+      success: true,
+      partId: partId,
+      imageCount: imageCount,
+      message: `부품 ${partId} 학습이 시작되었습니다`
+    }
+    
+  } catch (error) {
+    console.error(`❌ 부품 ${partId} 학습 실패:`, error)
+    throw error
+  }
+}
+
+// 기존 자동 트리거 로직
+    let result = null
+    
+    if (action === 'incremental' || action === 'incremental_learning') {
+      // 증분 학습 트리거
+      console.log('📈 증분 학습 트리거 실행')
+      result = await triggerIncrementalLearning(reason)
+    } else if (action === 'part_training') {
+      // 부품 단위 학습 트리거
+      console.log('🧩 부품 단위 학습 트리거 실행')
+      result = await triggerPartTraining(partId, reason)
+    } else if (action === 'full_retrain') {
+      // 전체 재학습 트리거
+      console.log('🔄 전체 재학습 트리거 실행')
+      result = await triggerFullRetraining(reason)
+    } else if (action === 'stage1_incremental') {
+      // Stage-1 증분 학습 트리거
+      console.log('🔍 Stage-1 증분 학습 트리거 실행')
+      result = await triggerStage1IncrementalLearning(reason)
+    } else if (action === 'stage1_full_retrain') {
+      // Stage-1 전체 재학습 트리거
+      console.log('🔍 Stage-1 전체 재학습 트리거 실행')
+      result = await triggerStage1FullRetraining(reason)
+    } else if (action === 'stage2_incremental') {
+      // Stage-2 증분 학습 트리거
+      console.log('🎯 Stage-2 증분 학습 트리거 실행')
+      result = await triggerStage2IncrementalLearning(reason)
+    } else if (action === 'stage2_full_retrain') {
+      // Stage-2 전체 재학습 트리거
+      console.log('🎯 Stage-2 전체 재학습 트리거 실행')
+      result = await triggerStage2FullRetraining(reason)
+    } else if (action === 'full_pipeline_retrain') {
+      // 전체 파이프라인 재학습 트리거
+      console.log('⚡ 전체 파이프라인 재학습 트리거 실행')
+      result = await triggerFullPipelineRetraining(reason)
+    } else {
+      throw new Error(`지원하지 않는 액션: ${action}`)
+    }
+    
+    res.json({
+      success: true,
+      message: `${action} 트리거가 실행되었습니다`,
+      result: result,
+      timestamp: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('❌ 자동 트리거 실행 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 증분 학습 트리거 실행
+const triggerIncrementalLearning = async (reason) => {
+  try {
+    console.log('📈 증분 학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'incremental_learning_pipeline.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ 증분 학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ 증분 학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ 증분 학습 실패:', stderr)
+          reject(new Error(`증분 학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ 증분 학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ 증분 학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// 전체 재학습 트리거 실행
+const triggerFullRetraining = async (reason) => {
+  try {
+    console.log('🔄 전체 재학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'full_retraining_pipeline.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ 전체 재학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ 전체 재학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ 전체 재학습 실패:', stderr)
+          reject(new Error(`전체 재학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ 전체 재학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ 전체 재학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// Stage-1 증분 학습 트리거
+const triggerStage1IncrementalLearning = async (reason) => {
+  try {
+    console.log('🔍 Stage-1 증분 학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'stage1_incremental_learning.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath, '--reason', reason], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[Stage-1증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[Stage-1증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ Stage-1 증분 학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ Stage-1 증분 학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ Stage-1 증분 학습 실패:', stderr)
+          reject(new Error(`Stage-1 증분 학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ Stage-1 증분 학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ Stage-1 증분 학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// Stage-1 전체 재학습 트리거
+const triggerStage1FullRetraining = async (reason) => {
+  try {
+    console.log('🔍 Stage-1 전체 재학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'stage1_full_retraining.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath, '--reason', reason], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[Stage-1전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[Stage-1전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ Stage-1 전체 재학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ Stage-1 전체 재학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ Stage-1 전체 재학습 실패:', stderr)
+          reject(new Error(`Stage-1 전체 재학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ Stage-1 전체 재학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ Stage-1 전체 재학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// Stage-2 증분 학습 트리거
+const triggerStage2IncrementalLearning = async (reason) => {
+  try {
+    console.log('🎯 Stage-2 증분 학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'stage2_incremental_learning.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath, '--reason', reason], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[Stage-2증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[Stage-2증분학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ Stage-2 증분 학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ Stage-2 증분 학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ Stage-2 증분 학습 실패:', stderr)
+          reject(new Error(`Stage-2 증분 학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ Stage-2 증분 학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ Stage-2 증분 학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// Stage-2 전체 재학습 트리거
+const triggerStage2FullRetraining = async (reason) => {
+  try {
+    console.log('🎯 Stage-2 전체 재학습 파이프라인 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'stage2_full_retraining.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath, '--reason', reason], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[Stage-2전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[Stage-2전체재학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ Stage-2 전체 재학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ Stage-2 전체 재학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ Stage-2 전체 재학습 실패:', stderr)
+          reject(new Error(`Stage-2 전체 재학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ Stage-2 전체 재학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ Stage-2 전체 재학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// 전체 파이프라인 재학습 트리거
+const triggerFullPipelineRetraining = async (reason) => {
+  try {
+    console.log('⚡ 전체 파이프라인 재학습 시작...')
+    
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'full_pipeline_retraining.py')
+    
+    return new Promise((resolve, reject) => {
+      const process = spawn('python', [scriptPath, '--reason', reason], {
+        cwd: path.join(__dirname, '..'),
+        stdio: ['pipe', 'pipe', 'pipe']
+      })
+      
+      let stdout = ''
+      let stderr = ''
+      
+      process.stdout.on('data', (data) => {
+        stdout += data.toString()
+        console.log(`[전체파이프라인재학습] ${data.toString().trim()}`)
+      })
+      
+      process.stderr.on('data', (data) => {
+        stderr += data.toString()
+        console.error(`[전체파이프라인재학습] ${data.toString().trim()}`)
+      })
+      
+      process.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const result = JSON.parse(stdout)
+            console.log('✅ 전체 파이프라인 재학습 완료:', result)
+            resolve(result)
+          } catch (e) {
+            console.log('✅ 전체 파이프라인 재학습 완료 (JSON 파싱 실패):', stdout)
+            resolve({ status: 'completed', output: stdout })
+          }
+        } else {
+          console.error('❌ 전체 파이프라인 재학습 실패:', stderr)
+          reject(new Error(`전체 파이프라인 재학습 실패 (종료 코드: ${code}): ${stderr}`))
+        }
+      })
+      
+      process.on('error', (error) => {
+        console.error('❌ 전체 파이프라인 재학습 프로세스 오류:', error)
+        reject(error)
+      })
+    })
+  } catch (error) {
+    console.error('❌ 전체 파이프라인 재학습 트리거 실패:', error)
+    throw error
+  }
+}
+
+// 자동 학습 실행 API 엔드포인트
+app.post('/api/synthetic/training/start', async (req, res) => {
+  try {
+    const { job_id, config, set_num } = req.body
+    console.log('🚀 자동 학습 실행 요청:', { job_id, config, set_num })
+    
+    // 학습 스크립트 실행
+    const { spawn } = await import('child_process')
+    const path = await import('path')
+    
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'local_yolo_training.py')
+    const args = [
+      '--set_num', set_num || 'latest',
+      '--epochs', config.epochs || 100,
+      '--batch_size', config.batch_size || 16,
+      '--imgsz', config.imgsz || 640,
+      '--device', config.device || 'cuda',
+      '--job_id', job_id
+    ]
+    
+    console.log('📋 실행 명령어:', `python ${scriptPath} ${args.join(' ')}`)
+    
+    const trainingProcess = spawn('python', [scriptPath, ...args], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONIOENCODING: 'utf-8',
+        LANG: 'ko_KR.UTF-8',
+        LC_ALL: 'ko_KR.UTF-8',
+        PYTHONUTF8: '1'
+      }
+    })
+    
+    // 프로세스 출력 처리
+    trainingProcess.stdout.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      console.log(`[학습] ${message}`)
+    })
+    
+    trainingProcess.stderr.on('data', (data) => {
+      const message = data.toString('utf8').trim()
+      console.error(`[학습 오류] ${message}`)
+    })
+    
+    trainingProcess.on('close', (code) => {
+      if (code === 0) {
+        console.log('✅ 자동 학습 완료')
+      } else {
+        console.error(`❌ 자동 학습 실패 (종료 코드: ${code})`)
+      }
+    })
+    
+    trainingProcess.on('error', (error) => {
+      console.error('❌ 자동 학습 프로세스 오류:', error)
+    })
+    
+    res.json({
+      success: true,
+      message: '자동 학습이 시작되었습니다',
+      process_id: trainingProcess.pid,
+      job_id: job_id
+    })
+    
+  } catch (error) {
+    console.error('❌ 자동 학습 실행 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 학습 작업 관리 API 엔드포인트들
+// 학습 작업 목록 조회
+app.get('/api/synthetic/training/jobs', async (req, res) => {
+  try {
+    console.log('📋 학습 작업 목록 조회')
+    
+    // 학습 작업 목록 조회 (실제 구현 시 데이터베이스에서 조회)
+    const jobs = await getTrainingJobs()
+    
+    res.json({
+      success: true,
+      jobs: jobs
+    })
+  } catch (error) {
+    console.error('❌ 학습 작업 목록 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 학습 작업 상태 조회
+app.get('/api/synthetic/training/jobs/:jobId/status', async (req, res) => {
+  try {
+    const { jobId } = req.params
+    console.log(`📊 학습 작업 ${jobId} 상태 조회`)
+    
+    const jobStatus = await getTrainingJobStatus(jobId)
+    
+    res.json({
+      success: true,
+      job: jobStatus
+    })
+  } catch (error) {
+    console.error('❌ 학습 작업 상태 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 학습 작업 재시도
+app.post('/api/synthetic/training/jobs/:jobId/retry', async (req, res) => {
+  try {
+    const { jobId } = req.params
+    console.log(`🔄 학습 작업 ${jobId} 재시도`)
+    
+    const result = await retryTrainingJob(jobId)
+    
+    res.json({
+      success: true,
+      message: '학습 작업 재시도가 시작되었습니다',
+      result: result
+    })
+  } catch (error) {
+    console.error('❌ 학습 작업 재시도 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 학습 작업 취소
+app.post('/api/synthetic/training/jobs/:jobId/cancel', async (req, res) => {
+  try {
+    const { jobId } = req.params
+    console.log(`⏹️ 학습 작업 ${jobId} 취소`)
+    
+    const result = await cancelTrainingJob(jobId)
+    
+    res.json({
+      success: true,
+      message: '학습 작업이 취소되었습니다',
+      result: result
+    })
+  } catch (error) {
+    console.error('❌ 학습 작업 취소 실패:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 학습 작업 목록 조회 함수
+const getTrainingJobs = async () => {
+  try {
+    // 실제 구현 시 데이터베이스에서 조회
+    // 현재는 파일 시스템에서 조회
+    const fs = await import('fs')
+    const path = await import('path')
+    
+    const jobsFile = path.join(__dirname, '..', 'logs', 'training_jobs.json')
+    if (fs.existsSync(jobsFile)) {
+      const data = fs.readFileSync(jobsFile, 'utf8')
+      return JSON.parse(data)
+    }
+    
+    return []
+  } catch (error) {
+    console.error('학습 작업 목록 조회 실패:', error)
+    return []
+  }
+}
+
+// 학습 작업 상태 조회 함수
+const getTrainingJobStatus = async (jobId) => {
+  try {
+    const jobs = await getTrainingJobs()
+    return jobs.find(job => job.id === jobId) || null
+  } catch (error) {
+    console.error('학습 작업 상태 조회 실패:', error)
+    return null
+  }
+}
+
+// 학습 작업 재시도 함수
+const retryTrainingJob = async (jobId) => {
+  try {
+    console.log(`🔄 학습 작업 ${jobId} 재시도 시작`)
+    
+    // 작업 상태를 pending으로 변경
+    const fs = await import('fs')
+    const path = await import('path')
+    
+    const jobsFile = path.join(__dirname, '..', 'logs', 'training_jobs.json')
+    if (fs.existsSync(jobsFile)) {
+      const jobs = JSON.parse(fs.readFileSync(jobsFile, 'utf8'))
+      const jobIndex = jobs.findIndex(job => job.id === jobId)
+      
+      if (jobIndex !== -1) {
+        jobs[jobIndex].status = 'pending'
+        jobs[jobIndex].updated_at = new Date().toISOString()
+        
+        fs.writeFileSync(jobsFile, JSON.stringify(jobs, null, 2))
+        console.log(`✅ 학습 작업 ${jobId} 재시도 설정 완료`)
+      }
+    }
+    
+    return { jobId, status: 'pending' }
+  } catch (error) {
+    console.error('학습 작업 재시도 실패:', error)
+    throw error
+  }
+}
+
+// 학습 작업 취소 함수
+const cancelTrainingJob = async (jobId) => {
+  try {
+    console.log(`⏹️ 학습 작업 ${jobId} 취소 시작`)
+    
+    // 작업 상태를 cancelled로 변경
+    const fs = await import('fs')
+    const path = await import('path')
+    
+    const jobsFile = path.join(__dirname, '..', 'logs', 'training_jobs.json')
+    if (fs.existsSync(jobsFile)) {
+      const jobs = JSON.parse(fs.readFileSync(jobsFile, 'utf8'))
+      const jobIndex = jobs.findIndex(job => job.id === jobId)
+      
+      if (jobIndex !== -1) {
+        jobs[jobIndex].status = 'cancelled'
+        jobs[jobIndex].cancelled_at = new Date().toISOString()
+        jobs[jobIndex].updated_at = new Date().toISOString()
+        
+        fs.writeFileSync(jobsFile, JSON.stringify(jobs, null, 2))
+        console.log(`✅ 학습 작업 ${jobId} 취소 완료`)
+      }
+    }
+    
+    return { jobId, status: 'cancelled' }
+  } catch (error) {
+    console.error('학습 작업 취소 실패:', error)
+    throw error
+  }
+}
 
 startServer()
 

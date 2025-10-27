@@ -884,7 +884,7 @@ const getPartImageUrl = (record) => {
   }
   
   // Supabase Storage에서 이미지 URL 생성
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
   const bucketName = 'lego_parts_images'
   const fileName = `${partId}_${record.color_id}.webp`
   

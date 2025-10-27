@@ -3,8 +3,8 @@
     <!-- 헤더 -->
     <div class="header-section">
       <div class="title-group">
-        <h2>📊 카테고리 모니터링</h2>
-        <p class="description">Unknown 카테고리 로그 분석 및 분기별 검토</p>
+        <h2>📊 카테고리 모니터링 ({{ totalCategories }}개 기준)</h2>
+        <p class="description">Unknown 카테고리 로그 분석 및 {{ totalCategories }}개 카테고리 기준 분기별 검토</p>
       </div>
       <div class="action-buttons">
         <button @click="refreshData" class="btn-refresh" :disabled="loading">
@@ -81,7 +81,7 @@
     <div class="tab-content">
       <!-- 요약 탭 -->
       <div v-if="subTab === 'summary'" class="summary-content">
-        <h3>Unknown 카테고리 요약 (10회 이상 검출)</h3>
+        <h3>Unknown 카테고리 요약 ({{ totalCategories }}개 기준, 10회 이상 검출)</h3>
         <div v-if="loading" class="loading">로딩 중...</div>
         <div v-else-if="unknownSummary.length === 0" class="empty-state">
           ✅ Unknown 카테고리가 없습니다!
@@ -223,6 +223,11 @@
           </div>
 
           <div class="report-actions">
+            <h4>💡 {{ totalCategories }}개 카테고리 기준</h4>
+            <div class="category-info">
+              <p><strong>현재 기준:</strong> {{ totalCategories }}개 카테고리 (기본 조립 21개 + 테크닉 10개 + 미니피그 6개 + 생물/자연 4개 + 액세서리 10개 + 레거시 4개)</p>
+              <p><strong>목표:</strong> Unknown 카테고리 최소화 및 {{ totalCategories }}개 기준 달성</p>
+            </div>
             <h4>💡 다음 단계</h4>
             <p>HIGH priority 카테고리를 검토하고 필요시 추가하세요:</p>
             <pre class="sql-template">
@@ -245,7 +250,11 @@ SELECT cleanup_resolved_category_logs('new_category');
       <!-- 등록된 카테고리 탭 -->
       <div v-if="subTab === 'categories'" class="categories-content">
         <div class="categories-header">
-          <h3>등록된 카테고리 ({{ registeredCategories.length }}개)</h3>
+          <h3>등록된 카테고리 ({{ registeredCategories.length }}/{{ totalCategories }}개)</h3>
+          <div class="category-status">
+            <span v-if="registeredCategories.length >= totalCategories" class="status-complete">✅ {{ totalCategories }}개 완료</span>
+            <span v-else class="status-incomplete">⚠️ {{ totalCategories - registeredCategories.length }}개 부족</span>
+          </div>
           <button @click="showAddCategoryForm = true" class="btn-add">
             ➕ 신규 카테고리 추가
           </button>
@@ -349,6 +358,7 @@ const unknownDetails = ref([])
 const quarterlyReport = ref([])
 const registeredCategories = ref([])
 const stats = ref({})
+const totalCategories = ref(55) // 기본값, DB에서 로드
 
 // 리포트 설정
 const reportMinDetections = ref(10)
@@ -388,31 +398,60 @@ const quarterlyStats = computed(() => {
 async function loadData() {
   loading.value = true
   try {
-    // ✅ 3개의 쿼리를 병렬로 실행 (Promise.all 사용)
-    const [summaryResult, detailsResult, categoriesResult] = await Promise.all([
+    // ✅ 4개의 쿼리를 병렬로 실행 (Promise.all 사용)
+    const [summaryResult, detailsResult, categoriesResult, totalCountResult] = await Promise.all([
       // 요약 조회
       supabase
         .from('v_unknown_categories_summary')
         .select('*'),
       
-      // 상세 조회
+      // 상세 조회 (parts_master_features에서 직접 조회)
       supabase
-        .from('v_unknown_parts_detail')
-        .select('*')
+        .from('parts_master_features')
+        .select(`
+          part_id,
+          part_name,
+          feature_json,
+          created_at,
+          updated_at
+        `)
+        .eq('part_category', 99)
         .limit(100),
       
       // 등록된 카테고리 조회
       supabase
         .from('v_part_categories_stats')
         .select('*')
-        .order('sort_order', { ascending: true })
+        .order('sort_order', { ascending: true }),
+      
+      // 총 카테고리 개수 조회 (55개 기준)
+      supabase
+        .from('part_categories')
+        .select('id', { count: 'exact', head: true })
     ])
 
     // 결과 할당
     const summary = summaryResult.data
     unknownSummary.value = summary || []
-    unknownDetails.value = detailsResult.data || []
+    
+    // 상세 데이터 처리 (검출 횟수 계산)
+    const detailsData = detailsResult.data || []
+    const processedDetails = detailsData.map(item => ({
+      part_id: item.part_id,
+      part_name: item.part_name || '-',
+      shape_tag: item.feature_json?.shape_tag || 'unknown',
+      detected_count: 1, // 기본값, 실제로는 로그에서 계산해야 함
+      first_detected_at: item.created_at,
+      last_detected_at: item.updated_at
+    }))
+    unknownDetails.value = processedDetails
+    
     registeredCategories.value = categoriesResult.data || []
+    
+    // 총 카테고리 개수 업데이트
+    if (totalCountResult.count !== null) {
+      totalCategories.value = totalCountResult.count
+    }
 
     // 통계 계산
     if (summary && summary.length > 0) {
@@ -508,7 +547,7 @@ async function addCategory() {
     // 폼 초기화 및 닫기
     cancelAddCategory()
     
-    // 데이터 새로고침
+    // 데이터 새로고침 (총 개수도 함께 업데이트)
     await loadData()
     
     // useMasterPartsPreprocessing의 캐시도 새로고침하도록 안내
@@ -972,6 +1011,62 @@ button:disabled {
 
 .btn-cancel:hover:not(:disabled) {
   background: #7f8c8d;
+}
+
+/* 55개 기준 상태 표시 */
+.category-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1rem;
+}
+
+.status-complete {
+  background: #d5f4e6;
+  color: #27ae60;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid #2ecc71;
+}
+
+.status-incomplete {
+  background: #fef5e7;
+  color: #e67e22;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid #f39c12;
+}
+
+.categories-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* 55개 기준 정보 섹션 */
+.category-info {
+  background: #e8f4fd;
+  border: 1px solid #3498db;
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.category-info p {
+  margin: 0.5rem 0;
+  color: #2c3e50;
+  font-size: 0.9rem;
+}
+
+.category-info strong {
+  color: #2980b9;
 }
 </style>
 

@@ -40,29 +40,39 @@ async function findAvailablePort(startPort = 3006, endPort = 3015) {
   }
 }
 
-// 워커 포트 설정
-let WORKER_PORT
+// 고정 포트 3020 사용 (근본 문제 해결)
+const WORKER_PORT = 3020;
+console.log(`🔒 고정 포트 사용: ${WORKER_PORT}`);
 
 // 서버 시작 함수
 async function startWorkerServer() {
   try {
-    // 포트 관리 시스템에서 포트 가져오기
-    try {
-      // 포트 설정 파일에서 읽기
-      const portConfigPath = path.join(process.cwd(), '.port-config.json');
-      if (fs.existsSync(portConfigPath)) {
-        const portConfig = JSON.parse(fs.readFileSync(portConfigPath, 'utf8'));
-        WORKER_PORT = portConfig.worker;
-        console.log(`📄 포트 설정 파일에서 읽기: ${WORKER_PORT}`);
-      } else {
-        // 포트 설정 파일이 없으면 자동 할당
-        WORKER_PORT = await findAvailablePort();
-        console.log(`🔍 사용 가능한 포트 찾기: ${WORKER_PORT}`);
+    // 포트 사용 가능 여부 확인 및 기존 프로세스 종료
+    if (!(await findAvailablePort(WORKER_PORT, WORKER_PORT))) {
+      console.warn(`⚠️ 포트 ${WORKER_PORT}이 사용 중입니다. 기존 프로세스를 종료합니다.`);
+      
+      try {
+        const { exec } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(exec);
+        
+        const { stdout } = await execAsync(`netstat -ano | findstr ":${WORKER_PORT}"`);
+        const lines = stdout.split('\n').filter(line => line.includes('LISTENING'));
+        
+        for (const line of lines) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length >= 5) {
+            const pid = parts[4];
+            if (pid && pid !== '0') {
+              console.log(`🔪 프로세스 종료: PID ${pid}`);
+              await execAsync(`taskkill /F /PID ${pid}`);
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
+      } catch (killError) {
+        console.warn('기존 프로세스 종료 실패:', killError.message);
       }
-    } catch (error) {
-      console.error('❌ 포트 할당 실패:', error.message);
-      WORKER_PORT = process.env.WORKER_PORT || 3020;
-      console.log(`⚠️ 기본 포트 사용: ${WORKER_PORT}`);
     }
 console.log('🔧 백그라운드 워커 서비스 시작...');
 console.log(`⚙️ 워커 포트: ${WORKER_PORT}`);
@@ -70,6 +80,16 @@ console.log(`⚙️ 워커 포트: ${WORKER_PORT}`);
     // Express 앱 생성
     const app = express()
     app.use(express.json())
+    
+    // Health check 엔드포인트
+    app.get('/health', (req, res) => {
+      res.status(200).json({
+        status: 'healthy',
+        service: 'Worker',
+        port: process.env.WORKER_PORT || 3020,
+        timestamp: new Date().toISOString()
+      })
+    })
     
     // CORS 설정
     app.use((req, res, next) => {
@@ -85,46 +105,59 @@ console.log(`⚙️ 워커 포트: ${WORKER_PORT}`);
     })
 
     // Supabase 클라이언트
-    const supabase = createClient(
-      process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL,
-      process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY
-    )
+    const supabaseUrl = process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+    const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+    
+    const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // OpenAI API 설정
-    const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY
-    const OPENAI_BASE_URL = process.env.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1'
+    // 임베딩 서비스 설정
+const EMBEDDING_PROVIDER = 'clip' // 🔧 수정됨: CLIP 서비스 사용 (최신 torch + transformers로 해결)
+// 🔧 수정됨: CLIP 서비스 기본 포트를 3021로 고정 (3022는 Semantic Vector API)
+const CLIP_SERVICE_URL = process.env.CLIP_SERVICE_URL || 'http://localhost:3021'
+const OPENAI_API_KEY = process.env.VITE_OPENAI_API_KEY
+const OPENAI_BASE_URL = process.env.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1'
 
-    // CLIP 임베딩 생성 함수
+    // CLIP 임베딩 생성 함수 (통합)
     async function generateClipEmbedding(text) {
-  try {
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API 키가 설정되지 않았습니다')
+      try {
+        if (EMBEDDING_PROVIDER === 'clip') {
+          // CLIP 서비스 사용
+          const response = await fetch(`${CLIP_SERVICE_URL}/v1/embeddings`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              input: text,
+              model: 'clip-vit-l/14',
+              dimensions: 768
+            })
+          })
+
+          if (!response.ok) {
+            throw new Error(`CLIP 서비스 오류: ${response.status} ${response.statusText}`)
+          }
+
+          const data = await response.json()
+          const emb = data?.data?.[0]?.embedding || []
+
+          // 제로 벡터/빈 벡터 방지
+          const norm = Array.isArray(emb) ? Math.sqrt(emb.reduce((s, v) => s + v * v, 0)) : 0
+          if (!Array.isArray(emb) || emb.length === 0 || norm === 0) {
+            throw new Error('CLIP embedding is zero or empty')
+          }
+
+          console.log(`✅ CLIP embedding generated: ${emb.length}D, norm=${norm.toFixed(4)}`)
+          return emb
+        }
+
+        // 🔧 수정됨: OpenAI 폴백 제거 (강제 실패)
+        throw new Error('EMBEDDING_PROVIDER는 clip만 허용됩니다')
+      } catch (error) {
+        console.error('임베딩 생성 실패:', error)
+        throw error
+      }
     }
-
-    const response = await fetch(`${OPENAI_BASE_URL}/embeddings`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'text-embedding-3-small',
-        input: text,
-        dimensions: 768
-      })
-    })
-
-    if (!response.ok) {
-      throw new Error(`OpenAI API 오류: ${response.status} ${response.statusText}`)
-    }
-
-    const data = await response.json()
-    return data.data[0].embedding
-  } catch (error) {
-    console.error('CLIP 임베딩 생성 실패:', error)
-    throw error
-  }
-}
 
 // 임베딩 생성 워커
 async function processEmbeddingQueue() {
@@ -169,6 +202,14 @@ async function processEmbeddingQueue() {
         // CLIP 임베딩 생성
         const embedding = await generateClipEmbedding(item.feature_text)
         
+        // 🔧 제로벡터 최종 검증 (이중 체크)
+        const finalNorm = Array.isArray(embedding) ? Math.sqrt(embedding.reduce((s, v) => s + v * v, 0)) : 0
+        if (!Array.isArray(embedding) || embedding.length === 0 || finalNorm === 0) {
+          throw new Error('제로벡터 감지: 임베딩 생성 실패')
+        }
+        
+        console.log(`✅ Part ${item.part_id}: 임베딩 검증 완료 (norm=${finalNorm.toFixed(4)})`)
+        
         // 데이터베이스에 저장
         const { error: updateError } = await supabase
           .from('parts_master_features')
@@ -193,11 +234,12 @@ async function processEmbeddingQueue() {
         await new Promise(resolve => setTimeout(resolve, 1000))
 
       } catch (error) {
-        console.error(`❌ Part ${item.part_id}: 임베딩 생성 실패`, error)
-        await supabase
-          .from('parts_master_features')
-          .update({ embedding_status: 'failed' })
-          .eq('id', item.id)
+        console.error(`❌ Part ${item.part_id}: 임베딩 생성 실패`, error) // 🔧 수정됨
+        // 실패 시 제로/빈 벡터 저장 금지, 상태만 failed로 표시
+        await supabase // 🔧 수정됨
+          .from('parts_master_features') // 🔧 수정됨
+          .update({ embedding_status: 'failed', updated_at: new Date().toISOString() }) // 🔧 수정됨
+          .eq('id', item.id) // 🔧 수정됨
       }
     }
 

@@ -57,35 +57,57 @@ async function findAvailablePort(startPort = 3005, endPort = 3015) {
   }
 }
 
-// 포트 관리 시스템에서 포트 가져오기
-let PORT;
-try {
-  // 포트 설정 파일에서 읽기
-  const portConfigPath = path.join(process.cwd(), '.port-config.json');
-  if (fs.existsSync(portConfigPath)) {
-    const portConfig = JSON.parse(fs.readFileSync(portConfigPath, 'utf8'));
-    PORT = portConfig.trainingApi;
-    console.log(`📄 포트 설정 파일에서 읽기: ${PORT}`);
-  } else {
-    // 포트 설정 파일이 없으면 자동 할당
-    PORT = await findAvailablePort();
-    console.log(`🔍 사용 가능한 포트 찾기: ${PORT}`);
+// 고정 포트 3010 사용 (근본 문제 해결)
+const PORT = 3010;
+console.log(`🔒 고정 포트 사용: ${PORT}`);
+
+// 포트 사용 가능 여부 확인 및 기존 프로세스 종료
+if (!(await findAvailablePort(PORT, PORT))) {
+  console.warn(`⚠️ 포트 ${PORT}이 사용 중입니다. 기존 프로세스를 종료합니다.`);
+  
+  try {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const { stdout } = await execAsync(`netstat -ano | findstr ":${PORT}"`);
+    const lines = stdout.split('\n').filter(line => line.includes('LISTENING'));
+    
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length >= 5) {
+        const pid = parts[4];
+        if (pid && pid !== '0') {
+          console.log(`🔪 프로세스 종료: PID ${pid}`);
+          await execAsync(`taskkill /F /PID ${pid}`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+    }
+  } catch (killError) {
+    console.warn('기존 프로세스 종료 실패:', killError.message);
   }
-} catch (error) {
-  console.error('❌ 포트 할당 실패:', error.message);
-  PORT = process.env.API_PORT || 3010;
-  console.log(`⚠️ 기본 포트 사용: ${PORT}`);
 }
 
 // CORS 설정
 app.use(cors())
 app.use(express.json())
 
+// Health check 엔드포인트
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'Training API',
+    port: process.env.API_PORT || 3010,
+    timestamp: new Date().toISOString()
+  })
+})
+
 // Supabase 클라이언트
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL,
-  process.env.VITE_SUPABASE_SERVICE_ROLE
-)
+const supabaseUrl = process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 // 활성 학습 프로세스 관리
 const activeProcesses = new Map()
