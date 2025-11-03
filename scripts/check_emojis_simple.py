@@ -16,10 +16,13 @@ def check_emojis_simple():
     file_count = 0
     
     for file_path in python_files:
-        # 제외할 디렉토리 (venv 포함)
+        # 제외할 디렉토리/파일 (venv 포함, 자기 검사 스크립트 제외)
         if any(exclude in file_path for exclude in ['node_modules', '.git', '__pycache__', '.venv', 'venv', 'temp']):
             continue
-            
+        base = os.path.basename(file_path)
+        if base in ('check_emojis_simple.py', 'check_emojis.py'):
+            continue
+
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
@@ -27,10 +30,7 @@ def check_emojis_simple():
             # 실제 이모지 문자만 검사 (ASCII 태그는 검사하지 않음)
             emojis = ['🔍', '❌', '⚠️', '💡', '📤', '🔧', '📦', '🔌', '⏳', '🚀', '📡', '🎯', '📁', '📋', '🎉']
             
-            found_emojis = []
-            for emoji in emojis:
-                if emoji in content:
-                    found_emojis.append(emoji)
+            found_emojis = [e for e in emojis if e in content]
             
             if found_emojis:
                 print(f"[FOUND] {file_path}")
