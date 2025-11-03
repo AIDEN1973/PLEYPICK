@@ -1,9 +1,9 @@
-# 🔍 Synthetic Dataset 렌더링 중복 체크 로직 분석
+# [SEARCH] Synthetic Dataset 렌더링 중복 체크 로직 분석
 
-## 📋 개요
+## [INFO] 개요
 `http://localhost:3000/synthetic-dataset`에서 렌더링 시 중복 파일/폴더 체크 로직을 분석한 결과입니다.
 
-## 🎯 중복 체크 전략
+## [TARGET] 중복 체크 전략
 
 ### 1. 다층 중복 체크 시스템
 ```
@@ -21,7 +21,7 @@ elementId = element_id || (part_num + '-' + color_id) || part_num
 elementKey = `${elementId}-${colorId || 'default'}`
 ```
 
-## 🔧 핵심 설정값
+## [FIX] 핵심 설정값
 
 ### 중복 체크 임계값
 ```javascript
@@ -31,7 +31,7 @@ const POLL_INTERVAL_MS = 3000    // 진행 폴링 간격
 const TIMEOUT_MAX_ATTEMPTS = 300 // 최대 시도 횟수 (15분)
 ```
 
-## 🚀 중복 체크 프로세스
+## [START] 중복 체크 프로세스
 
 ### 1단계: 스토리지 기반 중복 체크
 ```javascript
@@ -127,7 +127,7 @@ const getRenderedPartsFromDB = async () => {
 }
 ```
 
-## 🔍 중복 체크 세부 로직
+## [SEARCH] 중복 체크 세부 로직
 
 ### Element ID 우선순위
 ```javascript
@@ -208,7 +208,7 @@ if (folderData.length >= DUP_MIN_FILES) {
 - **문제**: 스토리지 API 호출 지연으로 인한 성능 저하
 - **해결**: 배치 처리와 캐싱으로 완화
 
-## 📊 중복 체크 결과
+## [STATS] 중복 체크 결과
 
 ### 로그 출력 예시
 ```
@@ -226,7 +226,7 @@ console.log(`폴더 후보 고유 키 수: ${uniqueParts.size}`)
 console.log(`이미 렌더링된 부품(스토리지): ${renderedKeys.size}개`)
 ```
 
-## 🎯 권장 개선사항
+## [TARGET] 권장 개선사항
 
 ### 1. 중복 체크 정확도 향상
 ```javascript
@@ -251,7 +251,7 @@ const progress = Math.round(((batchIndex + 1) / totalBatches) * 100)
 console.log(`폴더 검증 진행률: ${progress}%`)
 ```
 
-## 🎉 결론
+## [SUCCESS] 결론
 
 현재 시스템은 **3단계 중복 체크**로 매우 견고하게 설계되어 있습니다:
 
