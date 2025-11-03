@@ -4960,7 +4960,7 @@ class LDrawRenderer:
                                     print(f"[ERROR] 렌더링 후 형식 불일치: {actual_format} (기대: OPEN_EXR)")
                                     print(f"[ERROR] 깊이 맵이 올바른 형식으로 저장되지 않았을 수 있습니다.")
                                 else:
-                                    print(f"[INFO] 렌더링 후 형식 확인: {actual_format} ✅")
+                                    print(f"[INFO] 렌더링 후 형식 확인: {actual_format} [OK]")
                         
                         # 🔧 추가: DepthOutput 노드가 있으면 Compositor 실행 (write_still=False)
                         if depth_node:
@@ -5892,7 +5892,7 @@ class LDrawRenderer:
                 print(f"[ERROR] 깊이 맵이 PNG 형식으로 저장됨: {actual_depth_path}")
                 print(f"[ERROR] EXR 형식이어야 합니다. Blender OutputFile 노드 설정을 확인하세요.")
             elif file_ext == '.exr':
-                print(f"[INFO] 깊이 맵 형식 확인: EXR ✅")
+                print(f"[INFO] 깊이 맵 형식 확인: EXR [OK]")
             else:
                 print(f"[WARN] 깊이 맵 형식 예상 외: {file_ext}")
             
