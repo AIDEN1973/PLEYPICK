@@ -125,6 +125,7 @@ vercel.json
 # 데이터베이스 스크립트 (개발용)
 *.sql
 scripts/
+!scripts/check_emojis_simple.py  # 🔧 수정됨: CI에서 필요
 database/
 
 # 테스트 및 검증 파일
