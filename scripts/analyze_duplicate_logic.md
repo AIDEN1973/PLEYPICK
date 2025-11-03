@@ -3,7 +3,7 @@
 ## [INFO] 개요
 `http://localhost:3000/synthetic-dataset`에서 렌더링 시 중복 파일/폴더 체크 로직을 분석한 결과입니다.
 
-## [TARGET] 중복 체크 전략
+## [TARGET] 중복 체크 전략체크
 
 ### 1. 다층 중복 체크 시스템
 ```
