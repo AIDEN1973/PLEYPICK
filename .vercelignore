@@ -1,0 +1,15 @@
+# Exclude most Serverless Functions to stay under Hobby plan limit
+api/**
+
+# Whitelist essential APIs
+!api/openai/v1/chat/completions.js
+!api/openai/v1/embeddings.js
+!api/upload/proxy-image.js
+!api/ai/inference.js
+!api/system/metrics.js
+!api/training/status.js
+!api/synthetic/validate.js
+!api/proxy/media/[...path].js
+
+# Keep everything else by default
+
