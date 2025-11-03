@@ -128,7 +128,7 @@ def check_duplicates(local_folder, supabase_client):
             print(f"  - {dup}")
         return True
     else:
-        print("✅ 중복 파일 없음")
+        print("[OK] 중복 파일 없음")
         return False
 
 # 사용법

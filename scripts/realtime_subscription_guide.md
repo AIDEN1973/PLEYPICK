@@ -80,9 +80,9 @@ WHERE tablename IN ('training_jobs', 'training_metrics', 'model_registry');
 ### 3. 브라우저 콘솔에서 확인
 실시간 구독이 활성화되면 다음과 같은 메시지가 표시됩니다:
 ```
-✅ training_jobs 채널 구독 성공
-✅ training_metrics 채널 구독 성공
-✅ model_registry 채널 구독 성공
+[OK] training_jobs 채널 구독 성공
+[OK] training_metrics 채널 구독 성공
+[OK] model_registry 채널 구독 성공
 ```
 
 ## 문제 해결

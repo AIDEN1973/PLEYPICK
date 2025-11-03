@@ -147,7 +147,7 @@ for file in png_files:
 ping supabase.co
 
 # 2. 인증 확인
-python -c "from supabase import create_client; print('✅ 연결 확인')"
+python -c "from supabase import create_client; print('[OK] 연결 확인')"
 
 # 3. 파일 권한 확인
 dir "output/renders/3001"
