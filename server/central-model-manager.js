@@ -589,16 +589,34 @@ echo ✅ 롤백 완료!
     try {
       const { version } = req.params
       
-      // 기존 활성 모델 비활성화
-      await this.supabase
+      // 활성화할 모델 정보 조회
+      const { data: targetModel, error: fetchError } = await this.supabase
         .from('model_registry')
-        .update({ is_active: false })
+        .select('model_stage')
+        .eq('model_version', version)
+        .single()
+      
+      if (fetchError || !targetModel) {
+        throw new Error(`모델 조회 실패: ${fetchError?.message}`)
+      }
+      
+      // 동일 model_stage의 기존 활성 모델 비활성화
+      let deactivateQuery = this.supabase
+        .from('model_registry')
+        .update({ is_active: false, status: 'inactive' })
         .eq('is_active', true)
+      
+      // model_stage가 있으면 동일 stage만, 없으면 모든 모델 비활성화 (레거시 호환)
+      if (targetModel.model_stage) {
+        deactivateQuery = deactivateQuery.eq('model_stage', targetModel.model_stage)
+      }
+      
+      await deactivateQuery
       
       // 새 모델 활성화
       const { data, error } = await this.supabase
         .from('model_registry')
-        .update({ is_active: true })
+        .update({ is_active: true, status: 'active' })
         .eq('model_version', version)
         .select()
         .single()

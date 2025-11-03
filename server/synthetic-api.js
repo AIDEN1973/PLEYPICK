@@ -55,15 +55,99 @@ app.get('/api/synthetic/health', (req, res) => {
   })
 })
 
+// 환경 변수 파일 로드
+dotenv.config({ path: path.join(__dirname, '..', 'config', 'synthetic_dataset.env') })
+
 // Supabase 클라이언트 설정 (Service Role Key 사용)
-const supabaseUrl = process.env.SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+const supabaseUrl = process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const supabaseKey = process.env.VITE_SUPABASE_SERVICE_ROLE || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
 
 console.log('✅ Supabase 클라이언트 설정 완료')
 console.log('SUPABASE_URL:', supabaseUrl)
 console.log('SUPABASE_SERVICE_ROLE_KEY:', supabaseKey ? '설정됨' : '설정되지 않음')
 
 const supabase = createClient(supabaseUrl, supabaseKey)
+
+// 작업 상태 저장 경로
+const RECOVERY_STATE_DIR = path.join(__dirname, '..', 'output', 'recovery')
+const ACTIVE_JOBS_STATE_FILE = path.join(RECOVERY_STATE_DIR, 'active-jobs.json')
+
+// 복구 상태 디렉토리 생성
+if (!fs.existsSync(RECOVERY_STATE_DIR)) {
+  fs.mkdirSync(RECOVERY_STATE_DIR, { recursive: true })
+}
+
+// 렌더링 작업 관리 (상태 저장 함수보다 먼저 선언)
+const activeJobs = new Map()
+
+// 작업 상태 저장 함수
+const saveActiveJobsState = () => {
+  try {
+    if (!activeJobs || activeJobs.size === 0) {
+      // 작업이 없으면 빈 배열 저장
+      fs.writeFileSync(ACTIVE_JOBS_STATE_FILE, JSON.stringify([], null, 2))
+      return
+    }
+    
+    const jobsData = Array.from(activeJobs.entries()).map(([id, job]) => ({
+      id: job.id,
+      status: job.status,
+      progress: job.progress,
+      config: job.config,
+      startTime: job.startTime,
+      logs: (job.logs || []).slice(-50), // 최근 50개 로그만 저장
+      lastUpdate: new Date().toISOString()
+    }))
+    
+    fs.writeFileSync(ACTIVE_JOBS_STATE_FILE, JSON.stringify(jobsData, null, 2))
+    console.log(`💾 작업 상태 저장 완료: ${jobsData.length}개 작업`)
+  } catch (error) {
+    console.error('❌ 작업 상태 저장 실패:', error.message)
+  }
+}
+
+// 정기적으로 작업 상태 저장 (5분마다)
+setInterval(saveActiveJobsState, 5 * 60 * 1000)
+
+// 🔧 수정됨: 전역 에러 핸들러를 서버 시작 전에 등록 (서버 크래시 방지)
+process.on('uncaughtException', (error) => {
+  console.error('❌ [Uncaught Exception]:', error.message)
+  console.error('스택:', error.stack)
+  
+  // 작업 상태 저장
+  saveActiveJobsState()
+  
+  // 서버 종료하지 않고 계속 실행 (렌더링 작업 유지)
+  // 단, 에러 로그만 기록
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ [Unhandled Rejection]:', reason)
+  console.error('Promise:', promise)
+  
+  // 작업 상태 저장
+  saveActiveJobsState()
+  
+  // 서버 종료하지 않고 계속 실행
+})
+
+// 서버 종료 시 작업 상태 저장
+process.on('SIGTERM', () => {
+  console.log('⚠️ SIGTERM 신호 수신 - 작업 상태 저장 중...')
+  saveActiveJobsState()
+  process.exit(0)
+})
+
+process.on('SIGINT', () => {
+  console.log('⚠️ SIGINT 신호 수신 - 작업 상태 저장 중...')
+  saveActiveJobsState()
+  process.exit(0)
+})
+
+process.on('exit', (code) => {
+  console.log(`⚠️ 프로세스 종료 (코드: ${code}) - 작업 상태 저장 중...`)
+  saveActiveJobsState()
+})
 
 // 검증 함수들
 const validateFileIntegrity = async (filePath) => {
@@ -376,8 +460,7 @@ app.get('/api/supabase/storage/list/:bucket/*', async (req, res) => {
 // WebP 이미지 API는 별도 서버로 이동됨 (포트 3004)
 // 이 엔드포인트는 제거됨 - server/webp-image-api.js 사용
 
-// 렌더링 작업 관리
-const activeJobs = new Map()
+// activeJobs는 위에서 이미 선언됨
 
 // 자동 복구 시스템 상태 관리
 const autoRecoveryStatus = {
@@ -416,7 +499,16 @@ const conversionProgress = new Map()
 // 렌더링 시작 API
 app.post('/api/synthetic/start-rendering', async (req, res) => {
   try {
-    const { mode, partId, setNum, imageCount } = req.body
+    // 🔧 수정됨: 세트 렌더링 지원 (setNumber, renderType 매핑)
+    let { mode, partId, setNum, setNumber, renderType, imageCount } = req.body
+    
+    // setNumber와 renderType이 있으면 mode와 setNum으로 변환
+    if (setNumber && renderType === 'set') {
+      mode = 'set'
+      setNum = setNumber
+      console.log(`🎯 세트 렌더링 모드 감지: setNum=${setNum}`)
+    }
+    
     // Blender 스크립트 인수 호환: medium -> normal 매핑
     const qualityRaw = req.body.quality
     const quality = qualityRaw === 'medium' ? 'normal' : qualityRaw
@@ -426,7 +518,12 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
       id: jobId,
       status: 'running',
       progress: 0,
-      config: req.body,
+      config: {
+        ...req.body,
+        mode,  // 🔧 수정됨: 명시적으로 설정
+        setNum,  // 🔧 수정됨: 명시적으로 설정
+        partId  // 🔧 수정됨: 명시적으로 설정
+      },
       startTime: new Date(),
       logs: []
     }
@@ -434,10 +531,24 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
     activeJobs.set(jobId, job)
     
     // 실제 Blender 렌더링 시작
-    console.log('🎨 실제 Blender 렌더링 시작:', { partId, imageCount, quality })
+    console.log('🎨 실제 Blender 렌더링 시작:', { mode, partId, setNum, imageCount, quality })
     
     // Blender 렌더링 프로세스 시작
-    startBlenderRendering(job)
+    // 🔧 수정됨: async 함수를 안전하게 호출 (서버 크래시 방지)
+    startBlenderRendering(job).catch(error => {
+      console.error('❌ [startBlenderRendering 에러]:', error)
+      job.status = 'failed'
+      job.logs.push({
+        timestamp: new Date(),
+        message: `렌더링 시작 실패: ${error.message}`,
+        type: 'error'
+      })
+      // 작업 상태 저장
+      saveActiveJobsState()
+    })
+    
+    // 작업 시작 시 즉시 상태 저장
+    saveActiveJobsState()
     
     res.json({
       success: true,
@@ -1003,24 +1114,158 @@ async function ensureFetch() {
   return safeFetch
 }
 
-// Rebrickable에서 elementId → part/color 해석
+// elementId → part/color 해석 (데이터베이스 우선, Rebrickable API fallback)
 async function resolveElementToPartAndColor(elementId) {
   try {
+    console.log(`🔍 elementId 해석 시작: ${elementId}`)
+    
+    // 1. 먼저 set_parts 테이블에서 조회 (성공 로직)
+    console.log('📊 set_parts 테이블에서 elementId 조회 중...')
+    try {
+      const { data: setPartData, error: setPartError } = await supabase
+        .from('set_parts')
+        .select(`
+          element_id,
+          part_id,
+          lego_parts(part_num, name),
+          lego_colors(id, name, rgb)
+        `)
+        .eq('element_id', elementId)
+        .limit(1)
+      
+      if (setPartError) {
+        console.error('❌ set_parts 조회 오류:', setPartError)
+      } else if (setPartData && setPartData.length > 0) {
+        const setPart = setPartData[0]
+        console.log(`✅ set_parts에서 발견: elementId ${elementId} → partId ${setPart.part_id}`)
+        
+        // elementId는 색상 정보가 포함된 고유 식별자
+        // set_parts 테이블에서 색상 정보 추출
+        const colorId = setPart.lego_colors ? setPart.lego_colors.id : null
+        const colorName = setPart.lego_colors ? setPart.lego_colors.name : 'unknown'
+        const colorRgb = setPart.lego_colors ? setPart.lego_colors.rgb : null
+        
+        // RGB 값을 Blender에서 사용할 수 있는 형태로 변환 (# 제거 처리)
+        let blenderRgba = null
+        if (colorRgb) {
+          // # 제거하고 6자리 HEX 확인
+          const cleanRgb = colorRgb.replace(/^#/, '')
+          if (cleanRgb.length === 6 && /^[0-9A-Fa-f]{6}$/.test(cleanRgb)) {
+            const r = parseInt(cleanRgb.substring(0, 2), 16) / 255
+            const g = parseInt(cleanRgb.substring(2, 4), 16) / 255
+            const b = parseInt(cleanRgb.substring(4, 6), 16) / 255
+          blenderRgba = [r, g, b, 1.0]
+            console.log(`🎨 RGB 변환 성공: ${colorRgb} → [${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)}, 1.0]`)
+          } else {
+            console.log(`⚠️ RGB 형식 오류: ${colorRgb} (예상: 6자리 HEX)`)
+          }
+        }
+        
+        console.log(`🎨 elementId 색상 정보: colorId=${colorId}, colorName="${colorName}", rgb=${colorRgb}`)
+        console.log(`🎨 Blender RGBA: ${blenderRgba ? JSON.stringify(blenderRgba) : 'null'}`)
+        
+        return { 
+          partId: setPart.part_id, 
+          colorId: null, // 숫자 ID 대신 RGB 직접 사용
+          colorName: colorName,
+          colorRgb: colorRgb,
+          blenderRgba: blenderRgba, // Blender에서 직접 사용할 RGBA 값
+          originalColorId: colorId // 원본 UUID 보존
+        }
+      } else {
+        console.log('📭 set_parts에서 elementId를 찾을 수 없음')
+      }
+    } catch (setPartError) {
+      console.error('💥 set_parts 조회 실패:', setPartError)
+    }
+    
+    // 2. set_parts에서 찾지 못한 경우 parts_master에서 조회
+    console.log('📊 parts_master 테이블에서 elementId 조회 중...')
+    try {
+      const { data: partData, error: dbError } = await supabase
+        .from('parts_master')
+        .select('part_id, element_id')
+        .eq('element_id', elementId)
+        .limit(1)
+      
+      if (dbError) {
+        console.error('❌ parts_master 조회 오류:', dbError)
+      } else if (partData && partData.length > 0) {
+        const part = partData[0]
+        console.log(`✅ parts_master에서 발견: partId=${part.part_id}`)
+        
+        return { 
+          partId: part.part_id, 
+          colorId: null 
+        }
+      } else {
+        console.log('📭 parts_master에서도 elementId를 찾을 수 없음')
+      }
+    } catch (dbError) {
+      console.error('💥 parts_master 조회 실패:', dbError)
+    }
+    
+    // 2. 데이터베이스에서 찾지 못한 경우 Rebrickable API 시도
+    console.log('🌐 Rebrickable API 조회 시도...')
+    
+    // 환경 변수 로드 시도
+    try {
+      const { config } = await import('dotenv')
+      config({ path: path.join(__dirname, '..', 'config', 'synthetic_dataset.env') })
+    } catch (e) {
+      console.log('⚠️ dotenv 로드 실패, 기본 환경변수 사용')
+    }
+    
     const apiKey = process.env.VITE_REBRICKABLE_API_KEY
-    if (!apiKey) return null
+    console.log(`🔑 API 키 존재 여부: ${!!apiKey}`)
+    console.log(`🔑 API 키 미리보기: ${apiKey ? apiKey.substring(0, 8) + '...' : '없음'}`)
+    
+    if (!apiKey || apiKey === 'your-rebrickable-api-key-here') {
+      console.log('⚠️ Rebrickable API 키가 설정되지 않음, fallback 모드로 전환')
+      return null
+    }
+    
     const url = `https://rebrickable.com/api/v3/lego/elements/${encodeURIComponent(elementId)}/?key=${apiKey}`
+    console.log(`🌐 API URL: ${url.replace(apiKey, 'API_KEY_HIDDEN')}`)
+    
     const f = await ensureFetch()
-    if (!f) return null
+    if (!f) {
+      console.error('❌ fetch 함수를 사용할 수 없습니다')
+      return null
+    }
+    
+    console.log('📡 API 요청 전송 중...')
     const res = await f(url, { headers: { 'Accept': 'application/json' } })
-    if (!res.ok) return null
+    console.log(`📡 API 응답 상태: ${res.status} ${res.statusText}`)
+    
+    if (!res.ok) {
+      const errorText = await res.text()
+      console.error(`❌ API 응답 오류: ${res.status} - ${errorText}`)
+      return null
+    }
+    
     const json = await res.json()
+    console.log('📄 API 응답 데이터:', JSON.stringify(json, null, 2))
+    
     // 응답 예: { part: { part_num }, color: { id } }
     const p = json?.part?.part_num
     const c = json?.color?.id
-    if (p && Number.isInteger(c)) return { partId: p, colorId: c }
+    console.log(`🔍 파싱된 데이터 - partId: ${p}, colorId: ${c}`)
+    
+    if (p && Number.isInteger(c)) {
+      console.log(`✅ Rebrickable API에서 elementId ${elementId} 해석 성공: partId=${p}, colorId=${c}`)
+      return { partId: p, colorId: c }
+    }
+    
+    console.error(`❌ 유효하지 않은 API 응답 형식: partId=${p}, colorId=${c}`)
     return null
   } catch (e) {
-    console.error('element 해석 실패:', e)
+    console.error('💥 element 해석 실패:', e)
+    console.error('📊 오류 타입:', e.name)
+    console.error('📊 오류 메시지:', e.message)
+    if (e.stack) {
+      console.error('📊 스택 트레이스:', e.stack)
+    }
     return null
   }
 }
@@ -1073,7 +1318,7 @@ async function resolveColorHex(colorId) {
 // Blender 렌더링 프로세스 시작
 async function startBlenderRendering(job) {
   const { mode, partId, setNum, imageCount } = job.config
-  const quality = job.config.quality === 'medium' ? 'normal' : job.config.quality
+  const quality = job.config.quality ? (job.config.quality === 'medium' ? 'normal' : job.config.quality) : 'high' // 🔧 수정됨
   const background = job.config.background || 'white'
   // 정밀도 모드: 흰 배경일 때 Standard 강제, gray는 Filmic
   const colorManagement = 'standard'
@@ -1083,23 +1328,468 @@ async function startBlenderRendering(job) {
   let colorId = job.config.colorId
   let effectivePartId = partId
   let displayPartId = partId
+  let resolved = null // 🔧 수정됨: resolved 변수를 함수 스코프로 이동
+
+  // 🔧 수정됨: 세트 렌더링 모드 처리
+  if (mode === 'set' && setNum) {
+    console.log(`🎯 세트 렌더링 모드: setNum=${setNum}`)
+    job.logs.push({ timestamp: new Date(), type: 'info', message: `세트 ${setNum} 렌더링 시작...` })
+    
+    try {
+      // 세트 번호 정규화 (예: "76917" → "76917-1")
+      let normalizedSetNum = setNum.trim()
+      if (!normalizedSetNum.includes('-')) {
+        normalizedSetNum = `${normalizedSetNum}-1`
+      }
+      
+      // lego_sets 테이블에서 세트 조회
+      let legoSet = null
+      const { data: setData, error: setError } = await supabase
+        .from('lego_sets')
+        .select('id, set_num, name')
+        .eq('set_num', normalizedSetNum)
+        .limit(1)
+        .maybeSingle()
+      
+      if (setError || !setData) {
+        // base 번호로 재시도
+        const baseNum = normalizedSetNum.split('-')[0]
+        const { data: baseData } = await supabase
+          .from('lego_sets')
+          .select('id, set_num, name')
+          .eq('set_num', `${baseNum}-1`)
+          .limit(1)
+          .maybeSingle()
+        
+        if (baseData) legoSet = baseData
+      } else {
+        legoSet = setData
+      }
+      
+      if (!legoSet) {
+        job.status = 'failed'
+        job.logs.push({ timestamp: new Date(), type: 'error', message: `세트 ${setNum}를 찾을 수 없습니다.` })
+        return
+      }
+      
+      job.logs.push({ timestamp: new Date(), type: 'info', message: `✅ 세트 발견: ${legoSet.set_num} - ${legoSet.name}` })
+      
+      // set_parts 테이블에서 세트의 모든 부품 조회
+      const { data: setPartsData, error: partsError } = await supabase
+        .from('set_parts')
+        .select(`
+          element_id,
+          part_id,
+          quantity,
+          lego_parts(part_num, name),
+          lego_colors(id, name, rgb)
+        `)
+        .eq('set_id', legoSet.id)
+      
+      if (partsError || !setPartsData || setPartsData.length === 0) {
+        job.status = 'failed'
+        job.logs.push({ timestamp: new Date(), type: 'error', message: `세트 ${setNum}의 부품을 찾을 수 없습니다.` })
+        return
+      }
+      
+      job.logs.push({ timestamp: new Date(), type: 'info', message: `📦 세트 부품 ${setPartsData.length}개 발견` })
+      
+      // 🔧 수정됨: 한 개씩 순차 처리 (가장 안전한 방식)
+      // 동일 부품 엘리먼트아이디 및 파트넘버 중복 방지
+      const processedKeys = new Set()
+      const results = {
+        completed: 0,
+        failed: 0,
+        errors: []
+      }
+      
+      job.logs.push({ timestamp: new Date(), type: 'info', message: `🚀 ${setPartsData.length}개 부품 순차 렌더링 시작` })
+      
+      // 한 개씩 순차 처리
+      for (let i = 0; i < setPartsData.length; i++) {
+        const setPart = setPartsData[i]
+        const elementId = setPart.element_id
+        const partId = setPart.part_id
+        
+        if (!elementId && !partId) {
+          console.warn(`⚠️ 부품 정보 누락: elementId=${elementId}, partId=${partId}`)
+          continue
+        }
+        
+        // 중복 체크
+        const dedupeKey = elementId || partId
+        if (processedKeys.has(dedupeKey)) {
+          job.logs.push({ 
+            timestamp: new Date(), 
+            type: 'info', 
+            message: `⏭ 중복 부품 건너뜀: ${setPart.lego_parts?.name || partId} (${elementId ? `elementId: ${elementId}` : `partId: ${partId}`})` 
+          })
+          continue
+        }
+        
+        processedKeys.add(dedupeKey)
+        
+        // 색상 정보 추출 (데이터베이스에서 가져온 RGB 값)
+        let colorRgba = null
+        if (setPart.lego_colors && setPart.lego_colors.rgb) {
+          const colorRgb = setPart.lego_colors.rgb
+          const cleanRgb = colorRgb.replace(/^#/, '')
+          if (cleanRgb.length === 6 && /^[0-9A-Fa-f]{6}$/.test(cleanRgb)) {
+            const r = parseInt(cleanRgb.substring(0, 2), 16) / 255
+            const g = parseInt(cleanRgb.substring(2, 4), 16) / 255
+            const b = parseInt(cleanRgb.substring(4, 6), 16) / 255
+            colorRgba = [r, g, b, 1.0]
+            console.log(`🎨 세트 부품 색상 정보: ${colorRgb} → RGBA [${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)}, 1.0]`)
+          }
+        }
+        
+        // 부품 렌더링 작업 생성 및 즉시 실행
+        const partJobId = `job_${Date.now()}_${elementId || partId}_${Math.random().toString(36).substr(2, 9)}`
+        const partJob = {
+          id: partJobId,
+          status: 'running',
+          progress: 0,
+          config: {
+            mode: 'part',
+            partId: partId,
+            elementId: elementId,
+            imageCount: imageCount || 200,
+            quality: quality,
+            background: background,
+            resolution: resolution,
+            targetFill: targetFill,
+            colorRgba: colorRgba // 🔧 수정됨: 데이터베이스에서 가져온 색상 정보 저장
+          },
+          startTime: new Date(),
+          logs: [{
+            timestamp: new Date(),
+            type: 'info',
+            message: `부품 렌더링 중: ${setPart.lego_parts?.name || partId} (elementId: ${elementId}) - ${i + 1}/${setPartsData.length}`
+          }]
+        }
+        
+        activeJobs.set(partJobId, partJob)
+        
+        try {
+          job.logs.push({ 
+            timestamp: new Date(), 
+            type: 'info', 
+            message: `📦 부품 ${i + 1}/${setPartsData.length} 렌더링 시작: ${setPart.lego_parts?.name || partId}` 
+          })
+          
+          // 🔧 수정됨: 한 개씩 순차 렌더링 및 완료 대기
+          await startBlenderRendering(partJob)
+          
+          // 렌더링 완료까지 대기 (최대 20분)
+          const maxWaitTime = 20 * 60 * 1000
+          const startTime = Date.now()
+          
+          while (partJob.status === 'running' && (Date.now() - startTime) < maxWaitTime) {
+            await new Promise(resolve => setTimeout(resolve, 3000)) // 3초마다 체크
+            
+            // 프로세스가 종료되었는지 확인
+            if (partJob.blenderProcess && partJob.blenderProcess.exitCode !== null) {
+              break
+            }
+          }
+          
+          // 최종 상태 확인
+          if (partJob.status === 'completed') {
+            results.completed++
+            job.logs.push({ 
+              timestamp: new Date(), 
+              type: 'success', 
+              message: `✅ 부품 ${i + 1}/${setPartsData.length} 완료: ${setPart.lego_parts?.name || partId}` 
+            })
+          } else if (partJob.status === 'failed') {
+            results.failed++
+            results.errors.push({
+              partId: partJob.config.partId,
+              elementId: partJob.config.elementId,
+              error: '렌더링 실패 또는 타임아웃'
+            })
+            job.logs.push({ 
+              timestamp: new Date(), 
+              type: 'error', 
+              message: `❌ 부품 ${i + 1}/${setPartsData.length} 실패: ${setPart.lego_parts?.name || partId}` 
+            })
+          }
+          
+          // 작업 정보 삭제 (메모리 정리)
+          setTimeout(() => {
+            activeJobs.delete(partJobId)
+          }, 60000) // 1분 후 삭제
+          
+        } catch (renderError) {
+          console.error(`❌ 부품 렌더링 실패 (${partJob.id}):`, renderError)
+          partJob.status = 'failed'
+          results.failed++
+          results.errors.push({
+            partId: partJob.config.partId,
+            elementId: partJob.config.elementId,
+            error: renderError?.message || String(renderError)
+          })
+          job.logs.push({ 
+            timestamp: new Date(), 
+            type: 'error', 
+            message: `❌ 부품 ${i + 1}/${setPartsData.length} 렌더링 오류: ${renderError.message}` 
+          })
+          // 에러 발생해도 다음 부품 계속 처리
+        }
+        
+        // 다음 부품 처리 전 잠시 대기 (시스템 안정화)
+        if (i < setPartsData.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000)) // 2초 대기
+        }
+      }
+      
+      job.status = 'completed'
+      job.progress = 100
+      job.logs.push({ 
+        timestamp: new Date(), 
+        type: 'success', 
+        message: `✅ 세트 ${setNum} 렌더링 완료 (성공: ${results.completed}개, 실패: ${results.failed}개)` 
+      })
+      
+      if (results.failed > 0) {
+        job.logs.push({ 
+          timestamp: new Date(), 
+          type: 'warning', 
+          message: `⚠️ ${results.failed}개 부품 렌더링 실패. 자세한 내용은 로그를 확인하세요.` 
+        })
+      }
+      
+      // 🔧 수정됨: 세트 렌더링 완료 후 전체 데이터셋 train/val 분할 실행
+      try {
+        console.log('📊 세트 렌더링 완료 - 전체 데이터셋 train/val 분할 시작...')
+        job.logs.push({
+          timestamp: new Date(),
+          message: '전체 데이터셋 train/val 분할 시작 (세트 렌더링 완료)',
+          type: 'info'
+        })
+        
+        const prepareProcess = spawn('python', [
+          path.join(__dirname, '..', 'scripts', 'prepare_training_dataset.py'),
+          '--source', path.join(__dirname, '..', 'output', 'synthetic'),
+          '--output', path.join(__dirname, '..', 'output', 'synthetic', 'dataset_synthetic')
+        ], {
+          cwd: path.join(__dirname, '..'),
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PYTHONIOENCODING: 'utf-8',
+            LANG: 'ko_KR.UTF-8',
+            LC_ALL: 'ko_KR.UTF-8',
+            PYTHONUTF8: '1'
+          }
+        })
+        
+        let prepareOutput = ''
+        let prepareError = ''
+        
+        prepareProcess.stdout.on('data', (data) => {
+          const message = data.toString('utf8').trim()
+          if (message) {
+            console.log(`[Dataset Prepare] ${message}`)
+            prepareOutput += message + '\n'
+            job.logs.push({
+              timestamp: new Date(),
+              message: `[Dataset Prepare] ${message}`,
+              type: 'info'
+            })
+          }
+        })
+        
+        prepareProcess.stderr.on('data', (data) => {
+          const message = data.toString('utf8').trim()
+          if (message) {
+            console.error(`[Dataset Prepare Error] ${message}`)
+            prepareError += message + '\n'
+          }
+        })
+        
+        prepareProcess.on('close', async (prepareCode) => {
+          if (prepareCode === 0) {
+            console.log('✅ 전체 데이터셋 train/val 분할 완료')
+            job.logs.push({
+              timestamp: new Date(),
+              message: '전체 데이터셋 train/val 분할 완료',
+              type: 'success'
+            })
+          } else {
+            console.warn(`⚠️ 데이터셋 분할 실패 (코드: ${prepareCode})`)
+            job.logs.push({
+              timestamp: new Date(),
+              message: `데이터셋 분할 실패 (코드: ${prepareCode})`,
+              type: 'warning'
+            })
+          }
+          
+          // 🔧 수정됨: 자동 학습 활성화 확인 및 트리거 (세트 렌더링 완료 시)
+          try {
+            const { data: autoTrainingConfig, error: configError } = await supabase
+              .from('automation_config')
+              .select('config_value')
+              .eq('config_key', 'auto_training_enabled')
+              .eq('is_active', true)
+              .maybeSingle()
+            
+            const configValue = autoTrainingConfig?.config_value
+            const autoTrainingEnabled = !configError && (
+              configValue === 'true' || 
+              configValue === true || 
+              (typeof configValue === 'object' && configValue !== null && configValue.value === true)
+            )
+            
+            if (autoTrainingEnabled) {
+              console.log('🤖 자동 학습 활성화됨 - 세트 렌더링 완료 후 학습 트리거 시작...')
+              job.logs.push({
+                timestamp: new Date(),
+                message: '자동 학습 트리거 시작 (세트 렌더링 완료)',
+                type: 'info'
+              })
+              
+              // 자동 학습 트리거
+              try {
+                const triggerResponse = await fetch(`${process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'}/functions/v1/auto-training-trigger`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_SERVICE_ROLE || ''}`
+                  },
+                  body: JSON.stringify({
+                    job_id: job.id,
+                    set_num: setNum,
+                    completed_parts: results.completed,
+                    failed_parts: results.failed
+                  })
+                })
+                
+                if (triggerResponse.ok) {
+                  const triggerResult = await triggerResponse.json()
+                  console.log('✅ 자동 학습 트리거 성공 (세트):', triggerResult)
+                  job.logs.push({
+                    timestamp: new Date(),
+                    message: `자동 학습 트리거 완료: ${triggerResult.message || '성공'}`,
+                    type: 'success'
+                  })
+                } else {
+                  console.warn('⚠️ 자동 학습 트리거 실패 (세트):', await triggerResponse.text())
+                  job.logs.push({
+                    timestamp: new Date(),
+                    message: '자동 학습 트리거 실패 (수동 실행 필요)',
+                    type: 'warning'
+                  })
+                }
+              } catch (triggerError) {
+                console.error('❌ 자동 학습 트리거 오류 (세트):', triggerError)
+                job.logs.push({
+                  timestamp: new Date(),
+                  message: `자동 학습 트리거 오류: ${triggerError.message}`,
+                  type: 'warning'
+                })
+              }
+            } else {
+              console.log('⏸️ 자동 학습 비활성화됨 또는 설정 없음')
+            }
+          } catch (autoTrainError) {
+            console.error('❌ 자동 학습 설정 확인 실패:', autoTrainError)
+          }
+        })
+      } catch (datasetSplitError) {
+        console.error('❌ 데이터셋 분할 시작 실패:', datasetSplitError)
+        job.logs.push({
+          timestamp: new Date(),
+          message: `데이터셋 분할 시작 실패: ${datasetSplitError.message}`,
+          type: 'warning'
+        })
+      }
+      
+      return
+      
+    } catch (error) {
+      console.error('💥 세트 렌더링 오류:', error)
+      job.status = 'failed'
+      job.logs.push({ timestamp: new Date(), type: 'error', message: `세트 렌더링 실패: ${error.message}` })
+      return
+    }
+  }
 
   if (job.config.elementId && typeof job.config.elementId === 'string') {
     const raw = job.config.elementId.trim()
     const m = raw.match(/^([A-Za-z0-9]+)[-_](\d+)$/)
     if (m) {
       effectivePartId = m[1]
-      colorId = parseInt(m[2], 10)
+      const extractedColorId = parseInt(m[2], 10)
+      colorId = extractedColorId
+      job.logs.push({ timestamp: new Date(), type: 'info', message: `element ${raw} → part ${effectivePartId}, color ${colorId} (패턴 매칭)` })
+      
+      // 🔧 수정됨: 패턴 매칭 시 colorId로부터 데이터베이스에서 RGB 조회
+      try {
+        const { data: colorData, error: colorError } = await supabase
+          .from('lego_colors')
+          .select('rgb, name')
+          .eq('color_id', extractedColorId) // 🔧 수정됨: color_id로 조회 (id는 UUID, color_id는 integer)
+          .limit(1)
+          .maybeSingle()
+        
+        if (!colorError && colorData && colorData.rgb) {
+          const colorRgb = colorData.rgb
+          const cleanRgb = colorRgb.replace(/^#/, '')
+          if (cleanRgb.length === 6 && /^[0-9A-Fa-f]{6}$/.test(cleanRgb)) {
+            const r = parseInt(cleanRgb.substring(0, 2), 16) / 255
+            const g = parseInt(cleanRgb.substring(2, 4), 16) / 255
+            const b = parseInt(cleanRgb.substring(4, 6), 16) / 255
+            resolved = {
+              partId: effectivePartId,
+              colorId: extractedColorId,
+              colorName: colorData.name || 'unknown',
+              colorRgb: colorRgb,
+              blenderRgba: [r, g, b, 1.0]
+            }
+            console.log(`🎨 패턴 매칭 색상 정보 조회 성공: ${colorRgb} → RGBA [${r.toFixed(3)}, ${g.toFixed(3)}, ${b.toFixed(3)}, 1.0]`)
+            job.logs.push({ timestamp: new Date(), type: 'info', message: `색상 정보 조회: ${colorData.name || 'unknown'} (${colorRgb})` })
+          }
+        } else if (colorError) {
+          console.warn(`⚠️ colorId ${extractedColorId} 조회 실패: ${colorError.message}`)
+        }
+      } catch (colorLookupError) {
+        console.error(`❌ colorId 색상 조회 오류: ${colorLookupError}`)
+      }
     } else if (/^\d+$/.test(raw)) {
-      const resolved = await resolveElementToPartAndColor(raw)
+      console.log(`🔍 숫자형 elementId 감지: ${raw}`)
+      resolved = await resolveElementToPartAndColor(raw) // 🔧 수정됨: const 제거
       if (resolved) {
         effectivePartId = resolved.partId
         colorId = resolved.colorId
-        job.logs.push({ timestamp: new Date(), type: 'info', message: `element ${raw} → part ${effectivePartId}, color ${colorId}` })
+        job.logs.push({ timestamp: new Date(), type: 'info', message: `element ${raw} → part ${effectivePartId}, color ${colorId} (API 조회)` })
       } else {
-        job.status = 'failed'
-        job.logs.push({ timestamp: new Date(), type: 'error', message: `elementId(${raw}) 해석 실패. Rebrickable API 키/네트워크 확인.` })
-        return
+        // API 조회 실패 시 fallback: elementId를 그대로 partId로 사용
+        console.log(`⚠️ API 조회 실패, fallback 모드로 전환: elementId ${raw}를 partId로 사용`)
+        effectivePartId = raw
+        colorId = null // 색상 정보 없음
+        job.logs.push({ timestamp: new Date(), type: 'warning', message: `elementId(${raw}) API 조회 실패. elementId를 partId로 사용합니다.` })
+        job.logs.push({ timestamp: new Date(), type: 'info', message: `fallback: element ${raw} → part ${effectivePartId} (색상 정보 없음)` })
+        
+        // 데이터베이스에서 직접 조회 시도 (Supabase 클라이언트 사용)
+        console.log('🔄 데이터베이스 직접 조회 시도...')
+        try {
+          const { data: directData, error: directError } = await supabase
+            .from('parts_master')
+            .select('part_id')
+            .eq('element_id', raw)
+            .limit(1)
+          
+          if (!directError && directData && directData.length > 0) {
+            effectivePartId = directData[0].part_id
+            console.log(`✅ 데이터베이스 직접 조회 성공: elementId ${raw} → partId ${effectivePartId}`)
+            job.logs.push({ timestamp: new Date(), type: 'success', message: `데이터베이스 직접 조회 성공: elementId ${raw} → partId ${effectivePartId}` })
+          } else {
+            console.log(`❌ 데이터베이스 직접 조회 실패: ${directError?.message || '데이터 없음'}`)
+          }
+        } catch (directError) {
+          console.error('💥 데이터베이스 직접 조회 오류:', directError)
+        }
       }
     }
   }
@@ -1135,13 +1825,14 @@ async function startBlenderRendering(job) {
     || process.env.SUPABASE_SERVICE_KEY_JWT
     || process.env.VITE_SUPABASE_ANON_KEY
 
+  const safeImageCount = Number.isFinite(Number(imageCount)) && Number(imageCount) > 0 ? Number(imageCount) : 200 // 🔧 수정됨: 기술문서 기준 부품당 200장
   const args = [
     '--background',
     '--python', scriptPath,
     '--',
     '--part-id', effectivePartId,
-    '--count', imageCount.toString(),
-    '--quality', quality,
+    '--count', String(safeImageCount), // 🔧 수정됨
+    '--quality', String(quality), // 🔧 수정됨
     '--samples', String(samples),
     '--background', background,
     '--ldraw-path', ldrawPath,
@@ -1154,6 +1845,28 @@ async function startBlenderRendering(job) {
     '--supabase-url', process.env.VITE_SUPABASE_URL,
     '--supabase-key', blenderSupabaseKey
   ]
+
+  // elementId의 색상 정보를 Blender로 전달
+  if (job.config.elementId && colorId !== null && colorId !== undefined) {
+    args.push('--color-id', String(colorId))
+    console.log(`🎨 elementId 색상 정보 전달: colorId=${colorId}`)
+  }
+  
+  // RGB 색상 정보도 전달 (Blender에서 직접 사용)
+  // 🔧 수정됨: 우선순위 1) job.config.colorRgba (세트 렌더링에서 전달), 2) resolved.blenderRgba (elementId 조회 결과)
+  let colorRgbaToSend = null
+  if (job.config.colorRgba && Array.isArray(job.config.colorRgba) && job.config.colorRgba.length >= 3) {
+    colorRgbaToSend = job.config.colorRgba
+    console.log(`🎨 세트 렌더링 색상 정보 사용: RGBA [${colorRgbaToSend.join(', ')}]`)
+  } else if (job.config.elementId && resolved && resolved.blenderRgba) {
+    colorRgbaToSend = resolved.blenderRgba
+    console.log(`🎨 Element ID 조회 색상 정보 사용: RGBA [${colorRgbaToSend.join(', ')}]`)
+  }
+  
+  if (colorRgbaToSend) {
+    args.push('--color-rgba', `${colorRgbaToSend[0]},${colorRgbaToSend[1]},${colorRgbaToSend[2]},${colorRgbaToSend[3] || 1.0}`)
+    console.log(`🎨 Blender RGBA 전달: [${colorRgbaToSend.join(', ')}]`)
+  }
 
   // 디버그: 민감정보 노출 없이 전달 여부만 로깅
   try {
@@ -1174,20 +1887,73 @@ async function startBlenderRendering(job) {
         args.push('--color-hex', colorHex)
       }
     } catch {}
+  } else if (colorId === null) {
+    console.log('ℹ️ colorId가 null입니다. elementId는 색상 정보가 없으므로 기본 회색으로 렌더링합니다')
+    // colorId가 null인 경우 Blender에서 기본 회색을 사용하도록 함 (랜덤 색상 금지)
   }
   
-  console.log('Blender 렌더링 시작:', blenderPath, args.join(' '))
+  console.log('🎨 Blender 렌더링 시작:', blenderPath, args.join(' '))
+  console.log('📁 작업 디렉토리:', path.join(__dirname, '..'))
+  console.log('🔧 Blender 경로 존재 여부:', fs.existsSync(blenderPath))
   
-  const blenderProcess = spawn(blenderPath, args, {
-    cwd: path.join(__dirname, '..')
-  })
+  // Blender 실행 전 환경 확인
+  try {
+    const scriptExists = fs.existsSync(scriptPath)
+    const outputDirExists = fs.existsSync(path.dirname(args.find(arg => arg.startsWith('--output-dir'))?.split(' ')[1] || './output'))
+    
+    console.log('📄 스크립트 파일 존재:', scriptExists)
+    console.log('📁 출력 디렉토리 존재:', outputDirExists)
+    
+    if (!scriptExists) {
+      throw new Error(`Blender 스크립트 파일을 찾을 수 없습니다: ${scriptPath}`)
+    }
+  } catch (envError) {
+    console.error('❌ 환경 확인 실패:', envError)
+    job.status = 'failed'
+    job.logs.push({
+      timestamp: new Date(),
+      message: `환경 확인 실패: ${envError.message}`,
+      type: 'error'
+    })
+    return
+  }
+  
+  let blenderProcess
+  try {
+    // 🔧 수정됨: Blender 경로 존재 확인
+    if (!fs.existsSync(blenderPath)) {
+      throw new Error(`Blender 경로를 찾을 수 없습니다: ${blenderPath}`)
+    }
+    
+    blenderProcess = spawn(blenderPath, args, {
+      cwd: path.join(__dirname, '..'),
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      stdio: ['pipe', 'pipe', 'pipe'] // 🔧 수정됨: 명시적 stdio 설정
+    })
+    
+    if (!blenderProcess || !blenderProcess.pid) {
+      throw new Error('Blender 프로세스가 시작되지 않았습니다 (PID 없음)')
+    }
+    
+    console.log('✅ Blender 프로세스 시작됨 (PID:', blenderProcess.pid, ')')
+  } catch (spawnError) {
+    console.error('❌ Blender 프로세스 시작 실패:', spawnError)
+    job.status = 'failed'
+    job.logs.push({
+      timestamp: new Date(),
+      message: `Blender 프로세스 시작 실패: ${spawnError?.message || String(spawnError)}`,
+      type: 'error'
+    })
+    // 🔧 수정됨: 에러 발생해도 함수 반환 (서버 크래시 방지)
+    return
+  }
   
   job.blenderProcess = blenderProcess
   
   // 프로세스 출력 처리
   blenderProcess.stdout.on('data', (data) => {
     const output = data.toString()
-    console.log('Blender 출력:', output)
+    console.log('🎨 Blender 출력:', output.trim())
     
     // 진행률 파싱 (여러 패턴 시도)
     const progressPatterns = [
@@ -1203,24 +1969,29 @@ async function startBlenderRendering(job) {
         const progress = parseInt(match[1])
         if (progress > job.progress) {
           job.progress = Math.min(progress, 100)
+          console.log(`📊 진행률 업데이트: ${job.progress}%`)
         }
         break
       }
     }
     
-    // 로그 추가 (중요한 메시지만)
-    if (output.includes('렌더링') || output.includes('완료') || output.includes('오류') || output.includes('error')) {
-      job.logs.push({
-        timestamp: new Date(),
-        message: output.trim(),
-        type: output.includes('오류') || output.includes('error') ? 'error' : 'info'
-      })
+    // 모든 출력을 로그에 추가 (디버깅용)
+    job.logs.push({
+      timestamp: new Date(),
+      message: output.trim(),
+      type: output.includes('오류') || output.includes('error') || output.includes('Error') ? 'error' : 
+             output.includes('완료') || output.includes('success') ? 'success' : 'info'
+    })
+    
+    // 중요한 메시지는 별도 로깅
+    if (output.includes('렌더링') || output.includes('완료') || output.includes('오류') || output.includes('error') || output.includes('Error')) {
+      console.log(`📝 중요 메시지: ${output.trim()}`)
     }
   })
   
   blenderProcess.stderr.on('data', (data) => {
     const error = data.toString()
-    console.error('Blender 오류:', error)
+    console.error('❌ Blender 오류:', error.trim())
     
     job.logs.push({
       timestamp: new Date(),
@@ -1229,18 +2000,43 @@ async function startBlenderRendering(job) {
     })
   })
   
-  blenderProcess.on('close', (code) => {
-    console.log(`Blender 프로세스 종료: ${code}`)
+  // 프로세스 오류 이벤트 처리
+  blenderProcess.on('error', (error) => {
+    console.error('💥 Blender 프로세스 오류:', error)
+    job.status = 'failed'
+    job.logs.push({
+      timestamp: new Date(),
+      message: `프로세스 오류: ${error.message}`,
+      type: 'error'
+    })
+    // 🔧 수정됨: 에러 발생해도 서버는 계속 실행 (다른 작업 유지)
+    // 이 에러는 해당 작업에만 영향
+  })
+  
+  blenderProcess.on('close', async (code) => {
+    try {
+    console.log(`🏁 Blender 프로세스 종료: 코드 ${code}`)
     
     if (code === 0) {
+      console.log('✅ 렌더링 성공적으로 완료')
       job.status = 'completed'
       job.progress = 100
       job.logs.push({
         timestamp: new Date(),
         message: '렌더링 완료',
-        type: 'success'
-      })
+          type: 'success'
+        })
+        
+        // 🔧 수정됨: 단일 부품 렌더링 완료 시에는 분할하지 않음 (세트 렌더링 완료 시에만 분할)
+        // 단일 부품은 세트가 아니므로 전체 분할을 실행하지 않음
+        if (job.config.mode !== 'set') {
+          console.log('📊 단일 부품 렌더링 완료 (세트가 아니므로 분할 건너뜀)')
+        } else {
+          // 세트 렌더링인 경우에는 세트 렌더링 완료 처리에서 분할하므로 여기서는 처리하지 않음
+          console.log('📊 세트 렌더링 중 부품 완료 (전체 세트 완료 후 분할 예정)')
+        }
     } else {
+      console.error(`❌ 렌더링 실패 - 종료 코드: ${code}`)
       job.status = 'failed'
       job.logs.push({
         timestamp: new Date(),
@@ -1251,8 +2047,22 @@ async function startBlenderRendering(job) {
     
     // 5분 후 작업 정보 삭제
     setTimeout(() => {
+      console.log(`🗑️ 작업 ${job.id} 정보 삭제`)
       activeJobs.delete(job.id)
     }, 5 * 60 * 1000)
+    } catch (closeHandlerError) {
+      // 🔧 수정됨: close 핸들러 내부 에러도 안전하게 처리
+      console.error('❌ [Blender close 핸들러 에러]:', closeHandlerError)
+      // 에러 발생해도 작업 상태는 업데이트 시도
+      if (job && job.status !== 'failed') {
+        job.status = 'failed'
+        job.logs.push({
+          timestamp: new Date(),
+          message: `프로세스 종료 처리 중 오류: ${closeHandlerError.message}`,
+          type: 'error'
+        })
+      }
+    }
   })
 }
 
@@ -1690,8 +2500,17 @@ const startServer = async () => {
     })
     
   } catch (error) {
-    console.error('서버 시작 실패:', error.message)
-    process.exit(1)
+    console.error('❌ 서버 시작 실패:', error.message)
+    console.error('스택:', error.stack)
+    console.error('⚠️ 포트가 이미 사용 중이거나 환경 설정 오류입니다.')
+    console.error('💡 해결 방법:')
+    console.error('   1. npm run cleanup:force')
+    console.error('   2. npm run dev:full')
+    // 🔧 수정됨: 시작 실패 시에만 종료 (런타임 에러는 전역 핸들러가 처리)
+    setTimeout(() => {
+      console.error('⚠️ 5초 후 종료합니다...')
+      process.exit(1)
+    }, 5000)
   }
 }
 
@@ -2408,7 +3227,7 @@ app.post('/api/synthetic/dataset/backup', async (req, res) => {
     const { description = '통합 처리 백업' } = req.body
     console.log('💾 백업 요청:', description)
     
-    const currentPath = path.join(__dirname, '..', 'output', 'datasets', 'current')
+    const currentPath = path.join(__dirname, '..', 'output', 'synthetic')
     const versionsDir = path.join(__dirname, '..', 'output', 'datasets')
     const versionMetadataPath = path.join(__dirname, '..', 'output', 'dataset_versions.json')
     
@@ -2514,7 +3333,8 @@ app.post('/api/synthetic/dataset/backup', async (req, res) => {
     
     const imageCount = await countFiles(path.join(newVersionPath, 'images'), '.webp')
     const labelCount = await countFiles(path.join(newVersionPath, 'labels'), '.txt')
-    const metadataCount = await countFiles(path.join(newVersionPath, 'metadata'), '.json')
+    const metadataCount = await countFiles(path.join(newVersionPath, 'meta'), '.json')
+    const metaECount = await countFiles(path.join(newVersionPath, 'meta-e'), '_e2.json')
     const datasetHash = await calculateDatasetHash(newVersionPath)
     
     // 버전 정보 저장
@@ -2530,7 +3350,8 @@ app.post('/api/synthetic/dataset/backup', async (req, res) => {
         images: imageCount,
         labels: labelCount,
         metadata: metadataCount,
-        total: imageCount + labelCount + metadataCount
+        meta_e: metaECount,
+        total: imageCount + labelCount + metadataCount + metaECount
       }
     }
     
@@ -2956,7 +3777,7 @@ app.get('/api/synthetic/dataset/data.yaml', async (req, res) => {
 
     // 정적 제공 베이스 URL (output 폴더는 /api/synthetic/static 아래에 노출됨)
     const host = req.headers.host
-    const baseUrl = `http://${host}/api/synthetic/static/synthetic`
+    const baseUrl = `http://${host}/api/synthetic/static`
 
     // 이미지 경로를 train/val로 구분 (manifest.files 키가 상대경로 포함)
     const fileEntries = Object.keys(manifest.files || {})
@@ -4112,6 +4933,268 @@ app.post('/api/synthetic/training/jobs/:jobId/cancel', async (req, res) => {
   }
 })
 
+// ===== Render Queue 관리 API =====
+
+// Render Queue 상태 조회
+app.get('/api/synthetic/queue/status', async (req, res) => {
+  try {
+    console.log('📊 Render Queue 상태 조회')
+    // Supabase 그룹 집계 호환 이슈를 피하기 위해 상태별 개별 카운트로 계산
+    const safeCount = async (filterStatus) => {
+      try {
+        let query = supabase
+          .from('render_queue')
+          .select('*', { count: 'exact', head: true })
+        if (filterStatus) query = query.eq('status', filterStatus)
+        const { count, error } = await query
+        if (error) throw error
+        return count || 0
+      } catch (e) {
+        console.warn('Render Queue 카운트 조회 실패(0으로 대체):', e?.message || e)
+        return 0
+      }
+    }
+
+    const [pending, processing, completed, failed, total] = await Promise.all([
+      safeCount('pending'),
+      safeCount('processing'),
+      safeCount('completed'),
+      safeCount('failed'),
+      safeCount(null)
+    ])
+
+    const stats = { pending, processing, completed, failed, total }
+
+    res.json({
+      success: true,
+      stats,
+      lastUpdated: new Date().toISOString()
+    })
+  } catch (error) {
+    console.error('Render Queue 상태 조회 실패:', error)
+    // 폴백: 500 대신 안전한 기본값으로 응답하여 UI가 동작하도록 유지
+    res.json({
+      success: true,
+      stats: { pending: 0, processing: 0, completed: 0, failed: 0, total: 0 },
+      lastUpdated: new Date().toISOString(),
+      warning: error?.message || String(error)
+    })
+  }
+})
+
+// Render Queue 작업 목록 조회
+app.get('/api/synthetic/queue/tasks', async (req, res) => {
+  try {
+    const { status = 'pending', limit = 50 } = req.query
+    console.log(`📋 Render Queue 작업 목록 조회: status=${status}, limit=${limit}`)
+    
+    let query = supabase
+      .from('render_queue')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(parseInt(limit))
+    
+    if (status !== 'all') {
+      query = query.eq('status', status)
+    }
+    
+    const { data: tasks, error } = await query
+    
+    if (error) {
+      throw error
+    }
+    
+    res.json({
+      success: true,
+      tasks: tasks || [],
+      count: tasks?.length || 0
+    })
+  } catch (error) {
+    console.error('Render Queue 작업 목록 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Render Queue 작업 목록 조회 실패',
+      error: error.message
+    })
+  }
+})
+
+// 실패한 작업 재처리 트리거
+app.post('/api/synthetic/queue/process', async (req, res) => {
+  try {
+    console.log('🔄 실패한 작업 재처리 트리거')
+    
+    // Python 스크립트 실행
+    const process = spawn('python', [
+      path.join(__dirname, '..', 'scripts', 'render_ldraw_to_supabase.py'),
+      '--process-failed-queue'
+    ], {
+      cwd: path.join(__dirname, '..'),
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    
+    let output = ''
+    let errorOutput = ''
+    
+    process.stdout.on('data', (data) => {
+      output += data.toString()
+      console.log('재처리 출력:', data.toString())
+    })
+    
+    process.stderr.on('data', (data) => {
+      errorOutput += data.toString()
+      console.error('재처리 에러:', data.toString())
+    })
+    
+    process.on('close', (code) => {
+      if (code === 0) {
+        res.json({
+          success: true,
+          message: '실패한 작업 재처리 완료',
+          output: output.trim()
+        })
+      } else {
+        res.status(500).json({
+          success: false,
+          message: '실패한 작업 재처리 실패',
+          error: errorOutput.trim(),
+          output: output.trim()
+        })
+      }
+    })
+    
+    process.on('error', (error) => {
+      console.error('재처리 프로세스 실행 실패:', error)
+      res.status(500).json({
+        success: false,
+        message: '재처리 프로세스 실행 실패',
+        error: error.message
+      })
+    })
+    
+  } catch (error) {
+    console.error('실패한 작업 재처리 트리거 실패:', error)
+    res.status(500).json({
+      success: false,
+      message: '실패한 작업 재처리 트리거 실패',
+      error: error.message
+    })
+  }
+})
+
+// ===== 에러 복구 로그 API =====
+
+// 에러 복구 로그 조회
+app.get('/api/synthetic/logs/error-recovery', async (req, res) => {
+  try {
+    const { 
+      errorType = 'all', 
+      limit = 100, 
+      offset = 0,
+      startDate,
+      endDate 
+    } = req.query
+    
+    console.log(`📋 에러 복구 로그 조회: errorType=${errorType}, limit=${limit}`)
+    
+    let query = supabase
+      .from('operation_logs')
+      .select('*')
+      .eq('metadata->>log_type', 'error_recovery')
+      .order('timestamp', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1)
+    
+    // 날짜 필터링
+    if (startDate) {
+      query = query.gte('timestamp', startDate)
+    }
+    if (endDate) {
+      query = query.lte('timestamp', endDate)
+    }
+    
+    const { data: logs, error } = await query
+    
+    if (error) {
+      throw error
+    }
+    
+    // 에러 타입별 필터링
+    let filteredLogs = logs || []
+    if (errorType !== 'all') {
+      filteredLogs = filteredLogs.filter(log => 
+        log.metadata?.error_type === errorType
+      )
+    }
+    
+    res.json({
+      success: true,
+      logs: filteredLogs,
+      count: filteredLogs.length,
+      total: logs?.length || 0
+    })
+  } catch (error) {
+    console.error('에러 복구 로그 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      message: '에러 복구 로그 조회 실패',
+      error: error.message
+    })
+  }
+})
+
+// 에러 복구 로그 통계
+app.get('/api/synthetic/logs/error-recovery/stats', async (req, res) => {
+  try {
+    const { days = 7 } = req.query
+    console.log(`📊 에러 복구 로그 통계: ${days}일`)
+    
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - parseInt(days))
+    
+    const { data: logs, error } = await supabase
+      .from('operation_logs')
+      .select('metadata, timestamp')
+      .eq('metadata->>log_type', 'error_recovery')
+      .gte('timestamp', startDate.toISOString())
+    
+    if (error) {
+      throw error
+    }
+    
+    // 에러 타입별 통계
+    const errorTypeStats = {}
+    const dailyStats = {}
+    
+    logs?.forEach(log => {
+      const errorType = log.metadata?.error_type || 'unknown'
+      const date = log.timestamp.split('T')[0]
+      
+      // 에러 타입별 카운트
+      errorTypeStats[errorType] = (errorTypeStats[errorType] || 0) + 1
+      
+      // 일별 카운트
+      dailyStats[date] = (dailyStats[date] || 0) + 1
+    })
+    
+    res.json({
+      success: true,
+      stats: {
+        totalErrors: logs?.length || 0,
+        errorTypeStats,
+        dailyStats,
+        period: `${days}일`
+      }
+    })
+  } catch (error) {
+    console.error('에러 복구 로그 통계 조회 실패:', error)
+    res.status(500).json({
+      success: false,
+      message: '에러 복구 로그 통계 조회 실패',
+      error: error.message
+    })
+  }
+})
+
 // 학습 작업 목록 조회 함수
 const getTrainingJobs = async () => {
   try {
@@ -4205,6 +5288,144 @@ const cancelTrainingJob = async (jobId) => {
   }
 }
 
-startServer()
+// fetch polyfill (Node.js 환경) - 서버 시작 전에 선언
+let fetchFn
+(async () => {
+  try {
+    // Node.js 18+ has native fetch
+    if (globalThis.fetch) {
+      fetchFn = globalThis.fetch
+    } else {
+      const { default: nodeFetch } = await import('node-fetch')
+      fetchFn = nodeFetch
+    }
+  } catch {
+    // node-fetch가 없으면 HTTP 모듈 사용
+    const http = await import('http')
+    fetchFn = async (url, options) => {
+      return new Promise((resolve, reject) => {
+        try {
+          const urlObj = new URL(url)
+          const request = http.request({
+            hostname: urlObj.hostname,
+            port: urlObj.port || 80,
+            path: urlObj.pathname,
+            method: options?.method || 'GET',
+            headers: options?.headers || {}
+          }, (response) => {
+            let data = ''
+            response.on('data', chunk => data += chunk)
+            response.on('end', () => {
+              resolve({
+                ok: response.statusCode >= 200 && response.statusCode < 300,
+                status: response.statusCode,
+                json: async () => JSON.parse(data),
+                text: async () => data
+              })
+            })
+          })
+          request.on('error', reject)
+          if (options?.body) {
+            request.write(options.body)
+          }
+          request.end()
+        } catch (error) {
+          reject(error)
+        }
+      })
+    }
+  }
+})()
+
+// 🔧 수정됨: 서버 시작을 안전하게 처리
+startServer().then(async () => {
+  // fetchFn이 준비될 때까지 대기
+  while (!fetchFn) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  
+  // 서버 시작 완료 후 저장된 작업 복구 시도
+  try {
+    if (fs.existsSync(ACTIVE_JOBS_STATE_FILE)) {
+      const data = fs.readFileSync(ACTIVE_JOBS_STATE_FILE, 'utf8')
+      const savedJobs = JSON.parse(data)
+      
+      // 실행 중이거나 대기 중인 작업만 복구
+      const recoverableJobs = savedJobs.filter(job => 
+        job.status === 'running' || job.status === 'pending'
+      )
+      
+      if (recoverableJobs.length > 0) {
+        console.log(`🔄 복구 가능한 작업 발견: ${recoverableJobs.length}개`)
+        console.log('💡 작업을 수동으로 재개하려면: npm run recover:resume')
+        
+        // 30초 후 자동 복구 시도 (서버가 완전히 준비될 때까지 대기)
+        setTimeout(async () => {
+          for (const job of recoverableJobs) {
+            try {
+              console.log(`🔄 작업 재개 시도: ${job.id}`)
+              
+              const resumeResponse = await fetchFn('http://localhost:3011/api/synthetic/start-rendering', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  mode: job.config.mode,
+                  partId: job.config.partId,
+                  setNum: job.config.setNum || job.config.setNumber,
+                  imageCount: job.config.imageCount,
+                  quality: job.config.quality,
+                  background: job.config.background,
+                  resolution: job.config.resolution,
+                  targetFill: job.config.targetFill,
+                  elementId: job.config.elementId
+                })
+              })
+              
+              if (resumeResponse.ok) {
+                const result = await resumeResponse.json()
+                console.log(`✅ 작업 재개 완료: ${job.id} -> ${result.jobId}`)
+              } else {
+                console.warn(`⚠️ 작업 재개 실패: ${job.id}`)
+              }
+              
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            } catch (error) {
+              console.error(`❌ 작업 재개 오류 (${job.id}):`, error.message)
+            }
+          }
+        }, 30000) // 30초 대기
+      }
+    }
+  } catch (error) {
+    console.error('❌ 작업 복구 실패:', error.message)
+  }
+}).catch(error => {
+  console.error('❌ [서버 시작 실패]:', error)
+  console.error('스택:', error.stack)
+  // 전역 핸들러가 처리하지만, 여기서도 명시적으로 처리
+})
+
+// Express 앱 레벨 에러 핸들러 추가
+app.use((err, req, res, next) => {
+  console.error('❌ [Express 에러 핸들러]:', err.message)
+  console.error('스택:', err.stack)
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || '서버 오류가 발생했습니다',
+    // 프로덕션에서는 상세 스택 추적 제거
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+  })
+})
+
+// 404 핸들러
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: '요청한 리소스를 찾을 수 없습니다',
+    path: req.path
+  })
+})
 
 export default app

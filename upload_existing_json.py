@@ -2,20 +2,37 @@
 """기존 JSON 파일들을 Supabase에 업로드"""
 
 import os
+import sys
 import json
 import glob
-from dotenv import load_dotenv
-from supabase import create_client, Client
+from pathlib import Path
 
-# .env 파일 로드
-load_dotenv()
+# 프로젝트 루트를 sys.path에 추가
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+# 통합 환경변수 관리 시스템 사용
+try:
+    from scripts.env_integration import get_supabase_config, apply_environment
+    apply_environment()
+    supabase_config = get_supabase_config()
+    url = supabase_config['url']
+    key = supabase_config['service_role']
+    print("통합 환경변수 관리 시스템을 사용합니다.")
+except ImportError:
+    # 폴백: 기존 방식
+    print("통합 환경변수 관리 시스템을 사용할 수 없습니다. 기본 방식을 사용합니다.")
+    from dotenv import load_dotenv
+    load_dotenv()
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
+
+from supabase import create_client, Client
 
 def upload_json_files():
     """기존 JSON 파일들을 Supabase에 업로드"""
     try:
         # Supabase 클라이언트 생성
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
         
         if not url or not key:
             print("[ERROR] Supabase 환경변수가 설정되지 않음")

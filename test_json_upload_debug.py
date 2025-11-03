@@ -2,19 +2,34 @@
 """JSON 업로드 디버깅 테스트"""
 
 import os
+import sys
 import json
-from dotenv import load_dotenv
+from pathlib import Path
 
-# .env 파일 로드
-load_dotenv()
+# 프로젝트 루트를 sys.path에 추가
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+# 통합 환경변수 관리 시스템 사용
+try:
+    from scripts.env_integration import get_supabase_config, apply_environment
+    apply_environment()
+    supabase_config = get_supabase_config()
+    url = supabase_config['url']
+    key = supabase_config['service_role']
+    print("통합 환경변수 관리 시스템을 사용합니다.")
+except ImportError:
+    # 폴백: 기존 방식
+    print("통합 환경변수 관리 시스템을 사용할 수 없습니다. 기본 방식을 사용합니다.")
+    from dotenv import load_dotenv
+    load_dotenv()
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_KEY")
 
 def test_supabase_connection():
     """Supabase 연결 테스트"""
     try:
         from supabase import create_client, Client
-        
-        url = os.getenv("SUPABASE_URL")
-        key = os.getenv("SUPABASE_KEY")
         
         print(f"[CHECK] SUPABASE_URL: {'SET' if url else 'NOT SET'}")
         print(f"[CHECK] SUPABASE_KEY: {'SET' if key else 'NOT SET'}")

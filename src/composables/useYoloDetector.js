@@ -1,11 +1,20 @@
 import * as ort from 'onnxruntime-web'
+import { useSupabase } from './useSupabase'
 
-// 간단한 YOLO WebGPU 추론 컴포저블 (로컬 전용)
+// 간단한 YOLO WebGPU 추론 컴포저블 (2단계 검출 지원) // 🔧 수정됨
 export function useYoloDetector() {
+  const { supabase } = useSupabase()
   let session = null
+  let stage1Session = null  // Stage 1 모델 세션
+  let stage2Session = null  // Stage 2 모델 세션
   let inputSize = 640
   let modelPath = import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx'
   let executionProviders = ['wasm']
+  
+  // 동시 초기화 방지 (Promise 캐싱)
+  let initStage1Promise = null
+  let initStage2Promise = null
+  let initDefaultPromise = null
 
   const isWebGPUAvailable = () => {
     return typeof navigator !== 'undefined' && 'gpu' in navigator
@@ -21,47 +30,220 @@ export function useYoloDetector() {
     }
   }
 
-  const init = async (options = {}) => {
-    if (session) return
-    modelPath = options.modelPath || modelPath
-    inputSize = options.inputSize || inputSize
+  // Stage별 모델 초기화 // 🔧 수정됨
+  const initStage = async (stage, options = {}) => {
+    const targetSession = stage === 'stage1' ? stage1Session : stage === 'stage2' ? stage2Session : session
+    if (targetSession) {
+      console.log(`✅ ${stage || '기본'} 모델 세션 이미 존재, 재사용`)
+      return targetSession
+    }
+    
+    // 동시 초기화 방지: 진행 중인 Promise가 있으면 재사용
+    if (stage === 'stage1') {
+      if (initStage1Promise) {
+        console.log(`⏳ Stage1 모델 초기화 중... 기존 Promise 재사용 (대기 중)`)
+        try {
+          const result = await initStage1Promise
+          console.log(`✅ Stage1 모델 초기화 완료 (Promise 재사용)`)
+          return result
+        } catch (err) {
+          console.error(`❌ Stage1 모델 초기화 실패 (Promise 재사용 중):`, err)
+          initStage1Promise = null // 실패 시 초기화하여 재시도 가능하게
+          throw err
+        }
+      }
+      initStage1Promise = (async () => {
+        try {
+          return await initStageInternal(stage, options)
+        } finally {
+          initStage1Promise = null // 완료 후 초기화
+        }
+      })()
+      return await initStage1Promise
+    } else if (stage === 'stage2') {
+      if (initStage2Promise) {
+        console.log(`⏳ Stage2 모델 초기화 중... 기존 Promise 재사용 (대기 중)`)
+        try {
+          const result = await initStage2Promise
+          console.log(`✅ Stage2 모델 초기화 완료 (Promise 재사용)`)
+          return result
+        } catch (err) {
+          console.error(`❌ Stage2 모델 초기화 실패 (Promise 재사용 중):`, err)
+          initStage2Promise = null
+          throw err
+        }
+      }
+      initStage2Promise = (async () => {
+        try {
+          return await initStageInternal(stage, options)
+        } finally {
+          initStage2Promise = null
+        }
+      })()
+      return await initStage2Promise
+    } else {
+      if (initDefaultPromise) {
+        console.log(`⏳ 기본 모델 초기화 중... 기존 Promise 재사용 (대기 중)`)
+        try {
+          const result = await initDefaultPromise
+          console.log(`✅ 기본 모델 초기화 완료 (Promise 재사용)`)
+          return result
+        } catch (err) {
+          console.error(`❌ 기본 모델 초기화 실패 (Promise 재사용 중):`, err)
+          initDefaultPromise = null
+          throw err
+        }
+      }
+      initDefaultPromise = (async () => {
+        try {
+          return await initStageInternal(stage, options)
+        } finally {
+          initDefaultPromise = null
+        }
+      })()
+      return await initDefaultPromise
+    }
+  }
+  
+  // 실제 초기화 로직 (내부 함수)
+  const initStageInternal = async (stage, options = {}) => {
+    const stageInputSize = options.inputSize || inputSize
 
     // onnxruntime-web 환경 설정 (CDN 사용)
     try {
-      // CDN에서 WASM 파일 로드하도록 설정
       ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/'
-      ort.env.wasm.numThreads = 1 // 멀티스레딩 비활성화로 안정성 확보
-      ort.env.logLevel = 'error' // 경고 로그 숨기기
+      ort.env.wasm.numThreads = 1
+      ort.env.logLevel = 'warning' // 경고 레벨로 변경하여 불필요한 경고만 표시
     } catch (_) {}
 
-    // GPU 지원 우선순위: WebGPU > WebGL > WASM
-    if (isWebGPUAvailable()) {
-      executionProviders = ['webgpu', 'webgl', 'wasm']
-      console.log('🚀 WebGPU 지원 - 고성능 GPU 추론 활성화')
-    } else if (isWebGL2Available()) {
-      executionProviders = ['webgl', 'wasm']
-      console.log('🎮 WebGL2 지원 - GPU 가속 추론 활성화')
+    // Stage별 실행 프로바이더 최적화
+    // Stage1 (작은 모델 11.5MB): WASM이 더 빠름 (초기화 오버헤드 없음)
+    // Stage2 (큰 모델 40.4MB): WebGPU가 2-3배 빠름 (병렬 처리 유리)
+    let stageExecutionProviders = ['wasm']
+    
+    if (stage === 'stage1') {
+      // Stage1: WASM만 사용 (작은 모델, 빠른 초기화)
+      stageExecutionProviders = ['wasm']
+      console.log('📊 Stage1 실행 프로바이더: WASM (최적화)')
+    } else if (stage === 'stage2') {
+      // Stage2: WebGPU 우선 (큰 모델, 병렬 처리 유리)
+      if (isWebGPUAvailable()) {
+        stageExecutionProviders = ['webgpu', 'wasm']
+        console.log('📊 Stage2 실행 프로바이더: WebGPU + WASM (최적화)')
+      } else {
+        stageExecutionProviders = ['wasm']
+        console.log('📊 Stage2 실행 프로바이더: WASM (WebGPU 불가)')
+      }
     } else {
-      executionProviders = ['wasm']
-      console.log('⚠️ CPU 모드 - GPU 가속 불가능')
+      // 기본: WebGPU 사용 가능하면 사용
+      if (isWebGPUAvailable()) {
+        stageExecutionProviders = ['webgpu', 'wasm']
+        console.log('📊 실행 프로바이더: WebGPU + WASM')
+      } else {
+        console.log('📊 실행 프로바이더: WASM')
+      }
     }
 
-    // 모델 바이트를 직접 로드 (SPA 리다이렉트/MIME 문제 회피)
+    // 모델 바이트를 직접 로드 (SPA 리다이렉트/MIME 문제 회피) - Stage별 모델 지원 // 🔧 수정됨
     const loadModelBytes = async () => {
-      const candidates = [
-        modelPath, 
+      // Stage별 모델 조회 (stage1 우선, 없으면 stage2 또는 최신 모델)
+      let activeModelUrl = null
+      try {
+        let query = supabase
+          .from('model_registry')
+          .select('model_url, model_path, model_name, model_stage')
+          .eq('status', 'active')
+          .eq('is_active', true)
+        
+        // Stage 지정이 있으면 해당 stage만 조회
+        if (stage === 'stage1' || stage === 'stage2') {
+          query = query.eq('model_stage', stage)
+        }
+        
+        const { data: activeModels, error: modelError } = await query
+          .order('created_at', { ascending: false })
+          .limit(stage ? 1 : 2)  // stage 지정 시 1개, 미지정 시 2개까지
+        
+        if (modelError) {
+          console.warn('⚠️ model_registry 조회 에러:', modelError.message)
+        } else if (activeModels && activeModels.length > 0) {
+          // Stage 지정 시 첫 번째 모델 사용
+          // 미지정 시 stage1 우선, 없으면 stage2 또는 최신 모델
+          let activeModel = activeModels[0]
+          if (!stage && activeModels.length > 1) {
+            const stage1Model = activeModels.find(m => m.model_stage === 'stage1')
+            activeModel = stage1Model || activeModels[0]
+          }
+          
+          console.log('📊 model_registry 활성 모델 조회 성공:', activeModel.model_name, {
+            model_url: activeModel.model_url,
+            model_path: activeModel.model_path,
+            model_stage: activeModel.model_stage
+          })
+          
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+          
+          // ONNX 파일이 있는 경우 우선 사용
+          if (activeModel.model_url && activeModel.model_url.endsWith('.onnx')) {
+            activeModelUrl = activeModel.model_url
+            console.log(`✅ ONNX model_url 사용: ${activeModelUrl}`)
+          } else if (activeModel.model_path && activeModel.model_path.endsWith('.onnx')) {
+            // model_path가 .onnx인 경우 Supabase Storage URL 생성
+            activeModelUrl = `${supabaseUrl}/storage/v1/object/public/models/${activeModel.model_path}`
+            console.log(`✅ ONNX model_path 사용: ${activeModelUrl}`)
+          } else if (activeModel.model_path && activeModel.model_path.endsWith('.pt')) {
+            // .pt 파일 경로에서 .onnx 파일 경로 추론
+            const onnxPath = activeModel.model_path.replace(/\.pt$/, '.onnx')
+            activeModelUrl = `${supabaseUrl}/storage/v1/object/public/models/${onnxPath}`
+            console.log(`🔍 .pt 경로에서 .onnx 추론: ${activeModel.model_path} → ${onnxPath}`)
+          } else if (activeModel.model_url && activeModel.model_url.endsWith('.pt')) {
+            // model_url이 .pt인 경우 .onnx로 변환하여 시도
+            activeModelUrl = activeModel.model_url.replace(/\.pt$/, '.onnx')
+            console.log(`🔍 .pt URL에서 .onnx 추론: ${activeModelUrl}`)
+          }
+        } else {
+          console.log('⚠️ model_registry에 활성 모델이 없습니다')
+        }
+      } catch (err) {
+        console.warn('⚠️ model_registry 조회 실패:', err.message)
+      }
+      
+      // 우선순위 2: 옵션으로 전달된 modelPath
+      // 우선순위 3: 환경 변수
+      // 우선순위 4: 로컬 파일 경로들
+      const candidates = []
+      if (activeModelUrl) candidates.push(activeModelUrl)
+      if (modelPath) candidates.push(modelPath)
+      candidates.push(
         import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx',
         '/models/default_model.onnx',
         '/models/yolo11n-seg.onnx', 
         '/models/yolo11n.onnx', 
         '/models/yolov8n.onnx'
-      ]
+      )
+      
       let lastErr = null
-      for (const p of candidates) {
+      for (let i = 0; i < candidates.length; i++) {
+        const p = candidates[i]
+        if (!p) continue // null/undefined 제외
         try {
-          const res = await fetch(p, { cache: 'no-store' })
+          const loadStartTime = Date.now()
+          console.log(`📥 모델 다운로드 시도 ${i + 1}/${candidates.length}: ${p}`)
+          
+          // 타임아웃 설정 (60초)
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 60000)
+          
+          const res = await fetch(p, { 
+            cache: 'no-store',
+            signal: controller.signal
+          })
+          clearTimeout(timeoutId)
+          
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           const buf = await res.arrayBuffer()
+          const loadTime = Date.now() - loadStartTime
+          
           // 간단 검증: ONNX는 protobuf 바이너리, 최소 크기 체크
           if (buf.byteLength < 1024) throw new Error('ONNX too small')
           const bytes = new Uint8Array(buf)
@@ -72,21 +254,58 @@ export function useYoloDetector() {
           ) {
             throw new Error('Received HTML instead of ONNX at ' + p)
           }
-          console.log(`YOLO model bytes loaded from ${p}: ${buf.byteLength} bytes`)
+          console.log(`✅ YOLO 모델 로드 성공: ${p} (${buf.byteLength} bytes, ${loadTime}ms)`)
           return bytes
         } catch (e) {
           lastErr = e
+          // 조용히 다음 후보 시도 (마지막 에러만 기록)
         }
       }
-      throw lastErr || new Error('Failed to load ONNX model bytes')
+      throw lastErr || new Error('YOLO 모델을 로드할 수 없습니다. model_registry에 활성 모델이 등록되어 있는지 확인하세요.')
     }
 
+    console.log(`📦 모델 바이트 로드 시작... (${stage || '기본'})`)
     const onnxBytes = await loadModelBytes()
-
-    session = await ort.InferenceSession.create(onnxBytes, {
-      executionProviders,
+    console.log(`✅ 모델 바이트 로드 완료: ${onnxBytes.length} bytes`)
+    
+    console.log(`🔧 ONNX 세션 생성 시작... (${stage || '기본'})`)
+    const createStartTime = Date.now()
+    const createdSession = await ort.InferenceSession.create(onnxBytes, {
+      executionProviders: stageExecutionProviders,
       graphOptimizationLevel: 'basic'
     })
+    const createTime = Date.now() - createStartTime
+    console.log(`✅ ONNX 세션 생성 완료: ${createTime}ms`)
+    
+    // Stage별 세션 저장 (동기적으로 설정하여 즉시 사용 가능)
+    if (stage === 'stage1') {
+      stage1Session = createdSession
+      console.log('✅ Stage1 모델 세션 저장 완료 및 사용 가능')
+    } else if (stage === 'stage2') {
+      stage2Session = createdSession
+      console.log('✅ Stage2 모델 세션 저장 완료 및 사용 가능')
+    } else {
+      session = createdSession
+      console.log('✅ 기본 모델 세션 저장 완료 및 사용 가능')
+    }
+    
+    return createdSession
+  }
+
+  // 기존 init 함수 (하위 호환성 유지) // 🔧 수정됨
+  const init = async (options = {}) => {
+    const stage = options.stage || null
+    const targetSession = stage === 'stage1' ? stage1Session : stage === 'stage2' ? stage2Session : session
+    
+    if (targetSession && !options.forceReload) {
+      console.log(`ℹ️ ${stage || '기본'} 모델 세션 이미 로드됨, 재사용`)
+      return targetSession
+    }
+    
+    modelPath = options.modelPath || modelPath
+    inputSize = options.inputSize || inputSize
+    
+    return await initStage(stage, options)
   }
 
   // letterbox 리사이즈 (패딩 유지)
@@ -291,15 +510,37 @@ export function useYoloDetector() {
   }
 
   const detect = async (imageDataUrl, options = {}) => {
-    console.log('🔍 YOLO 검출 시작 (기술문서 권장 설정):', { imageDataUrl: imageDataUrl?.substring(0, 50) + '...', options })
+    const stage = options.stage || null
+    const startTime = Date.now()
+    console.log(`🔍 YOLO 검출 시작 ${stage ? `(${stage})` : ''}`)
     
     try {
-      await init(options)
-      console.log('✅ YOLO 모델 초기화 완료')
+      const initializedSession = await init(options)
+      const initTime = Date.now() - startTime
+      console.log(`✅ YOLO 모델 초기화 완료 ${stage ? `(${stage})` : ''} (${initTime}ms)`)
+      
+      // Stage별 세션 선택 // 🔧 수정됨
+      const activeSession = stage === 'stage1' ? stage1Session : stage === 'stage2' ? stage2Session : session
+      if (!activeSession) {
+        // 초기화는 완료되었지만 세션 변수가 아직 설정되지 않은 경우 (비동기 타이밍 이슈)
+        // 잠시 대기 후 다시 확인
+        await new Promise(resolve => setTimeout(resolve, 10))
+        const retrySession = stage === 'stage1' ? stage1Session : stage === 'stage2' ? stage2Session : session
+        if (!retrySession) {
+          throw new Error(`모델 세션이 초기화되지 않았습니다 (stage: ${stage || 'none'})`)
+        }
+        return await detectWithSession(imageDataUrl, retrySession, options, stage)
+      }
+      
+      return await detectWithSession(imageDataUrl, activeSession, options, stage)
     } catch (error) {
-      console.error('❌ YOLO 모델 초기화 실패:', error)
+      console.error(`❌ YOLO 검출 실패 ${stage ? `(${stage})` : ''}:`, error)
       throw error
     }
+  }
+  
+  // 실제 검출 로직 (세션이 준비된 후)
+  const detectWithSession = async (imageDataUrl, activeSession, options, stage) => {
 
     // 원본 이미지를 로드하고 letterbox
     const img = await new Promise((resolve, reject) => {
@@ -323,26 +564,28 @@ export function useYoloDetector() {
     console.log('🔧 입력 텐서 생성:', { shape: input.dims, type: input.type })
 
     // 입력 이름 자동 감지 (첫 번째 입력 또는 images)
-    const inputName = Array.isArray(session.inputNames) && session.inputNames.length > 0
-      ? session.inputNames[0]
+    const inputName = Array.isArray(activeSession.inputNames) && activeSession.inputNames.length > 0
+      ? activeSession.inputNames[0]
       : 'images'
     console.log('🔧 YOLO 입력 이름:', inputName)
     const feeds = { [inputName]: input }
 
     let results
     try {
-      console.log('🚀 YOLO 추론 시작...')
-      results = await session.run(feeds)
-      console.log('✅ YOLO 추론 완료')
+      const inferenceStartTime = Date.now()
+      console.log(`🚀 YOLO 추론 시작... (${stage || '기본'})`)
+      results = await activeSession.run(feeds)
+      const inferenceTime = Date.now() - inferenceStartTime
+      console.log(`✅ YOLO 추론 완료 (${stage || '기본'}): ${inferenceTime}ms`)
     } catch (e) {
-      console.error('❌ YOLO 추론 실패:', e)
+      console.error(`❌ YOLO 추론 실패 (${stage || '기본'}):`, e)
       throw e
     }
 
     // 출력 텐서 선택 (첫 번째 또는 적절한 형식 탐색)
-    let outputName = session.outputNames?.[0]
+    let outputName = activeSession.outputNames?.[0]
     let output = results[outputName]
-    console.log('🔧 출력 텐서 선택:', { outputName, hasOutput: !!output, outputNames: session.outputNames })
+    console.log('🔧 출력 텐서 선택:', { outputName, hasOutput: !!output, outputNames: activeSession.outputNames })
     
     if (!output || !output.dims) {
       const values = Object.values(results)
@@ -364,24 +607,66 @@ export function useYoloDetector() {
     }
 
     // 결과를 BrickBox 형식으로 변환
+    // 실시간 검출 성능 최적화: 이미지 크롭을 스킵하고 원본 이미지 URL 사용
+    const isRealtime = options.realtime || false
     const mapped = []
-    for (const d of dets) {
-      const [x1, y1, x2, y2] = d.box
-      const crop = await cropToDataUrl(imageDataUrl, d.box)
-      mapped.push({
-        id: crypto.randomUUID(),
-        boundingBox: {
-          x: x1 / img.width,
-          y: y1 / img.height,
-          width: (x2 - x1) / img.width,
-          height: (y2 - y1) / img.height
-        },
-        confidence: d.score,
-        classId: d.classId,
-        image: crop,
-        timestamp: new Date().toISOString()
-      })
+    
+    console.log(`🔄 검출 결과 변환 시작: ${dets.length}개 (실시간 모드: ${isRealtime}, ${stage || '기본'})`)
+    
+    if (isRealtime) {
+      // 실시간 검출: 빠른 변환 (이미지 크롭 스킵) - 성능 최적화
+      for (const d of dets) {
+        const [x1, y1, x2, y2] = d.box
+        mapped.push({
+          id: crypto.randomUUID(),
+          boundingBox: {
+            x: x1 / img.width,
+            y: y1 / img.height,
+            width: (x2 - x1) / img.width,
+            height: (y2 - y1) / img.height
+          },
+          confidence: d.score,
+          classId: d.classId,
+          image: imageDataUrl, // 원본 이미지 URL 사용 (크롭 스킵으로 성능 향상)
+          timestamp: new Date().toISOString()
+        })
+      }
+      console.log(`✅ YOLO 검출 결과 변환 완료: ${mapped.length}개 (실시간 모드: 크롭 스킵)`)
+    } else {
+      // 일반 검출: 정확한 이미지 크롭 (비동기, 느림)
+      console.log(`📸 이미지 크롭 시작: ${dets.length}개 객체`)
+      for (let i = 0; i < dets.length; i++) {
+        const d = dets[i]
+        const [x1, y1, x2, y2] = d.box
+        const crop = await cropToDataUrl(imageDataUrl, d.box)
+        mapped.push({
+          id: crypto.randomUUID(),
+          boundingBox: {
+            x: x1 / img.width,
+            y: y1 / img.height,
+            width: (x2 - x1) / img.width,
+            height: (y2 - y1) / img.height
+          },
+          confidence: d.score,
+          classId: d.classId,
+          image: crop,
+          timestamp: new Date().toISOString()
+        })
+        if ((i + 1) % 10 === 0) {
+          console.log(`📸 이미지 크롭 진행: ${i + 1}/${dets.length}개`)
+        }
+      }
+      console.log(`✅ YOLO 검출 결과 변환 완료: ${mapped.length}개 (이미지 크롭 포함)`)
     }
+    
+    if (mapped.length > 0) {
+      console.log(`📊 검출 결과 샘플 (최종):`, mapped.slice(0, 3).map(m => ({
+        confidence: m.confidence.toFixed(3),
+        boundingBox: m.boundingBox,
+        classId: m.classId
+      })))
+    }
+    
     return mapped
   }
 

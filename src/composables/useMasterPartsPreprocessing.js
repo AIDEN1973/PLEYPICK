@@ -26,6 +26,29 @@ function normalizeVector(vec = []) {
   return vec
 }
 
+// 🔧 수정됨: lego_parts 테이블에서 part_num으로 실제 부품명 조회
+async function getPartNameFromLegoParts(partNum) {
+  try {
+    if (!partNum) return null
+    
+    const { data, error } = await supabase
+      .from('lego_parts')
+      .select('part_num, name')
+      .eq('part_num', partNum)
+      .maybeSingle()
+    
+    if (error) {
+      console.warn(`⚠️ lego_parts 조회 실패 (part_num: ${partNum}): ${error.message}`)
+      return null
+    }
+    
+    return data?.name || null
+  } catch (error) {
+    console.warn(`⚠️ 부품명 조회 실패 (part_num: ${partNum}):`, error.message)
+    return null
+  }
+}
+
 // 🔧 수정됨: set_parts 테이블에서 엘리먼트 ID로 부품 정보 조회 (API 호출 제거)
 async function getRealPartIdFromElementId(elementId) {
   try {
@@ -276,8 +299,21 @@ function expandTo768Dimensions(fgcVector) {
     return Array(768).fill(0.0)
   }
   
-  // FGC 512차원 + 256차원 제로 패딩 = 768차원
-  return [...fgcVector, ...Array(256).fill(0.0)]
+  // 🔧 수정됨: 제로 패딩 대신 앞부분 반복 방식 사용
+  // 앞부분 256개를 가져와서 뒤에 추가 (제로 패딩 대신)
+  const front256 = fgcVector.slice(0, 256)
+  // 부드러운 확장을 위해 약간의 스케일링 적용
+  const scale = 0.1 // 확장 부분의 스케일 (벡터의 특징 유지)
+  const extended256 = front256.map(v => v * scale)
+  const expanded = [...fgcVector, ...extended256]
+  
+  // L2 정규화
+  const norm = Math.sqrt(expanded.reduce((sum, val) => sum + val * val, 0))
+  if (norm > 0.01) {
+    return expanded.map(v => v / norm)
+  }
+  
+  return expanded
 }
 
 // L2 정규화 함수
@@ -2294,8 +2330,13 @@ export async function saveToMasterPartsDB(analysisResults) {
         part.semantic_vector = Array(768).fill(0.0) // 제로벡터로 설정 (나중에 재생성 가능)
       }
       
-      part.semantic_vector = normalizeVector(part.semantic_vector)
-      part.clip_text_emb = normalizeVector(part.clip_text_emb)
+      // 🔧 수정됨: VECTOR 타입 저장을 위해 숫자 배열로 보장
+      if (part.semantic_vector && Array.isArray(part.semantic_vector)) {
+        part.semantic_vector = part.semantic_vector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
+      }
+      if (part.clip_text_emb && Array.isArray(part.clip_text_emb)) {
+        part.clip_text_emb = part.clip_text_emb.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
+      }
     })
 
     // 🔧 수정됨: 누락 임베딩은 백엔드 워커가 처리. 프론트에서는 백필 시도하지 않음
@@ -2303,14 +2344,41 @@ export async function saveToMasterPartsDB(analysisResults) {
     // 분류기 초기화 (Tier/메타데이터 산출)
     const classifier = usePartClassification()
 
+    // 🔧 수정됨: part_num별로 lego_parts에서 부품명 일괄 조회 (성능 최적화)
+    const uniquePartNums = [...new Set(analysisResults.map(r => r.part_num || r.part?.part_num).filter(Boolean))]
+    const partNameMap = new Map()
+    
+    if (uniquePartNums.length > 0) {
+      const { data: legoParts, error: legoPartsError } = await supabase
+        .from('lego_parts')
+        .select('part_num, name')
+        .in('part_num', uniquePartNums)
+      
+      if (!legoPartsError && legoParts) {
+        legoParts.forEach(lp => {
+          if (lp.name) {
+            partNameMap.set(lp.part_num, lp.name)
+          }
+        })
+      }
+    }
+
     // color_id 확정: result.color_id 또는 result.color?.id에서 추출, 없으면 기본값 0 사용
     const mapped = analysisResults.map(result => {
       const resolvedColorId = (result.color_id !== undefined && result.color_id !== null)
         ? result.color_id
         : (result.color?.id !== undefined ? result.color.id : 0) // 기본값 0 사용
 
-      const partName = result.part?.name || result.name || ''
       const partNum = result.part_num || result.part?.part_num || ''
+      
+      // 🔧 수정됨: lego_parts에서 조회한 부품명 우선 사용, 없으면 기존 로직 사용
+      let partName = partNameMap.get(partNum) || result.part?.name || result.name || ''
+      
+      // 부품명이 여전히 없거나 part_id와 동일한 경우 다시 조회 시도
+      if (!partName || partName === partNum) {
+        console.warn(`⚠️ 부품명 누락 또는 part_id와 동일 (part_num: ${partNum}), 기본값 사용`)
+        partName = result.part?.name || result.name || `LEGO Part ${partNum}`.trim()
+      }
 
       // Tier 분류 및 향상 메타데이터 계산
       const tierClassification = classifier.classifyPartTier({ name: partName, part_num: partNum })
@@ -2331,7 +2399,7 @@ export async function saveToMasterPartsDB(analysisResults) {
 
       const rec = {
         part_id: result.part_num,
-        part_name: result.part?.name || 'Unknown',
+        part_name: partName,
         color_id: resolvedColorId,
         // 기술문서 스키마에 맞는 필드 매핑
         expected_stud_count: result.expected_stud_count || result.stud_count_top || 0,
@@ -2421,15 +2489,23 @@ export async function saveToMasterPartsDB(analysisResults) {
         },
         feature_text: result.feature_text,
         // CLIP 텍스트 임베딩: 제로/불완전 벡터는 저장 금지 (워커에 위임)
+        // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
         clip_text_emb: (() => {
           const candidate = Array.isArray(result.clip_text_emb)
             ? result.clip_text_emb
             : (Array.isArray(result.embedding) ? result.embedding : null)
-          const normalized = normalizeClipVectorOrNull(candidate) // 🔧 수정됨
-          return (normalized && !isZeroVector(normalized)) ? normalized : null // 🔧 수정됨
+          const normalized = normalizeClipVectorOrNull(candidate)
+          if (!normalized || isZeroVector(normalized)) return null
+          // 문자열 요소가 있으면 숫자로 변환 (VECTOR 타입 저장 전 필수)
+          return normalized.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
         })(),
         // 시맨틱 벡터는 별도 컬럼 유지
-        semantic_vector: Array.isArray(result.semantic_vector) ? result.semantic_vector : null,
+        // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+        semantic_vector: (() => {
+          if (!Array.isArray(result.semantic_vector)) return null
+          // 문자열 요소가 있으면 숫자로 변환 (VECTOR 타입 저장 전 필수)
+          return result.semantic_vector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
+        })(),
         // 별도 컬럼으로도 저장하여 검색 최적화
         recognition_hints: result.recognition_hints || null,
         similar_parts: result.similar_parts || result.confusions || null,

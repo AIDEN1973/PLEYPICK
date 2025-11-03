@@ -596,6 +596,26 @@
         </div>
       </div>
 
+      <!-- 6. 큐 관리 탭 -->
+      <div v-if="activeTab === 'queue'" class="tab-panel">
+        <div class="panel-header">
+          <h2>🔄 Render Queue 관리</h2>
+          <p>실패한 렌더링 작업을 모니터링하고 재처리합니다</p>
+        </div>
+        
+        <RenderQueueManager />
+      </div>
+
+      <!-- 7. 에러 로그 탭 -->
+      <div v-if="activeTab === 'logs'" class="tab-panel">
+        <div class="panel-header">
+          <h2>📋 에러 복구 로그</h2>
+          <p>시스템 에러와 복구 작업을 모니터링합니다</p>
+        </div>
+        
+        <ErrorRecoveryLogs />
+      </div>
+
     </div>
 
     <!-- 알림 시스템 -->
@@ -624,15 +644,25 @@
     </div>
 
     <!-- 진행률 모달 -->
-    <div v-if="showProgressModal" class="progress-modal-overlay" @click="hideProgress">
+    <div v-if="showProgressModal" class="progress-modal-overlay"> <!-- // 🔧 수정됨: 오버레이 클릭으로 닫히지 않도록 -->
       <div class="progress-modal" @click.stop>
         <div class="progress-header">
-          <h3>🚀 통합 처리 진행 중</h3>
+          <h3>{{ progressModalData.title || '🚀 통합 처리 진행 중' }}</h3> <!-- // 🔧 수정됨: 동적 타이틀 -->
           <button class="progress-close" @click="hideProgress">
             ×
           </button>
         </div>
         <div class="progress-content">
+          <div v-if="progressSteps.length === 0" class="progress-linear"> <!-- // 🔧 수정됨: 단계 없을 때 기본 진행률 표시 -->
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: (progressModalData.progress || 0) + '%' }"></div>
+            </div>
+            <div class="progress-status">
+              <span class="status-text">{{ progressModalData.status }}</span>
+              <span class="status-percent">{{ Math.round(progressModalData.progress || 0) }}%</span>
+            </div>
+            <div class="progress-message">{{ progressModalData.message }}</div>
+          </div>
           <div class="progress-steps">
             <div 
               v-for="step in progressSteps" 
@@ -665,6 +695,8 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useSupabase } from '@/composables/useSupabase'
+import RenderQueueManager from '@/components/RenderQueueManager.vue'
+import ErrorRecoveryLogs from '@/components/ErrorRecoveryLogs.vue'
 
 // Supabase 클라이언트
 const { supabase } = useSupabase()
@@ -677,6 +709,8 @@ const tabs = ref([
   { id: 'validation', icon: '🔍', label: '검증' },
   { id: 'dataset', icon: '📋', label: '데이터셋' },
   { id: 'training', icon: '🤖', label: '학습' },
+  { id: 'queue', icon: '🔄', label: '큐 관리' },
+  { id: 'logs', icon: '📋', label: '에러 로그' },
 ])
 
 // 자동 학습 설정
@@ -847,7 +881,7 @@ const updateProgress = (progress, status, message) => {
   progressModalData.value.message = message
 }
 
-const hideProgress = () => {
+const hideProgress = () => { // // 🔧 수정됨: 수동 닫기만 허용
   showProgressModal.value = false
   progressModalData.value = {
     title: '',
@@ -978,53 +1012,76 @@ const startSingleRendering = async () => {
   addNotification('info', '렌더링 시작', `부품 ${partNumber.value} 렌더링을 시작합니다.`)
   
   try {
+    console.log('🚀 렌더링 시작 - 부품:', partNumber.value, '엘리먼트:', elementId.value, '색상:', colorId.value)
     renderLogs.value.push({ type: 'info', message: `부품 ${partNumber.value} 렌더링 시작...` })
     updateProgress(10, 'API 호출 중...', '렌더링 요청을 전송하고 있습니다...')
     
+    // 요청 데이터 로깅
+    const requestData = {
+      partId: partNumber.value,
+      elementId: elementId.value,
+      colorId: colorId.value,
+      renderType: 'single'
+    }
+    console.log('📤 렌더링 요청 데이터:', requestData)
+    
     // 실제 렌더링 API 호출
-    const response = await fetchWithPortDetection('/api/synthetic/render', {
+    const response = await fetchWithPortDetection('/api/synthetic/start-rendering', { // 🔧 수정됨
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        partId: partNumber.value,
-        elementId: elementId.value,
-        colorId: colorId.value,
-        renderType: 'single'
-      })
+      body: JSON.stringify(requestData)
     })
     
+    console.log('📡 API 응답 상태:', response.status, response.statusText)
+    
     if (!response.ok) {
-      throw new Error(`렌더링 API 오류: ${response.status}`)
+      const errorText = await response.text()
+      console.error('❌ API 오류 응답:', errorText)
+      throw new Error(`렌더링 API 오류: ${response.status} - ${errorText}`)
     }
     
     const result = await response.json()
+    console.log('✅ API 응답 데이터:', result)
+    
     updateProgress(20, '렌더링 엔진 초기화', 'Blender 렌더링 엔진을 초기화하고 있습니다...')
     renderLogs.value.push({ type: 'info', message: '🎨 Blender 렌더링 엔진 초기화 중...' })
     renderLogs.value.push({ type: 'info', message: '📐 3D 모델 로딩 중...' })
     
     // 실제 렌더링 진행률 모니터링
     const jobId = result.jobId
+    console.log('🆔 작업 ID:', jobId)
+    
     if (jobId) {
       await monitorRenderingProgress(jobId)
     } else {
       // 즉시 완료된 경우
+      console.log('⚡ 즉시 완료된 렌더링')
       renderProgress.value = 100
-        isRendering.value = false
+      isRendering.value = false
       updateProgress(100, '완료', '렌더링이 완료되었습니다!')
-        renderLogs.value.push({ type: 'success', message: '✅ 렌더링 완료!' })
+      renderLogs.value.push({ type: 'success', message: '✅ 렌더링 완료!' })
       renderLogs.value.push({ type: 'info', message: `📊 생성된 파일: 이미지 ${result.imageCount || 5}개, 라벨 ${result.labelCount || 5}개, 메타데이터 1개` })
       addNotification('success', '렌더링 완료', `부품 ${partNumber.value} 렌더링이 성공적으로 완료되었습니다.`)
-      setTimeout(() => hideProgress(), 2000)
-      }
+      /* 완료 후에도 사용자가 X를 누를 때까지 유지 */ // 🔧 수정됨
+    }
     
   } catch (error) {
+    console.error('💥 렌더링 오류 상세:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      partNumber: partNumber.value,
+      elementId: elementId.value,
+      colorId: colorId.value
+    })
+    
     renderLogs.value.push({ type: 'error', message: `렌더링 실패: ${error.message}` })
     isRendering.value = false
     updateProgress(0, '오류', `렌더링 실패: ${error.message}`)
     addNotification('error', '렌더링 실패', `부품 ${partNumber.value} 렌더링 중 오류가 발생했습니다.`)
-    setTimeout(() => hideProgress(), 3000)
+    /* 오류 표시 후에도 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -1048,7 +1105,7 @@ const startSetRendering = async () => {
     updateProgress(10, 'API 호출 중...', '렌더링 요청을 전송하고 있습니다...')
     
     // 실제 세트 렌더링 API 호출
-    const response = await fetchWithPortDetection('/api/synthetic/render', {
+    const response = await fetchWithPortDetection('/api/synthetic/start-rendering', { // 🔧 수정됨
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -1080,7 +1137,7 @@ const startSetRendering = async () => {
         renderLogs.value.push({ type: 'success', message: '✅ 세트 렌더링 완료!' })
       renderLogs.value.push({ type: 'info', message: `📊 생성된 파일: 이미지 ${result.imageCount || 75}개, 라벨 ${result.labelCount || 75}개, 메타데이터 ${result.partCount || 15}개` })
       addNotification('success', '세트 렌더링 완료', `세트 ${setNumber.value} 렌더링이 성공적으로 완료되었습니다.`)
-      setTimeout(() => hideProgress(), 2000)
+      /* 완료 후 수동 닫기 */ // 🔧 수정됨
       }
     
   } catch (error) {
@@ -1088,7 +1145,7 @@ const startSetRendering = async () => {
     isRendering.value = false
     updateProgress(0, '오류', `렌더링 실패: ${error.message}`)
     addNotification('error', '세트 렌더링 실패', `세트 ${setNumber.value} 렌더링 중 오류가 발생했습니다.`)
-    setTimeout(() => hideProgress(), 3000)
+    /* 오류 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -1097,50 +1154,81 @@ const monitorRenderingProgress = async (jobId) => {
   const maxAttempts = 60 // 5분 타임아웃 (5초 간격)
   let attempts = 0
   
+  console.log('📊 진행률 모니터링 시작 - 작업 ID:', jobId)
+  
   while (isRendering.value && attempts < maxAttempts) {
     try {
-      const response = await fetchWithPortDetection(`/api/synthetic/render/status/${jobId}`)
+      console.log(`🔄 진행률 확인 시도 ${attempts + 1}/${maxAttempts}`)
+      const response = await fetchWithPortDetection(`/api/synthetic/progress/${jobId}`) // 🔧 수정됨
+      
+      console.log('📡 진행률 API 응답 상태:', response.status, response.statusText)
+      
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('❌ 진행률 API 오류:', errorText)
+        throw new Error(`진행률 API 오류: ${response.status} - ${errorText}`)
+      }
+      
       const data = await response.json()
+      console.log('📈 진행률 데이터:', data)
       
       renderProgress.value = data.progress || 0
       updateProgress(data.progress || 0, '렌더링 중...', `진행률: ${data.progress || 0}%`)
       renderLogs.value.push({ type: 'info', message: `🎨 렌더링 진행률: ${renderProgress.value}%` })
       
+      // 로그 메시지도 콘솔에 출력
+      if (data.logs && data.logs.length > 0) {
+        data.logs.forEach(log => {
+          console.log(`📝 렌더링 로그 [${log.type}]:`, log.message)
+        })
+        renderLogs.value.push(...data.logs)
+      }
+      
       if (data.status === 'completed') {
+        console.log('✅ 렌더링 완료 감지')
         isRendering.value = false
         renderProgress.value = 100
         updateProgress(100, '완료', '렌더링이 완료되었습니다!')
         renderLogs.value.push({ type: 'success', message: '✅ 렌더링 완료!' })
         renderLogs.value.push({ type: 'info', message: `📊 생성된 파일: 이미지 ${data.imageCount || 5}개, 라벨 ${data.labelCount || 5}개, 메타데이터 1개` })
         addNotification('success', '렌더링 완료', '렌더링이 성공적으로 완료되었습니다.')
-        setTimeout(() => hideProgress(), 2000)
+        /* 완료 후 수동 닫기 */ // 🔧 수정됨
         break
       } else if (data.status === 'failed') {
+        console.error('❌ 렌더링 실패 감지:', data.error)
         isRendering.value = false
         updateProgress(0, '오류', `렌더링 실패: ${data.error || '알 수 없는 오류'}`)
         renderLogs.value.push({ type: 'error', message: `렌더링 실패: ${data.error || '알 수 없는 오류'}` })
         addNotification('error', '렌더링 실패', data.error || '알 수 없는 오류')
-        setTimeout(() => hideProgress(), 3000)
+        /* 오류 후 수동 닫기 */ // 🔧 수정됨
         break
       }
       
       await new Promise(resolve => setTimeout(resolve, 5000)) // 5초 대기
       attempts++
     } catch (error) {
+      console.error('💥 진행률 모니터링 오류:', {
+        message: error.message,
+        stack: error.stack,
+        jobId: jobId,
+        attempt: attempts + 1
+      })
+      
       renderLogs.value.push({ type: 'error', message: `진행률 모니터링 오류: ${error.message}` })
       updateProgress(0, '오류', `진행률 모니터링 오류: ${error.message}`)
       addNotification('error', '진행률 모니터링 오류', error.message)
-      setTimeout(() => hideProgress(), 3000)
+      /* 모니터링 오류 후 수동 닫기 */ // 🔧 수정됨
       break
     }
   }
   
   if (attempts >= maxAttempts) {
+    console.error('⏰ 렌더링 타임아웃 - 최대 시도 횟수 초과')
     isRendering.value = false
     updateProgress(0, '타임아웃', '렌더링 타임아웃: 최대 대기 시간을 초과했습니다')
     renderLogs.value.push({ type: 'error', message: '렌더링 타임아웃: 최대 대기 시간을 초과했습니다' })
     addNotification('error', '렌더링 타임아웃', '최대 대기 시간을 초과했습니다')
-    setTimeout(() => hideProgress(), 3000)
+    /* 타임아웃 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -1153,6 +1241,7 @@ const stopRendering = () => {
 // 데이터 검증
 const manualDataValidation = async () => {
   try {
+    console.log('[검증] 수동 검증 시작') // 🔧 수정됨
     renderLogs.value.push({ type: 'info', message: '데이터 검증 시작...' })
     addNotification('info', '데이터 검증 시작', '데이터 검증을 시작합니다...')
     showProgress('데이터 검증', false)
@@ -1160,6 +1249,15 @@ const manualDataValidation = async () => {
     
     // 실제 파일 검증 API 호출
     console.log('🔍 검증 API 호출 시작...')
+    console.debug('[검증] 요청 페이로드', { // 🔧 수정됨
+      sourcePath: 'output/synthetic',
+      validateImages: true,
+      validateLabels: true,
+      validateMetadata: true,
+      checkFileIntegrity: true,
+      validateBucketSync: true,
+      bucketName: 'lego-synthetic'
+    })
     const response = await fetchWithPortDetection('/api/synthetic/validate', {
       method: 'POST',
       headers: {
@@ -1176,13 +1274,16 @@ const manualDataValidation = async () => {
       })
     })
     
-    console.log('📡 검증 API 응답:', response.status, response.statusText)
+    console.log('📡 검증 API 응답:', response.status, response.statusText) // 🔧 수정됨
     
     if (!response.ok) {
+      const errText = await response.text().catch(() => '')
+      console.error('[검증] API 오류 본문:', errText) // 🔧 수정됨
       throw new Error(`검증 API 오류: ${response.status}`)
     }
     
     const result = await response.json()
+    console.debug('[검증] 초기 응답 JSON', result) // 🔧 수정됨
     updateProgress(30, '폴더 구조 검증', '렌더링된 폴더 구조를 검증하고 있습니다...')
     renderLogs.value.push({ type: 'info', message: '📁 output/synthetic 폴더 구조 검증 중...' })
     
@@ -1238,26 +1339,33 @@ const manualDataValidation = async () => {
       }
       
       addNotification('success', '데이터 검증 완료', `이미지 ${result.imageCount || 0}개, 라벨 ${result.labelCount || 0}개, 메타데이터 ${result.metadataCount || 0}개가 검증되었습니다.`)
-      setTimeout(() => hideProgress(), 2000)
+      /* 완료 후 수동 닫기 */ // 🔧 수정됨
     }
     
   } catch (error) {
+    console.error('[검증] 예외 발생:', error) // 🔧 수정됨
     renderLogs.value.push({ type: 'error', message: `검증 실패: ${error.message}` })
     updateProgress(0, '오류', `검증 실패: ${error.message}`)
     addNotification('error', '데이터 검증 실패', error.message)
-    setTimeout(() => hideProgress(), 3000)
+    /* 실패 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
 // 검증 진행률 모니터링
 const monitorValidationProgress = async (jobId) => {
-  const maxAttempts = 30 // 2.5분 타임아웃 (5초 간격)
+  const maxAttempts = 60 // 5분 타임아웃 (5초 간격) // 🔧 수정됨
   let attempts = 0
+  let lastProgress = -1 // 🔧 수정됨
+  let lastStep = '' // 🔧 수정됨
+  let stalledCount = 0 // 🔧 수정됨
+  const STALLED_THRESHOLD = 6 // 30초 정체 시 상세 조회 // 🔧 수정됨
   
   while (attempts < maxAttempts) {
     try {
+      console.log(`[검증] 폴링 시도 ${attempts + 1}/${maxAttempts} (jobId=${jobId})`) // 🔧 수정됨
       const response = await fetchWithPortDetection(`/api/synthetic/validate/status/${jobId}`)
       const data = await response.json()
+      console.debug('[검증] 폴링 응답 JSON', data) // 🔧 수정됨
       
       if (data.status === 'completed') {
         updateProgress(100, '완료', '데이터 검증이 완료되었습니다!')
@@ -1298,21 +1406,55 @@ const monitorValidationProgress = async (jobId) => {
         }
         
         addNotification('success', '데이터 검증 완료', `이미지 ${data.imageCount || 0}개, 라벨 ${data.labelCount || 0}개, 메타데이터 ${data.metadataCount || 0}개가 검증되었습니다.`)
-        setTimeout(() => hideProgress(), 2000)
+        /* 완료 후 수동 닫기 */ // 🔧 수정됨
         break
       } else if (data.status === 'failed') {
         updateProgress(0, '오류', `데이터 검증 실패: ${data.error || '알 수 없는 오류'}`)
         renderLogs.value.push({ type: 'error', message: `데이터 검증 실패: ${data.error || '알 수 없는 오류'}` })
         addNotification('error', '데이터 검증 실패', data.error || '알 수 없는 오류')
-        setTimeout(() => hideProgress(), 3000)
+        /* 실패 후 수동 닫기 */ // 🔧 수정됨
         break
       }
       
-      updateProgress(data.progress || 0, '검증 중...', `진행률: ${data.progress || 0}%`)
+      updateProgress(data.progress || 0, data.currentStep || '검증 중...', `경로: output/synthetic · 진행률: ${data.progress || 0}%`) // 🔧 수정됨
       renderLogs.value.push({ type: 'info', message: `🔍 데이터 검증 진행률: ${data.progress || 0}%` })
       
       if (data.currentStep) {
         renderLogs.value.push({ type: 'info', message: `📋 현재 단계: ${data.currentStep}` })
+        console.log('[검증] 현재 단계:', data.currentStep) // 🔧 수정됨
+      }
+
+      // 정체 감지 및 상세 조회 // 🔧 수정됨
+      const curProgress = data.progress ?? -1
+      const curStep = data.currentStep || ''
+      if (curProgress === lastProgress && curStep === lastStep) {
+        stalledCount++
+        if (stalledCount === STALLED_THRESHOLD) {
+          console.warn('[검증] 진행률/단계 정체 감지. 상세 상태 조회 시도')
+          renderLogs.value.push({ type: 'warning', message: '⏸️ 진행 정체 감지: 상세 상태 조회 중...' })
+          try {
+            const verboseResp = await fetchWithPortDetection(`/api/synthetic/validate/status/${jobId}?verbose=1`)
+            const verboseData = await verboseResp.json().catch(() => ({}))
+            console.debug('[검증] 상세 상태', verboseData)
+            if (verboseData?.logs?.length) {
+              verboseData.logs.slice(-20).forEach((msg) => {
+                renderLogs.value.push({ type: 'info', message: `🔎 서버 로그: ${msg}` })
+              })
+            }
+            // 폴더 구조 힌트 출력 (정체시 1회)
+            renderLogs.value.push({ type: 'info', message: '📁 예상 폴더 구조 힌트:' }) // 🔧 수정됨
+            renderLogs.value.push({ type: 'info', message: '  • output/synthetic/<part_id>/images/*.webp' })
+            renderLogs.value.push({ type: 'info', message: '  • output/synthetic/<part_id>/labels/*.txt' })
+            renderLogs.value.push({ type: 'info', message: '  • output/synthetic/<part_id>/meta/*.json' })
+            renderLogs.value.push({ type: 'info', message: '  • 또는 dataset_synthetic/images|labels|meta/ 하위 구조' })
+          } catch (e) {
+            console.error('[검증] 상세 상태 조회 실패', e)
+          }
+        }
+      } else {
+        stalledCount = 0
+        lastProgress = curProgress
+        lastStep = curStep
       }
       
       await new Promise(resolve => setTimeout(resolve, 5000)) // 5초 대기
@@ -1321,16 +1463,30 @@ const monitorValidationProgress = async (jobId) => {
       renderLogs.value.push({ type: 'error', message: `검증 모니터링 오류: ${error.message}` })
       updateProgress(0, '오류', `검증 모니터링 오류: ${error.message}`)
       addNotification('error', '검증 모니터링 오류', error.message)
-      setTimeout(() => hideProgress(), 3000)
+      /* 모니터링 오류 후 수동 닫기 */ // 🔧 수정됨
       break
     }
   }
   
   if (attempts >= maxAttempts) {
+    console.warn('[검증] 타임아웃 도달. 마지막 상태 조회 시도') // 🔧 수정됨
     updateProgress(0, '타임아웃', '데이터 검증 타임아웃: 최대 대기 시간을 초과했습니다')
     renderLogs.value.push({ type: 'error', message: '데이터 검증 타임아웃: 최대 대기 시간을 초과했습니다' })
     addNotification('error', '데이터 검증 타임아웃', '최대 대기 시간을 초과했습니다')
-    setTimeout(() => hideProgress(), 3000)
+
+    try {
+      const lastResp = await fetchWithPortDetection(`/api/synthetic/validate/status/${jobId}`)
+      const lastData = await lastResp.json().catch(() => ({}))
+      console.debug('[검증] 타임아웃 직전 상태', lastData) // 🔧 수정됨
+      if (lastData?.logs?.length) {
+        lastData.logs.slice(-20).forEach((msg) => {
+          renderLogs.value.push({ type: 'info', message: `🔎 서버 로그: ${msg}` })
+        })
+      }
+    } catch (e) {
+      console.error('[검증] 타임아웃 후 상태 조회 실패:', e) // 🔧 수정됨
+    }
+    /* 타임아웃 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -1391,14 +1547,14 @@ const manualDatasetPreparation = async () => {
         addNotification('success', '데이터셋 준비 완료', `이미지 ${result.imageCount || 0}개, 라벨 ${result.labelCount || 0}개, 메타데이터 ${result.metadataCount || 0}개가 준비되었습니다.`)
       }
       
-      setTimeout(() => hideProgress(), 2000)
+      /* 완료 후 수동 닫기 */ // 🔧 수정됨
     }
     
   } catch (error) {
     renderLogs.value.push({ type: 'error', message: `데이터셋 준비 실패: ${error.message}` })
     updateProgress(0, '오류', `데이터셋 준비 실패: ${error.message}`)
     addNotification('error', '데이터셋 준비 실패', error.message)
-    setTimeout(() => hideProgress(), 3000)
+    /* 실패 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -1722,13 +1878,13 @@ const monitorDatasetPreparation = async (jobId) => {
           addNotification('success', '데이터셋 준비 완료', `이미지 ${data.imageCount || 0}개, 라벨 ${data.labelCount || 0}개, 메타데이터 ${data.metadataCount || 0}개가 준비되었습니다.`)
         }
         
-        setTimeout(() => hideProgress(), 2000)
+        /* 완료 후 수동 닫기 */ // 🔧 수정됨
         break
       } else if (data.status === 'failed') {
         updateProgress(0, '오류', `데이터셋 준비 실패: ${data.error || '알 수 없는 오류'}`)
         renderLogs.value.push({ type: 'error', message: `데이터셋 준비 실패: ${data.error || '알 수 없는 오류'}` })
         addNotification('error', '데이터셋 준비 실패', data.error || '알 수 없는 오류')
-        setTimeout(() => hideProgress(), 3000)
+        /* 실패 후 수동 닫기 */ // 🔧 수정됨
         break
       }
       
@@ -1740,7 +1896,7 @@ const monitorDatasetPreparation = async (jobId) => {
       renderLogs.value.push({ type: 'error', message: `데이터셋 준비 모니터링 오류: ${error.message}` })
       updateProgress(0, '오류', `데이터셋 준비 모니터링 오류: ${error.message}`)
       addNotification('error', '데이터셋 준비 모니터링 오류', error.message)
-      setTimeout(() => hideProgress(), 3000)
+      /* 모니터링 오류 후 수동 닫기 */ // 🔧 수정됨
       break
     }
   }
@@ -1749,7 +1905,7 @@ const monitorDatasetPreparation = async (jobId) => {
     updateProgress(0, '타임아웃', '데이터셋 준비 타임아웃: 최대 대기 시간을 초과했습니다')
     renderLogs.value.push({ type: 'error', message: '데이터셋 준비 타임아웃: 최대 대기 시간을 초과했습니다' })
     addNotification('error', '데이터셋 준비 타임아웃', '최대 대기 시간을 초과했습니다')
-    setTimeout(() => hideProgress(), 3000)
+    /* 타임아웃 후 수동 닫기 */ // 🔧 수정됨
   }
 }
 
@@ -2512,28 +2668,7 @@ onMounted(async () => {
   font-style: italic;
 }
 
-/* 진행률 모달 스타일 */
-.progress-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 1000;
-}
-
-.progress-content {
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  max-width: 500px;
-  width: 90%;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-}
+/* 진행률 모달 스타일 구식 정의 제거 */ /* // 🔧 수정됨 */
 
 .progress-steps {
   margin-top: 20px;
@@ -2586,6 +2721,40 @@ onMounted(async () => {
 
 .progress-step.failed .step-status {
   color: #dc3545;
+}
+
+/* 선형 진행률 UI 추가 */ /* // 🔧 수정됨 */
+.progress-linear {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 10px;
+  background: #eef2f7;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  transition: width 0.25s ease;
+}
+
+.progress-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #374151;
+  font-weight: 500;
+}
+
+.progress-message {
+  color: #6b7280;
+  font-size: 0.9rem;
 }
 
 /* 도움말 섹션 */

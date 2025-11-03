@@ -254,7 +254,7 @@
     </div>
 
     <!-- 진행률 모달 -->
-    <div v-if="showProgressModal" class="progress-modal-overlay" @click="closeProgressModal">
+    <div v-if="showProgressModal" class="progress-modal-overlay"> <!-- // 🔧 수정됨: 오버레이 클릭으로 닫힘 방지 -->
       <div class="progress-modal" @click.stop>
         <div class="progress-modal-header">
           <h3>🚀 처리 진행 중...</h3>
@@ -1269,7 +1269,7 @@ export default {
                 console.log(`🤖 백그라운드 LLM 분석 + CLIP 임베딩 자동화 시작 (${savedParts.length}개 부품)`)
                 const taskId = await startBackgroundAnalysis(selectedSet.value, setParts.value)
                 console.log(`📋 Background task started: ${taskId}`)
-                successMessage.value = `🎉 세트 저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${savedParts.length * 2}초\n📋 작업 ID: ${taskId}`
+                successMessage.value = `🎉 세트 저장 완료!\n\n🤖 자동 처리 시작:\n• LLM 메타데이터 생성\n• CLIP 임베딩 생성 (768차원)\n• 데이터베이스 저장\n\n⏱️ 예상 소요 시간: ${savedParts.length * 2}초\n📋 작업 ID: ${taskId}\n\n⚠️ 다음 단계 필수: Semantic Vector 생성\n→ 메타데이터 관리 페이지 > Semantic Vector 탭에서 생성하세요.\n→ 신규 등록 부품 필터를 사용하면 빠르게 찾을 수 있습니다.`
               } else if (skipLLMAnalysis.value) {
                 console.log(`⚡ LLM 분석 건너뛰기 (빠른 저장 모드)`)
                 successMessage.value = `세트 저장 완료! (빠른 저장 모드)`
@@ -1674,9 +1674,12 @@ export default {
              llmRunningTasks.value.length > 0
     })
 
-    // 모달 표시 상태 감시
-    watch(shouldShowModal, (newValue) => {
-      showProgressModal.value = newValue
+    // 모달 표시 상태 감시 (자동 닫힘 방지)
+    watch(shouldShowModal, (newValue) => { // // 🔧 수정됨
+      if (newValue) {
+        showProgressModal.value = true
+      }
+      // false일 때는 사용자가 X 버튼으로 닫을 때까지 유지
     }, { immediate: true })
 
     return {

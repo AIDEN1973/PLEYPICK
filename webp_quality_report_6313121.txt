@@ -1,0 +1,3446 @@
+
+=== WebP 인코딩 설정 검증 보고서 ===
+데이터셋: output\synthetic\6313121
+검증 시간: 2025-10-29T21:00:32.234007
+
+=== 기술문서 기준 ===
+- 품질: q=90
+- 메서드: -m 6
+- AF: -af on (알파 필터링)
+- 색상 모드: RGB
+- 색상 깊이: 8비트
+- ICC 프로파일: 포함
+- EXIF 메타데이터: 포함
+- 최소 해상도: 512x512
+- 최소 선명도: 50 (Laplacian variance)
+- 최소 SNR: 30dB
+
+=== 검증 결과 ===
+전체 파일: 200개
+통과: 0개
+실패: 200개
+성공률: 0.0%
+
+=== 상세 결과 ===
+
+✗ 실패: 6313121_000.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4629631042480469
+    snr_estimate: 20.94999874328127
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.46 (최소: 50)
+    - SNR이 너무 낮음: 20.95dB (최소: 30dB)
+
+✗ 실패: 6313121_001.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6162433624267578
+    snr_estimate: 19.69567062096456
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.62 (최소: 50)
+    - SNR이 너무 낮음: 19.70dB (최소: 30dB)
+
+✗ 실패: 6313121_002.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.534090042114258
+    snr_estimate: 17.504384424039824
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.53 (최소: 50)
+    - SNR이 너무 낮음: 17.50dB (최소: 30dB)
+
+✗ 실패: 6313121_003.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.4474029541015625
+    snr_estimate: 14.817254940500826
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.45 (최소: 50)
+    - SNR이 너무 낮음: 14.82dB (최소: 30dB)
+
+✗ 실패: 6313121_004.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.415332794189453
+    snr_estimate: 17.67233612113843
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.42 (최소: 50)
+    - SNR이 너무 낮음: 17.67dB (최소: 30dB)
+
+✗ 실패: 6313121_005.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.275339126586914
+    snr_estimate: 15.105905459751233
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.28 (최소: 50)
+    - SNR이 너무 낮음: 15.11dB (최소: 30dB)
+
+✗ 실패: 6313121_006.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.455728530883789
+    snr_estimate: 14.831557001621508
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.46 (최소: 50)
+    - SNR이 너무 낮음: 14.83dB (최소: 30dB)
+
+✗ 실패: 6313121_007.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.825010299682617
+    snr_estimate: 14.689502894901011
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.83 (최소: 50)
+    - SNR이 너무 낮음: 14.69dB (최소: 30dB)
+
+✗ 실패: 6313121_008.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.856357574462891
+    snr_estimate: 14.259284793132396
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.86 (최소: 50)
+    - SNR이 너무 낮음: 14.26dB (최소: 30dB)
+
+✗ 실패: 6313121_009.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5229988098144531
+    snr_estimate: 19.69790349694571
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.52 (최소: 50)
+    - SNR이 너무 낮음: 19.70dB (최소: 30dB)
+
+✗ 실패: 6313121_010.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.829458236694336
+    snr_estimate: 14.93736274240874
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.83 (최소: 50)
+    - SNR이 너무 낮음: 14.94dB (최소: 30dB)
+
+✗ 실패: 6313121_011.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.9895763397216797
+    snr_estimate: 14.816263990187936
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.99 (최소: 50)
+    - SNR이 너무 낮음: 14.82dB (최소: 30dB)
+
+✗ 실패: 6313121_012.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 7.026948928833008
+    snr_estimate: 14.310966979243807
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 7.03 (최소: 50)
+    - SNR이 너무 낮음: 14.31dB (최소: 30dB)
+
+✗ 실패: 6313121_013.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.460023880004883
+    snr_estimate: 13.465080438853596
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.46 (최소: 50)
+    - SNR이 너무 낮음: 13.47dB (최소: 30dB)
+
+✗ 실패: 6313121_014.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.540435791015625
+    snr_estimate: 19.307927090196074
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.54 (최소: 50)
+    - SNR이 너무 낮음: 19.31dB (최소: 30dB)
+
+✗ 실패: 6313121_015.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4215164184570312
+    snr_estimate: 17.1062852038665
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.42 (최소: 50)
+    - SNR이 너무 낮음: 17.11dB (최소: 30dB)
+
+✗ 실패: 6313121_016.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5031814575195312
+    snr_estimate: 20.50186696131487
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.50 (최소: 50)
+    - SNR이 너무 낮음: 20.50dB (최소: 30dB)
+
+✗ 실패: 6313121_017.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.506021499633789
+    snr_estimate: 21.320160577404465
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.51 (최소: 50)
+    - SNR이 너무 낮음: 21.32dB (최소: 30dB)
+
+✗ 실패: 6313121_018.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.642848968505859
+    snr_estimate: 12.803597727564293
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.64 (최소: 50)
+    - SNR이 너무 낮음: 12.80dB (최소: 30dB)
+
+✗ 실패: 6313121_019.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.145721435546875
+    snr_estimate: 13.766708909542928
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.15 (최소: 50)
+    - SNR이 너무 낮음: 13.77dB (최소: 30dB)
+
+✗ 실패: 6313121_020.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.7405624389648438
+    snr_estimate: 17.523554708578907
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.74 (최소: 50)
+    - SNR이 너무 낮음: 17.52dB (최소: 30dB)
+
+✗ 실패: 6313121_021.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.776126861572266
+    snr_estimate: 14.547418453415037
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.78 (최소: 50)
+    - SNR이 너무 낮음: 14.55dB (최소: 30dB)
+
+✗ 실패: 6313121_022.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.058391571044922
+    snr_estimate: 15.492283327193654
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.06 (최소: 50)
+    - SNR이 너무 낮음: 15.49dB (최소: 30dB)
+
+✗ 실패: 6313121_023.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.380069732666016
+    snr_estimate: 13.463160198405328
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.38 (최소: 50)
+    - SNR이 너무 낮음: 13.46dB (최소: 30dB)
+
+✗ 실패: 6313121_024.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5341796875
+    snr_estimate: 21.464474153595706
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.53 (최소: 50)
+    - SNR이 너무 낮음: 21.46dB (최소: 30dB)
+
+✗ 실패: 6313121_025.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4824085235595703
+    snr_estimate: 20.97372081159889
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.48 (최소: 50)
+    - SNR이 너무 낮음: 20.97dB (최소: 30dB)
+
+✗ 실패: 6313121_026.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.281129837036133
+    snr_estimate: 13.84000493789534
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.28 (최소: 50)
+    - SNR이 너무 낮음: 13.84dB (최소: 30dB)
+
+✗ 실패: 6313121_027.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5999565124511719
+    snr_estimate: 20.329632792256433
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.60 (최소: 50)
+    - SNR이 너무 낮음: 20.33dB (최소: 30dB)
+
+✗ 실패: 6313121_028.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.2843399047851562
+    snr_estimate: 19.46691512716731
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.28 (최소: 50)
+    - SNR이 너무 낮음: 19.47dB (최소: 30dB)
+
+✗ 실패: 6313121_029.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.1398048400878906
+    snr_estimate: 18.55477383629077
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.14 (최소: 50)
+    - SNR이 너무 낮음: 18.55dB (최소: 30dB)
+
+✗ 실패: 6313121_030.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.7087516784667969
+    snr_estimate: 20.81605610916771
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.71 (최소: 50)
+    - SNR이 너무 낮음: 20.82dB (최소: 30dB)
+
+✗ 실패: 6313121_031.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4512863159179688
+    snr_estimate: 16.08795207366514
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.45 (최소: 50)
+    - SNR이 너무 낮음: 16.09dB (최소: 30dB)
+
+✗ 실패: 6313121_032.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.163074493408203
+    snr_estimate: 16.48172961007245
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.16 (최소: 50)
+    - SNR이 너무 낮음: 16.48dB (최소: 30dB)
+
+✗ 실패: 6313121_033.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.3845272064208984
+    snr_estimate: 16.292344409008376
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.38 (최소: 50)
+    - SNR이 너무 낮음: 16.29dB (최소: 30dB)
+
+✗ 실패: 6313121_034.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5242080688476562
+    snr_estimate: 20.68263494630656
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.52 (최소: 50)
+    - SNR이 너무 낮음: 20.68dB (최소: 30dB)
+
+✗ 실패: 6313121_035.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 13.411687850952148
+    snr_estimate: 10.552199324882732
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 13.41 (최소: 50)
+    - SNR이 너무 낮음: 10.55dB (최소: 30dB)
+
+✗ 실패: 6313121_036.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.417022705078125
+    snr_estimate: 21.203149672451683
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.42 (최소: 50)
+    - SNR이 너무 낮음: 21.20dB (최소: 30dB)
+
+✗ 실패: 6313121_037.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.367893218994141
+    snr_estimate: 15.139874583487947
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.37 (최소: 50)
+    - SNR이 너무 낮음: 15.14dB (최소: 30dB)
+
+✗ 실패: 6313121_038.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.440578460693359
+    snr_estimate: 15.000237356439488
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.44 (최소: 50)
+    - SNR이 너무 낮음: 15.00dB (최소: 30dB)
+
+✗ 실패: 6313121_039.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 8.398059844970703
+    snr_estimate: 12.418626351668848
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 8.40 (최소: 50)
+    - SNR이 너무 낮음: 12.42dB (최소: 30dB)
+
+✗ 실패: 6313121_040.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.313486099243164
+    snr_estimate: 16.678429428604254
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.31 (최소: 50)
+    - SNR이 너무 낮음: 16.68dB (최소: 30dB)
+
+✗ 실패: 6313121_041.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4657344818115234
+    snr_estimate: 20.783177546492464
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.47 (최소: 50)
+    - SNR이 너무 낮음: 20.78dB (최소: 30dB)
+
+✗ 실패: 6313121_042.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.0502166748046875
+    snr_estimate: 17.763695010709053
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.05 (최소: 50)
+    - SNR이 너무 낮음: 17.76dB (최소: 30dB)
+
+✗ 실패: 6313121_043.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.799932479858398
+    snr_estimate: 13.836894033112088
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.80 (최소: 50)
+    - SNR이 너무 낮음: 13.84dB (최소: 30dB)
+
+✗ 실패: 6313121_044.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.707437515258789
+    snr_estimate: 22.050417070153596
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.71 (최소: 50)
+    - SNR이 너무 낮음: 22.05dB (최소: 30dB)
+
+✗ 실패: 6313121_045.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5316848754882812
+    snr_estimate: 20.850806062327266
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.53 (최소: 50)
+    - SNR이 너무 낮음: 20.85dB (최소: 30dB)
+
+✗ 실패: 6313121_046.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.103082656860352
+    snr_estimate: 15.137415475881317
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.10 (최소: 50)
+    - SNR이 너무 낮음: 15.14dB (최소: 30dB)
+
+✗ 실패: 6313121_047.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.03129768371582
+    snr_estimate: 15.12587830746195
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.03 (최소: 50)
+    - SNR이 너무 낮음: 15.13dB (최소: 30dB)
+
+✗ 실패: 6313121_048.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6298866271972656
+    snr_estimate: 20.314069301738154
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.63 (최소: 50)
+    - SNR이 너무 낮음: 20.31dB (최소: 30dB)
+
+✗ 실패: 6313121_049.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6339778900146484
+    snr_estimate: 21.670524628655585
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.63 (최소: 50)
+    - SNR이 너무 낮음: 21.67dB (최소: 30dB)
+
+✗ 실패: 6313121_050.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.625604629516602
+    snr_estimate: 14.998385850599462
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.63 (최소: 50)
+    - SNR이 너무 낮음: 15.00dB (최소: 30dB)
+
+✗ 실패: 6313121_051.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 15.969121932983398
+    snr_estimate: 7.53209197573756
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 15.97 (최소: 50)
+    - SNR이 너무 낮음: 7.53dB (최소: 30dB)
+
+✗ 실패: 6313121_052.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.9490623474121094
+    snr_estimate: 15.92593204107236
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.95 (최소: 50)
+    - SNR이 너무 낮음: 15.93dB (최소: 30dB)
+
+✗ 실패: 6313121_053.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2921295166015625
+    snr_estimate: 19.712612322180888
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.29 (최소: 50)
+    - SNR이 너무 낮음: 19.71dB (최소: 30dB)
+
+✗ 실패: 6313121_054.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6684226989746094
+    snr_estimate: 19.150458735105268
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.67 (최소: 50)
+    - SNR이 너무 낮음: 19.15dB (최소: 30dB)
+
+✗ 실패: 6313121_055.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3297157287597656
+    snr_estimate: 21.322858172755296
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.33 (최소: 50)
+    - SNR이 너무 낮음: 21.32dB (최소: 30dB)
+
+✗ 실패: 6313121_056.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.260913848876953
+    snr_estimate: 13.935659166428172
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.26 (최소: 50)
+    - SNR이 너무 낮음: 13.94dB (최소: 30dB)
+
+✗ 실패: 6313121_057.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.855762481689453
+    snr_estimate: 17.22347199625188
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.86 (최소: 50)
+    - SNR이 너무 낮음: 17.22dB (최소: 30dB)
+
+✗ 실패: 6313121_058.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.368734359741211
+    snr_estimate: 14.534669029734772
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.37 (최소: 50)
+    - SNR이 너무 낮음: 14.53dB (최소: 30dB)
+
+✗ 실패: 6313121_059.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.506683349609375
+    snr_estimate: 20.164899841494766
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.51 (최소: 50)
+    - SNR이 너무 낮음: 20.16dB (최소: 30dB)
+
+✗ 실패: 6313121_060.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.481517791748047
+    snr_estimate: 12.487546106289972
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.48 (최소: 50)
+    - SNR이 너무 낮음: 12.49dB (최소: 30dB)
+
+✗ 실패: 6313121_061.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.049640655517578
+    snr_estimate: 14.495403810853055
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.05 (최소: 50)
+    - SNR이 너무 낮음: 14.50dB (최소: 30dB)
+
+✗ 실패: 6313121_062.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.353847503662109
+    snr_estimate: 15.468523509177825
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.35 (최소: 50)
+    - SNR이 너무 낮음: 15.47dB (최소: 30dB)
+
+✗ 실패: 6313121_063.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3773193359375
+    snr_estimate: 20.40769486410386
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.38 (최소: 50)
+    - SNR이 너무 낮음: 20.41dB (최소: 30dB)
+
+✗ 실패: 6313121_064.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3327922821044922
+    snr_estimate: 19.8001689716822
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.33 (최소: 50)
+    - SNR이 너무 낮음: 19.80dB (최소: 30dB)
+
+✗ 실패: 6313121_065.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4779472351074219
+    snr_estimate: 20.766663332841674
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.48 (최소: 50)
+    - SNR이 너무 낮음: 20.77dB (최소: 30dB)
+
+✗ 실패: 6313121_066.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6055278778076172
+    snr_estimate: 19.47981691022529
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.61 (최소: 50)
+    - SNR이 너무 낮음: 19.48dB (최소: 30dB)
+
+✗ 실패: 6313121_067.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.6678619384765625
+    snr_estimate: 14.291159943892374
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.67 (최소: 50)
+    - SNR이 너무 낮음: 14.29dB (최소: 30dB)
+
+✗ 실패: 6313121_068.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.277456283569336
+    snr_estimate: 13.138128527465192
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.28 (최소: 50)
+    - SNR이 너무 낮음: 13.14dB (최소: 30dB)
+
+✗ 실패: 6313121_069.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3326606750488281
+    snr_estimate: 20.20862799927349
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.33 (최소: 50)
+    - SNR이 너무 낮음: 20.21dB (최소: 30dB)
+
+✗ 실패: 6313121_070.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4309616088867188
+    snr_estimate: 16.83578964836961
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.43 (최소: 50)
+    - SNR이 너무 낮음: 16.84dB (최소: 30dB)
+
+✗ 실패: 6313121_071.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.54058837890625
+    snr_estimate: 20.524827793184595
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.54 (최소: 50)
+    - SNR이 너무 낮음: 20.52dB (최소: 30dB)
+
+✗ 실패: 6313121_072.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4233741760253906
+    snr_estimate: 20.682361047253252
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.42 (최소: 50)
+    - SNR이 너무 낮음: 20.68dB (최소: 30dB)
+
+✗ 실패: 6313121_073.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.230222702026367
+    snr_estimate: 19.129987527926453
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.23 (최소: 50)
+    - SNR이 너무 낮음: 19.13dB (최소: 30dB)
+
+✗ 실패: 6313121_074.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.0734500885009766
+    snr_estimate: 18.247617746871295
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.07 (최소: 50)
+    - SNR이 너무 낮음: 18.25dB (최소: 30dB)
+
+✗ 실패: 6313121_075.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.2727909088134766
+    snr_estimate: 17.912045478600387
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.27 (최소: 50)
+    - SNR이 너무 낮음: 17.91dB (최소: 30dB)
+
+✗ 실패: 6313121_076.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.128021240234375
+    snr_estimate: 19.222179683538435
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.13 (최소: 50)
+    - SNR이 너무 낮음: 19.22dB (최소: 30dB)
+
+✗ 실패: 6313121_077.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3371448516845703
+    snr_estimate: 21.437565710992217
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.34 (최소: 50)
+    - SNR이 너무 낮음: 21.44dB (최소: 30dB)
+
+✗ 실패: 6313121_078.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.659719467163086
+    snr_estimate: 20.409243981489045
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.66 (최소: 50)
+    - SNR이 너무 낮음: 20.41dB (최소: 30dB)
+
+✗ 실패: 6313121_079.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.625213623046875
+    snr_estimate: 21.537268648405067
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.63 (최소: 50)
+    - SNR이 너무 낮음: 21.54dB (최소: 30dB)
+
+✗ 실패: 6313121_080.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4095783233642578
+    snr_estimate: 19.738426833967242
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.41 (최소: 50)
+    - SNR이 너무 낮음: 19.74dB (최소: 30dB)
+
+✗ 실패: 6313121_081.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2209281921386719
+    snr_estimate: 18.300493040144097
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.22 (최소: 50)
+    - SNR이 너무 낮음: 18.30dB (최소: 30dB)
+
+✗ 실패: 6313121_082.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.161111831665039
+    snr_estimate: 14.021691030707132
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.16 (최소: 50)
+    - SNR이 너무 낮음: 14.02dB (최소: 30dB)
+
+✗ 실패: 6313121_083.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.021961212158203
+    snr_estimate: 14.414387804412295
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.02 (최소: 50)
+    - SNR이 너무 낮음: 14.41dB (최소: 30dB)
+
+✗ 실패: 6313121_084.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4191017150878906
+    snr_estimate: 18.04841730397385
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.42 (최소: 50)
+    - SNR이 너무 낮음: 18.05dB (최소: 30dB)
+
+✗ 실패: 6313121_085.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.645660400390625
+    snr_estimate: 16.533817430361275
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.65 (최소: 50)
+    - SNR이 너무 낮음: 16.53dB (최소: 30dB)
+
+✗ 실패: 6313121_086.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.449575424194336
+    snr_estimate: 20.8480827626623
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.45 (최소: 50)
+    - SNR이 너무 낮음: 20.85dB (최소: 30dB)
+
+✗ 실패: 6313121_087.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.104974746704102
+    snr_estimate: 17.239014286507345
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.10 (최소: 50)
+    - SNR이 너무 낮음: 17.24dB (최소: 30dB)
+
+✗ 실패: 6313121_088.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.379922866821289
+    snr_estimate: 14.694338334436004
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.38 (최소: 50)
+    - SNR이 너무 낮음: 14.69dB (최소: 30dB)
+
+✗ 실패: 6313121_089.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.751220703125
+    snr_estimate: 19.57701146180782
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.75 (최소: 50)
+    - SNR이 너무 낮음: 19.58dB (최소: 30dB)
+
+✗ 실패: 6313121_090.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.053915023803711
+    snr_estimate: 18.39330252924902
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.05 (최소: 50)
+    - SNR이 너무 낮음: 18.39dB (최소: 30dB)
+
+✗ 실패: 6313121_091.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4514350891113281
+    snr_estimate: 19.066412093691095
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.45 (최소: 50)
+    - SNR이 너무 낮음: 19.07dB (최소: 30dB)
+
+✗ 실패: 6313121_092.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3737869262695312
+    snr_estimate: 20.75901711070835
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.37 (최소: 50)
+    - SNR이 너무 낮음: 20.76dB (최소: 30dB)
+
+✗ 실패: 6313121_093.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.8423194885253906
+    snr_estimate: 14.532547317039148
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.84 (최소: 50)
+    - SNR이 너무 낮음: 14.53dB (최소: 30dB)
+
+✗ 실패: 6313121_094.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6349830627441406
+    snr_estimate: 20.618711439180476
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.63 (최소: 50)
+    - SNR이 너무 낮음: 20.62dB (최소: 30dB)
+
+✗ 실패: 6313121_095.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 7.911027908325195
+    snr_estimate: 13.258084172647518
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 7.91 (최소: 50)
+    - SNR이 너무 낮음: 13.26dB (최소: 30dB)
+
+✗ 실패: 6313121_096.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.2753524780273438
+    snr_estimate: 18.515233171161988
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.28 (최소: 50)
+    - SNR이 너무 낮음: 18.52dB (최소: 30dB)
+
+✗ 실패: 6313121_097.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.0341529846191406
+    snr_estimate: 19.157043949371545
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.03 (최소: 50)
+    - SNR이 너무 낮음: 19.16dB (최소: 30dB)
+
+✗ 실패: 6313121_098.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4018898010253906
+    snr_estimate: 15.584900620032835
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.40 (최소: 50)
+    - SNR이 너무 낮음: 15.58dB (최소: 30dB)
+
+✗ 실패: 6313121_099.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.0199718475341797
+    snr_estimate: 17.409221799103005
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.02 (최소: 50)
+    - SNR이 너무 낮음: 17.41dB (최소: 30dB)
+
+✗ 실패: 6313121_100.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.0797863006591797
+    snr_estimate: 18.84462303315641
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.08 (최소: 50)
+    - SNR이 너무 낮음: 18.84dB (최소: 30dB)
+
+✗ 실패: 6313121_101.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.670612335205078
+    snr_estimate: 14.578329589937272
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.67 (최소: 50)
+    - SNR이 너무 낮음: 14.58dB (최소: 30dB)
+
+✗ 실패: 6313121_102.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.436891555786133
+    snr_estimate: 16.55341154328791
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.44 (최소: 50)
+    - SNR이 너무 낮음: 16.55dB (최소: 30dB)
+
+✗ 실패: 6313121_103.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4063224792480469
+    snr_estimate: 19.65358521534511
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.41 (최소: 50)
+    - SNR이 너무 낮음: 19.65dB (최소: 30dB)
+
+✗ 실패: 6313121_104.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6959648132324219
+    snr_estimate: 20.72775088430076
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.70 (최소: 50)
+    - SNR이 너무 낮음: 20.73dB (최소: 30dB)
+
+✗ 실패: 6313121_105.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5444221496582031
+    snr_estimate: 21.333547666474914
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.54 (최소: 50)
+    - SNR이 너무 낮음: 21.33dB (최소: 30dB)
+
+✗ 실패: 6313121_106.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3944072723388672
+    snr_estimate: 21.949222203012457
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.39 (최소: 50)
+    - SNR이 너무 낮음: 21.95dB (최소: 30dB)
+
+✗ 실패: 6313121_107.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3858699798583984
+    snr_estimate: 21.428074431230485
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.39 (최소: 50)
+    - SNR이 너무 낮음: 21.43dB (최소: 30dB)
+
+✗ 실패: 6313121_108.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.7613410949707031
+    snr_estimate: 21.159325975490674
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.76 (최소: 50)
+    - SNR이 너무 낮음: 21.16dB (최소: 30dB)
+
+✗ 실패: 6313121_109.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5183048248291016
+    snr_estimate: 20.5253380782225
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.52 (최소: 50)
+    - SNR이 너무 낮음: 20.53dB (최소: 30dB)
+
+✗ 실패: 6313121_110.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.241209030151367
+    snr_estimate: 16.455489974518127
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.24 (최소: 50)
+    - SNR이 너무 낮음: 16.46dB (최소: 30dB)
+
+✗ 실패: 6313121_111.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.5801830291748047
+    snr_estimate: 18.648504275083305
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.58 (최소: 50)
+    - SNR이 너무 낮음: 18.65dB (최소: 30dB)
+
+✗ 실패: 6313121_112.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 13.390129089355469
+    snr_estimate: 9.781268610964975
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 13.39 (최소: 50)
+    - SNR이 너무 낮음: 9.78dB (최소: 30dB)
+
+✗ 실패: 6313121_113.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4018268585205078
+    snr_estimate: 20.30484784888564
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.40 (최소: 50)
+    - SNR이 너무 낮음: 20.30dB (최소: 30dB)
+
+✗ 실패: 6313121_114.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.074108123779297
+    snr_estimate: 18.292870426827935
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.07 (최소: 50)
+    - SNR이 너무 낮음: 18.29dB (최소: 30dB)
+
+✗ 실패: 6313121_115.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.1391353607177734
+    snr_estimate: 19.063999937434552
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.14 (최소: 50)
+    - SNR이 너무 낮음: 19.06dB (최소: 30dB)
+
+✗ 실패: 6313121_116.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3087406158447266
+    snr_estimate: 20.959815727748456
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.31 (최소: 50)
+    - SNR이 너무 낮음: 20.96dB (최소: 30dB)
+
+✗ 실패: 6313121_117.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2936573028564453
+    snr_estimate: 21.194727754888415
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.29 (최소: 50)
+    - SNR이 너무 낮음: 21.19dB (최소: 30dB)
+
+✗ 실패: 6313121_118.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.947153091430664
+    snr_estimate: 17.947781509160997
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.95 (최소: 50)
+    - SNR이 너무 낮음: 17.95dB (최소: 30dB)
+
+✗ 실패: 6313121_119.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.5068740844726562
+    snr_estimate: 17.800315326028716
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.51 (최소: 50)
+    - SNR이 너무 낮음: 17.80dB (최소: 30dB)
+
+✗ 실패: 6313121_120.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.1992626190185547
+    snr_estimate: 20.686967450317233
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.20 (최소: 50)
+    - SNR이 너무 낮음: 20.69dB (최소: 30dB)
+
+✗ 실패: 6313121_121.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4341163635253906
+    snr_estimate: 20.7742388950585
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.43 (최소: 50)
+    - SNR이 너무 낮음: 20.77dB (최소: 30dB)
+
+✗ 실패: 6313121_122.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5322189331054688
+    snr_estimate: 20.549519686884622
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.53 (최소: 50)
+    - SNR이 너무 낮음: 20.55dB (최소: 30dB)
+
+✗ 실패: 6313121_123.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.754789352416992
+    snr_estimate: 16.224955773263567
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.75 (최소: 50)
+    - SNR이 너무 낮음: 16.22dB (최소: 30dB)
+
+✗ 실패: 6313121_124.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.934286117553711
+    snr_estimate: 15.390713471820984
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.93 (최소: 50)
+    - SNR이 너무 낮음: 15.39dB (최소: 30dB)
+
+✗ 실패: 6313121_125.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.470315933227539
+    snr_estimate: 21.228377196938126
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.47 (최소: 50)
+    - SNR이 너무 낮음: 21.23dB (최소: 30dB)
+
+✗ 실패: 6313121_126.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.8895092010498047
+    snr_estimate: 17.652314408347962
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.89 (최소: 50)
+    - SNR이 너무 낮음: 17.65dB (최소: 30dB)
+
+✗ 실패: 6313121_127.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6429710388183594
+    snr_estimate: 21.463303580052774
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.64 (최소: 50)
+    - SNR이 너무 낮음: 21.46dB (최소: 30dB)
+
+✗ 실패: 6313121_128.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2336483001708984
+    snr_estimate: 18.92871728002015
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.23 (최소: 50)
+    - SNR이 너무 낮음: 18.93dB (최소: 30dB)
+
+✗ 실패: 6313121_129.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 11.15451431274414
+    snr_estimate: 11.060788201743847
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 11.15 (최소: 50)
+    - SNR이 너무 낮음: 11.06dB (최소: 30dB)
+
+✗ 실패: 6313121_130.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5469112396240234
+    snr_estimate: 18.299861392931675
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.55 (최소: 50)
+    - SNR이 너무 낮음: 18.30dB (최소: 30dB)
+
+✗ 실패: 6313121_131.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5975055694580078
+    snr_estimate: 19.87342516776574
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.60 (최소: 50)
+    - SNR이 너무 낮음: 19.87dB (최소: 30dB)
+
+✗ 실패: 6313121_132.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4038734436035156
+    snr_estimate: 17.83683325923751
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.40 (최소: 50)
+    - SNR이 너무 낮음: 17.84dB (최소: 30dB)
+
+✗ 실패: 6313121_133.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 7.642185211181641
+    snr_estimate: 10.852665165151391
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 7.64 (최소: 50)
+    - SNR이 너무 낮음: 10.85dB (최소: 30dB)
+
+✗ 실패: 6313121_134.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.8542118072509766
+    snr_estimate: 17.148373580398605
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.85 (최소: 50)
+    - SNR이 너무 낮음: 17.15dB (최소: 30dB)
+
+✗ 실패: 6313121_135.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.021585464477539
+    snr_estimate: 19.47766177232146
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.02 (최소: 50)
+    - SNR이 너무 낮음: 19.48dB (최소: 30dB)
+
+✗ 실패: 6313121_136.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6481666564941406
+    snr_estimate: 21.458445652572614
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.65 (최소: 50)
+    - SNR이 너무 낮음: 21.46dB (최소: 30dB)
+
+✗ 실패: 6313121_137.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5394153594970703
+    snr_estimate: 20.003255296982335
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.54 (최소: 50)
+    - SNR이 너무 낮음: 20.00dB (최소: 30dB)
+
+✗ 실패: 6313121_138.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.994760513305664
+    snr_estimate: 18.47150884012035
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.99 (최소: 50)
+    - SNR이 너무 낮음: 18.47dB (최소: 30dB)
+
+✗ 실패: 6313121_139.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3909454345703125
+    snr_estimate: 21.469192699021757
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.39 (최소: 50)
+    - SNR이 너무 낮음: 21.47dB (최소: 30dB)
+
+✗ 실패: 6313121_140.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.551412582397461
+    snr_estimate: 17.697023035844193
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.55 (최소: 50)
+    - SNR이 너무 낮음: 17.70dB (최소: 30dB)
+
+✗ 실패: 6313121_141.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4394550323486328
+    snr_estimate: 20.33668468614784
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.44 (최소: 50)
+    - SNR이 너무 낮음: 20.34dB (최소: 30dB)
+
+✗ 실패: 6313121_142.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.415945053100586
+    snr_estimate: 16.22344435916505
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.42 (최소: 50)
+    - SNR이 너무 낮음: 16.22dB (최소: 30dB)
+
+✗ 실패: 6313121_143.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.0654296875
+    snr_estimate: 18.121203423538198
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.07 (최소: 50)
+    - SNR이 너무 낮음: 18.12dB (최소: 30dB)
+
+✗ 실패: 6313121_144.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.601825714111328
+    snr_estimate: 16.82631222006127
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.60 (최소: 50)
+    - SNR이 너무 낮음: 16.83dB (최소: 30dB)
+
+✗ 실패: 6313121_145.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5463638305664062
+    snr_estimate: 21.464301782370825
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.55 (최소: 50)
+    - SNR이 너무 낮음: 21.46dB (최소: 30dB)
+
+✗ 실패: 6313121_146.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3196258544921875
+    snr_estimate: 19.09267590690232
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.32 (최소: 50)
+    - SNR이 너무 낮음: 19.09dB (최소: 30dB)
+
+✗ 실패: 6313121_147.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3892040252685547
+    snr_estimate: 20.73808361426216
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.39 (최소: 50)
+    - SNR이 너무 낮음: 20.74dB (최소: 30dB)
+
+✗ 실패: 6313121_148.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4317073822021484
+    snr_estimate: 19.963131448536785
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.43 (최소: 50)
+    - SNR이 너무 낮음: 19.96dB (최소: 30dB)
+
+✗ 실패: 6313121_149.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.6044082641601562
+    snr_estimate: 17.13048732595188
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.60 (최소: 50)
+    - SNR이 너무 낮음: 17.13dB (최소: 30dB)
+
+✗ 실패: 6313121_150.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3889026641845703
+    snr_estimate: 18.43879854859905
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.39 (최소: 50)
+    - SNR이 너무 낮음: 18.44dB (최소: 30dB)
+
+✗ 실패: 6313121_151.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.776529312133789
+    snr_estimate: 14.879370255692576
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.78 (최소: 50)
+    - SNR이 너무 낮음: 14.88dB (최소: 30dB)
+
+✗ 실패: 6313121_152.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5106468200683594
+    snr_estimate: 20.597457436234787
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.51 (최소: 50)
+    - SNR이 너무 낮음: 20.60dB (최소: 30dB)
+
+✗ 실패: 6313121_153.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.536783218383789
+    snr_estimate: 21.379720806978675
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.54 (최소: 50)
+    - SNR이 너무 낮음: 21.38dB (최소: 30dB)
+
+✗ 실패: 6313121_154.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.479642868041992
+    snr_estimate: 14.18905533990316
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.48 (최소: 50)
+    - SNR이 너무 낮음: 14.19dB (최소: 30dB)
+
+✗ 실패: 6313121_155.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.998077392578125
+    snr_estimate: 18.66190758312373
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.00 (최소: 50)
+    - SNR이 너무 낮음: 18.66dB (최소: 30dB)
+
+✗ 실패: 6313121_156.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.35479736328125
+    snr_estimate: 21.607409210679617
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.35 (최소: 50)
+    - SNR이 너무 낮음: 21.61dB (최소: 30dB)
+
+✗ 실패: 6313121_157.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.4521255493164062
+    snr_estimate: 17.98020155788937
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.45 (최소: 50)
+    - SNR이 너무 낮음: 17.98dB (최소: 30dB)
+
+✗ 실패: 6313121_158.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3744773864746094
+    snr_estimate: 21.25388457919801
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.37 (최소: 50)
+    - SNR이 너무 낮음: 21.25dB (최소: 30dB)
+
+✗ 실패: 6313121_159.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.297414779663086
+    snr_estimate: 21.88463636494967
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.30 (최소: 50)
+    - SNR이 너무 낮음: 21.88dB (최소: 30dB)
+
+✗ 실패: 6313121_160.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2026214599609375
+    snr_estimate: 18.389758872560847
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.20 (최소: 50)
+    - SNR이 너무 낮음: 18.39dB (최소: 30dB)
+
+✗ 실패: 6313121_161.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3748855590820312
+    snr_estimate: 18.939336183005615
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.37 (최소: 50)
+    - SNR이 너무 낮음: 18.94dB (최소: 30dB)
+
+✗ 실패: 6313121_162.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4475440979003906
+    snr_estimate: 19.72074755259323
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.45 (최소: 50)
+    - SNR이 너무 낮음: 19.72dB (최소: 30dB)
+
+✗ 실패: 6313121_163.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.1750659942626953
+    snr_estimate: 18.54113936239538
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.18 (최소: 50)
+    - SNR이 너무 낮음: 18.54dB (최소: 30dB)
+
+✗ 실패: 6313121_164.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.475101470947266
+    snr_estimate: 12.697198820373341
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.48 (최소: 50)
+    - SNR이 너무 낮음: 12.70dB (최소: 30dB)
+
+✗ 실패: 6313121_165.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.454990386962891
+    snr_estimate: 15.0797299311661
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.45 (최소: 50)
+    - SNR이 너무 낮음: 15.08dB (최소: 30dB)
+
+✗ 실패: 6313121_166.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.226524353027344
+    snr_estimate: 14.488141248311257
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.23 (최소: 50)
+    - SNR이 너무 낮음: 14.49dB (최소: 30dB)
+
+✗ 실패: 6313121_167.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3776988983154297
+    snr_estimate: 19.547268873124
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.38 (최소: 50)
+    - SNR이 너무 낮음: 19.55dB (최소: 30dB)
+
+✗ 실패: 6313121_168.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3691082000732422
+    snr_estimate: 18.93439613183319
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.37 (최소: 50)
+    - SNR이 너무 낮음: 18.93dB (최소: 30dB)
+
+✗ 실패: 6313121_169.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.267847061157227
+    snr_estimate: 15.224842893566118
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.27 (최소: 50)
+    - SNR이 너무 낮음: 15.22dB (최소: 30dB)
+
+✗ 실패: 6313121_170.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.5109214782714844
+    snr_estimate: 17.077507209364448
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.51 (최소: 50)
+    - SNR이 너무 낮음: 17.08dB (최소: 30dB)
+
+✗ 실패: 6313121_171.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.268795013427734
+    snr_estimate: 16.077016552295746
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.27 (최소: 50)
+    - SNR이 너무 낮음: 16.08dB (최소: 30dB)
+
+✗ 실패: 6313121_172.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.439239501953125
+    snr_estimate: 20.58652837340127
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.44 (최소: 50)
+    - SNR이 너무 낮음: 20.59dB (최소: 30dB)
+
+✗ 실패: 6313121_173.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2725906372070312
+    snr_estimate: 20.533840434596154
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.27 (최소: 50)
+    - SNR이 너무 낮음: 20.53dB (최소: 30dB)
+
+✗ 실패: 6313121_174.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 3.0660133361816406
+    snr_estimate: 17.949761889211672
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 3.07 (최소: 50)
+    - SNR이 너무 낮음: 17.95dB (최소: 30dB)
+
+✗ 실패: 6313121_175.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5149059295654297
+    snr_estimate: 19.811739160895026
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.51 (최소: 50)
+    - SNR이 너무 낮음: 19.81dB (최소: 30dB)
+
+✗ 실패: 6313121_176.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.3442325592041016
+    snr_estimate: 17.7841639935972
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.34 (최소: 50)
+    - SNR이 너무 낮음: 17.78dB (최소: 30dB)
+
+✗ 실패: 6313121_177.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.60328483581543
+    snr_estimate: 12.746302658198331
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.60 (최소: 50)
+    - SNR이 너무 낮음: 12.75dB (최소: 30dB)
+
+✗ 실패: 6313121_178.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4504337310791016
+    snr_estimate: 21.049967156740305
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.45 (최소: 50)
+    - SNR이 너무 낮음: 21.05dB (최소: 30dB)
+
+✗ 실패: 6313121_179.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6327362060546875
+    snr_estimate: 20.44491225876776
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.63 (최소: 50)
+    - SNR이 너무 낮음: 20.44dB (최소: 30dB)
+
+✗ 실패: 6313121_180.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4644222259521484
+    snr_estimate: 20.010434103679366
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.46 (최소: 50)
+    - SNR이 너무 낮음: 20.01dB (최소: 30dB)
+
+✗ 실패: 6313121_181.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.5716781616210938
+    snr_estimate: 19.93622528160813
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.57 (최소: 50)
+    - SNR이 너무 낮음: 19.94dB (최소: 30dB)
+
+✗ 실패: 6313121_182.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.257486343383789
+    snr_estimate: 20.087776684092752
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.26 (최소: 50)
+    - SNR이 너무 낮음: 20.09dB (최소: 30dB)
+
+✗ 실패: 6313121_183.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.750165939331055
+    snr_estimate: 13.848111295274425
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.75 (최소: 50)
+    - SNR이 너무 낮음: 13.85dB (최소: 30dB)
+
+✗ 실패: 6313121_184.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.87530517578125
+    snr_estimate: 17.087344610015343
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.88 (최소: 50)
+    - SNR이 너무 낮음: 17.09dB (최소: 30dB)
+
+✗ 실패: 6313121_185.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.082277297973633
+    snr_estimate: 14.286494172918108
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.08 (최소: 50)
+    - SNR이 너무 낮음: 14.29dB (최소: 30dB)
+
+✗ 실패: 6313121_186.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.880138397216797
+    snr_estimate: 18.423244107165814
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.88 (최소: 50)
+    - SNR이 너무 낮음: 18.42dB (최소: 30dB)
+
+✗ 실패: 6313121_187.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 6.639011383056641
+    snr_estimate: 13.1647569314417
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 6.64 (최소: 50)
+    - SNR이 너무 낮음: 13.16dB (최소: 30dB)
+
+✗ 실패: 6313121_188.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.6058578491210938
+    snr_estimate: 18.189040386606163
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.61 (최소: 50)
+    - SNR이 너무 낮음: 18.19dB (최소: 30dB)
+
+✗ 실패: 6313121_189.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2803497314453125
+    snr_estimate: 20.488557513110997
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.28 (최소: 50)
+    - SNR이 너무 낮음: 20.49dB (최소: 30dB)
+
+✗ 실패: 6313121_190.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.2611045837402344
+    snr_estimate: 18.997987471627884
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.26 (최소: 50)
+    - SNR이 너무 낮음: 19.00dB (최소: 30dB)
+
+✗ 실패: 6313121_191.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 2.2032928466796875
+    snr_estimate: 18.212185661365524
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 2.20 (최소: 50)
+    - SNR이 너무 낮음: 18.21dB (최소: 30dB)
+
+✗ 실패: 6313121_192.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.490137100219727
+    snr_estimate: 15.208460586359644
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.49 (최소: 50)
+    - SNR이 너무 낮음: 15.21dB (최소: 30dB)
+
+✗ 실패: 6313121_193.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.1715965270996094
+    snr_estimate: 19.055381042234586
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.17 (최소: 50)
+    - SNR이 너무 낮음: 19.06dB (최소: 30dB)
+
+✗ 실패: 6313121_194.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4868850708007812
+    snr_estimate: 19.60538784716405
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.49 (최소: 50)
+    - SNR이 너무 낮음: 19.61dB (최소: 30dB)
+
+✗ 실패: 6313121_195.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.651185989379883
+    snr_estimate: 14.546201333693276
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.65 (최소: 50)
+    - SNR이 너무 낮음: 14.55dB (최소: 30dB)
+
+✗ 실패: 6313121_196.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.4491100311279297
+    snr_estimate: 21.06955685905198
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.45 (최소: 50)
+    - SNR이 너무 낮음: 21.07dB (최소: 30dB)
+
+✗ 실패: 6313121_197.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 4.665044784545898
+    snr_estimate: 12.913696592180715
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 4.67 (최소: 50)
+    - SNR이 너무 낮음: 12.91dB (최소: 30dB)
+
+✗ 실패: 6313121_198.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 5.333892822265625
+    snr_estimate: 12.306675888054828
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 5.33 (최소: 50)
+    - SNR이 너무 낮음: 12.31dB (최소: 30dB)
+
+✗ 실패: 6313121_199.webp
+  메트릭:
+    resolution: 1024x1024
+    icc_profile: False
+    exif_metadata: False
+    color_depth: 8
+    webp_quality: unknown
+    webp_method: unknown
+    webp_lossless: False
+    sharpness: 1.3730144500732422
+    snr_estimate: 20.291068911635712
+  이슈:
+    - ICC 프로파일이 없음
+    - EXIF 메타데이터가 없음
+    - 이미지가 너무 흐림: 1.37 (최소: 50)
+    - SNR이 너무 낮음: 20.29dB (최소: 30dB)
+
+=== 권장사항 ===
+
+1. WebP 인코딩 파라미터 수정 필요:
+   - cwebp -q 90 -m 6 -af -metadata all -exif -icc [input] -o [output]
+
+2. Blender 렌더링 설정 확인:
+   - file_format = 'WEBP'
+   - quality = 90
+   - compression = 6
+   - color_mode = 'RGB'
+   - use_metadata = True
+   - metadata_format = 'EXIF'
+
+3. ICC 프로파일 포함:
+   - sRGB 색공간 설정
+   - 색상 관리 활성화
+
+4. 이미지 품질 개선:
+   - 선명도 향상 (언샤프 마스크)
+   - 노이즈 감소
+   - 해상도 최적화

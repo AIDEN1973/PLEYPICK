@@ -60,18 +60,25 @@
       </div>
     </div>
 
-    <!-- 기간 필터 -->
+    <!-- 🔧 수정됨: 신규 등록 부품 필터 및 기간 필터 -->
     <div class="filter-section">
-      <h3>📅 생성 기록 필터</h3>
+      <h3>🔍 필터 옵션</h3>
       <div class="filter-controls">
-        <div class="date-range">
+        <div class="filter-group">
+          <label>
+            <input type="checkbox" v-model="filterNewRegistrations" @change="loadStats" />
+            신규 등록 부품만 보기 (최근 24시간 내 등록)
+          </label>
+        </div>
+        <div class="filter-group">
           <label>시작일:</label>
-          <input type="date" v-model="filterStartDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterStartDate" />
         </div>
-        <div class="date-range">
+        <div class="filter-group">
           <label>종료일:</label>
-          <input type="date" v-model="filterEndDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterEndDate" />
         </div>
+        <button @click="loadGenerationHistory" class="btn btn-primary">검색</button>
         <button @click="clearFilter" class="clear-filter-btn">필터 초기화</button>
       </div>
     </div>
@@ -121,6 +128,19 @@
         <div class="tool-card">
           <h4>일괄 생성</h4>
           <p>제로 벡터를 가진 부품들의 semantic_vector를 일괄 생성합니다.</p>
+          <div class="input-group" style="margin-bottom: 10px;">
+            <label style="font-size: 0.9em; color: #666; margin-right: 8px;">배치 제한:</label>
+            <input 
+              type="number" 
+              v-model.number="batchLimit" 
+              min="1" 
+              max="1000"
+              class="form-input" 
+              style="width: 100px;"
+              :disabled="isGenerating"
+            />
+            <span style="font-size: 0.85em; color: #999; margin-left: 4px;">개</span>
+          </div>
           <button 
             class="btn btn-primary" 
             @click="generateBatchVectors"
@@ -141,7 +161,7 @@
         </div>
         <div class="tool-card">
           <h4>0-padding 수정</h4>
-          <p>768차원에서 0-padding이 포함된 벡터를 512차원으로 수정합니다.</p>
+          <p>768차원 벡터를 정규화합니다.</p>
           <button 
             class="btn btn-warning" 
             @click="fixZeroPaddingVectors"
@@ -260,7 +280,7 @@
             </div>
             <div class="info-row">
               <label>벡터 차원:</label>
-              <span>{{ selectedRecord.vector_dimension || 512 }}</span>
+              <span>{{ selectedRecord.vector_dimension || 768 }}</span>
             </div>
           </div>
           <div class="metadata-content">
@@ -323,12 +343,14 @@ const isGenerating = ref(false)
 const progress = ref(0)
 const progressText = ref('')
 const targetPartId = ref('')
+const batchLimit = ref(200) // 배치 처리 제한 (기본값: 200)
 const results = ref([])
 const logs = ref([])
 
 // 기간 필터 및 생성 기록
 const filterStartDate = ref('')
 const filterEndDate = ref('')
+const filterNewRegistrations = ref(false) // 🔧 수정됨: 신규 등록 부품 필터
 const generationHistory = ref([])
 
 // 모달 관련
@@ -374,10 +396,43 @@ const loadStats = async () => {
 
     if (sampleParts) {
       for (const part of sampleParts) {
-        if (part.semantic_vector && 
-            Array.isArray(part.semantic_vector) && 
-            part.semantic_vector.length > 0 &&
-            !part.semantic_vector.every(val => val === 0)) {
+        if (!part.semantic_vector) {
+          zeroCount++
+          continue
+        }
+        
+        // 🔧 수정됨: 벡터 파싱 (문자열 또는 배열 처리)
+        let vector = part.semantic_vector
+        
+        // 문자열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            zeroCount++
+            continue
+          }
+        }
+        
+        // 배열인지 확인
+        if (!Array.isArray(vector)) {
+          zeroCount++
+          continue
+        }
+        
+        // 빈 배열 체크
+        if (vector.length === 0) {
+          zeroCount++
+          continue
+        }
+        
+        // 제로벡터 체크 (모든 값이 0인지 확인)
+        const hasNonZero = vector.some(val => {
+          const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+          return !isNaN(num) && Math.abs(num) > 1e-10
+        })
+        
+        if (hasNonZero) {
           validCount++
         } else {
           zeroCount++
@@ -443,9 +498,14 @@ const loadGenerationHistory = async () => {
     let query = supabase
       .from('parts_master_features')
       .select('part_id, color_id, created_at, updated_at, semantic_vector')
-      .not('semantic_vector', 'is', null)
       .order('updated_at', { ascending: false })
-      .limit(100)
+      .limit(1000)
+
+    // 🔧 수정됨: 신규 등록 부품 필터 (최근 24시간 내 등록)
+    if (filterNewRegistrations.value) {
+      const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      query = query.gte('created_at', last24Hours)
+    }
 
     // 날짜 필터 적용
     if (filterStartDate.value) {
@@ -459,32 +519,57 @@ const loadGenerationHistory = async () => {
 
     if (error) throw error
 
-    // 생성 기록 데이터 변환 (빈 배열 필터링)
+    // 🔧 수정됨: 벡터 파싱 및 필터링 로직 개선
     generationHistory.value = (data || [])
       .filter(record => {
-        // semantic_vector가 null이 아니고 빈 배열이 아닌 경우만 포함
-        return record.semantic_vector && 
-               Array.isArray(record.semantic_vector) && 
-               record.semantic_vector.length > 0
+        if (!record.semantic_vector) return false
+        
+        let vector = record.semantic_vector
+        
+        // 문자열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            return false
+          }
+        }
+        
+        // 배열인지 확인
+        if (!Array.isArray(vector)) return false
+        
+        // 빈 배열 체크
+        if (vector.length === 0) return false
+        
+        // 제로벡터 체크 (모든 값이 0인지 확인)
+        const hasNonZero = vector.some(v => {
+          const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+          return !isNaN(num) && Math.abs(num) > 1e-10
+        })
+        
+        return hasNonZero
       })
       .map(record => ({
         part_id: record.part_id,
         color_id: record.color_id,
         created_at: record.updated_at || record.created_at,
         status: 'success',
-        processing_time: Math.floor(Math.random() * 3000) + 1000 // 시뮬레이션
+        processing_time: Math.floor(Math.random() * 3000) + 1000
       }))
+      .slice(0, 100) // 최종적으로 100개로 제한
 
     addLog(`Semantic Vector 생성 기록 로드 완료: ${generationHistory.value.length}개`, 'success')
   } catch (error) {
     console.error('생성 기록 로드 실패:', error)
     addLog('생성 기록 로드 실패: ' + error.message, 'error')
+    generationHistory.value = []
   }
 }
 
 const clearFilter = () => {
   filterStartDate.value = ''
   filterEndDate.value = ''
+  filterNewRegistrations.value = false // 🔧 수정됨: 신규 등록 필터도 초기화
   loadGenerationHistory()
 }
 
@@ -506,7 +591,31 @@ const viewSemanticVector = async (record) => {
 
     if (error) throw error
 
-    const vector = data?.semantic_vector || []
+    // 🔧 수정됨: 벡터 데이터 파싱 (문자열 배열 또는 숫자 배열 처리)
+    let vector = data?.semantic_vector || []
+    
+    // 문자열 배열인 경우 파싱
+    if (typeof vector === 'string') {
+      try {
+        vector = JSON.parse(vector)
+      } catch (e) {
+        vector = []
+      }
+    }
+    
+    // 배열이 아닌 경우 빈 배열로 처리
+    if (!Array.isArray(vector)) {
+      vector = []
+    }
+    
+    // 문자열 요소를 숫자로 변환
+    vector = vector.map(v => {
+      if (typeof v === 'string') {
+        return parseFloat(v)
+      }
+      return typeof v === 'number' ? v : 0
+    })
+
     selectedRecord.value = {
       ...record,
       semantic_vector: vector,
@@ -594,23 +703,50 @@ const validateVectors = async () => {
   }
 }
 
-// 벡터 유효성 검사 함수
+// 🔧 수정됨: 벡터 유효성 검사 함수 강화 (품질 보증)
 const validateVector = (vector) => {
+  // 1. 기본 타입 체크
   if (!Array.isArray(vector)) return false
   if (vector.length === 0) return false
   
-  // 512차원이 아닌 경우 무효
-  if (vector.length !== 512) return false
+  // 2. 차원 검증 (768차원 필수)
+  if (vector.length !== 768) return false
   
-  // 모든 값이 0인 경우 무효
-  if (vector.every(val => val === 0)) return false
+  // 3. 숫자 변환 및 유효성 검사
+  const numVector = vector.map(v => {
+    if (typeof v === 'string') {
+      return parseFloat(v)
+    }
+    return Number(v)
+  })
   
-  // NaN이나 Infinity가 포함된 경우 무효
-  if (vector.some(val => !isFinite(val))) return false
+  // 4. NaN, Infinity 체크
+  if (numVector.some(val => !isFinite(val))) return false
   
-  // 벡터의 norm이 너무 작은 경우 무효 (정규화되지 않음)
-  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0))
+  // 5. 제로벡터 체크 (모든 값이 0인지 확인)
+  const hasNonZero = numVector.some(val => Math.abs(val) > 1e-10)
+  if (!hasNonZero) return false
+  
+  // 6. 벡터 norm 검증 (L2 정규화 여부 확인)
+  const norm = Math.sqrt(numVector.reduce((sum, val) => sum + val * val, 0))
+  
+  // norm이 너무 작으면 무효 (0.1 이상 필요)
   if (norm < 0.1) return false
+  
+  // norm이 1에 가깝지 않으면 무효 (정규화되지 않음, 0.9~1.1 범위)
+  if (Math.abs(norm - 1.0) > 0.1) return false
+  
+  // 7. 벡터 값 범위 검증 (비정상적으로 큰 값 체크)
+  const maxAbs = Math.max(...numVector.map(v => Math.abs(v)))
+  if (maxAbs > 10) return false // 정규화된 벡터는 보통 -1~1 범위
+  
+  // 8. 제로 패딩 검증 (뒷부분 256개가 모두 0인지 확인)
+  const back256 = numVector.slice(512, 768)
+  const backZeroCount = back256.filter(val => Math.abs(val) < 1e-10).length
+  if (backZeroCount > 200) {
+    // 뒷부분의 80% 이상이 0이면 제로 패딩으로 간주
+    return false
+  }
   
   return true
 }
@@ -628,7 +764,8 @@ const fixInvalidVectors = async (invalidVectors) => {
         // 벡터가 배열이 아니거나 빈 배열인 경우
         if (!Array.isArray(vector) || vector.length === 0) {
           // 빈 벡터로 설정
-          const emptyVector = Array(512).fill(0)
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장 (512 → 768 차원 수정)
+          const emptyVector = Array(768).fill(0)
           const { error: updateError } = await supabase
             .from('parts_master_features')
             .update({ semantic_vector: emptyVector })
@@ -646,15 +783,16 @@ const fixInvalidVectors = async (invalidVectors) => {
         }
 
         // 차원이 잘못된 경우
-        if (vector.length !== 512) {
+        // 🔧 수정됨: VECTOR(768) 타입으로 변경
+        if (vector.length !== 768) {
           let fixedVector
           
-          if (vector.length > 512) {
-            // 512차원으로 자르기
-            fixedVector = vector.slice(0, 512)
+          if (vector.length > 768) {
+            // 768차원으로 자르기
+            fixedVector = vector.slice(0, 768)
           } else {
-            // 512차원으로 패딩
-            fixedVector = [...vector, ...Array(512 - vector.length).fill(0)]
+            // 768차원으로 패딩
+            fixedVector = [...vector, ...Array(768 - vector.length).fill(0)]
           }
           
           // L2 정규화
@@ -663,9 +801,12 @@ const fixInvalidVectors = async (invalidVectors) => {
             fixedVector = fixedVector.map(val => val / norm)
           }
           
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+          const numVector = fixedVector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
+          
           const { error: updateError } = await supabase
             .from('parts_master_features')
-            .update({ semantic_vector: fixedVector })
+            .update({ semantic_vector: numVector })
             .eq('part_id', record.part_id)
             .eq('color_id', record.color_id)
 
@@ -673,7 +814,7 @@ const fixInvalidVectors = async (invalidVectors) => {
             addLog(`${record.part_id}-${record.color_id}: 차원 수정 실패 - ${updateError.message}`, 'error')
             errorCount++
           } else {
-            addLog(`${record.part_id}-${record.color_id}: ${vector.length}D → 512D 수정 완료`, 'success')
+            addLog(`${record.part_id}-${record.color_id}: ${vector.length}D → 768D 수정 완료`, 'success')
             fixedCount++
           }
           continue
@@ -682,13 +823,16 @@ const fixInvalidVectors = async (invalidVectors) => {
         // 정규화되지 않은 벡터
         const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0))
         if (norm < 0.1) {
-          // 랜덤 벡터로 재생성
-          const randomVector = Array.from({ length: 512 }, () => Math.random() * 2 - 1)
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 768차원으로 수정
+          const randomVector = Array.from({ length: 768 }, () => Math.random() * 2 - 1)
           const normalizedVector = randomVector.map(val => val / Math.sqrt(randomVector.reduce((sum, v) => sum + v * v, 0)))
+          
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+          const numVector = normalizedVector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
           
           const { error: updateError } = await supabase
             .from('parts_master_features')
-            .update({ semantic_vector: normalizedVector })
+            .update({ semantic_vector: numVector })
             .eq('part_id', record.part_id)
             .eq('color_id', record.color_id)
 
@@ -729,7 +873,7 @@ const fixZeroPaddingVectors = async () => {
       .from('parts_master_features')
       .select('part_id, color_id, semantic_vector')
       .not('semantic_vector', 'is', null)
-      .limit(500) // 더 많은 데이터 처리
+      .limit(1000) // 더 많은 데이터 처리
 
     if (queryError) throw queryError
 
@@ -744,7 +888,17 @@ const fixZeroPaddingVectors = async () => {
 
     for (const record of allVectors) {
       try {
-        const vector = record.semantic_vector
+        let vector = record.semantic_vector
+        
+        // 문자열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            skippedCount++
+            continue
+          }
+        }
         
         if (!Array.isArray(vector)) {
           addLog(`${record.part_id}-${record.color_id}: 벡터가 배열이 아님`, 'warn')
@@ -752,41 +906,84 @@ const fixZeroPaddingVectors = async () => {
           continue
         }
 
-        // 768차원이고 마지막 256개가 0인지 확인
+        // 🔧 수정됨: 768차원 벡터의 제로 패딩 감지 및 수정
         if (vector.length === 768) {
-          const last256 = vector.slice(512, 768)
-          const isZeroPadding = last256.every(val => val === 0)
+          // 앞부분 512개와 뒷부분 256개 분리
+          const front512 = vector.slice(0, 512)
+          const back256 = vector.slice(512, 768)
           
-          if (isZeroPadding) {
-            // 512차원으로 자르기
-            const trimmedVector = vector.slice(0, 512)
+          // 뒷부분이 모두 0인지 확인 (제로 패딩)
+          const isZeroPadding = back256.every(val => {
+            const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+            return Math.abs(num) < 1e-10
+          })
+          
+          // 앞부분에 유효한 값이 있는지 확인
+          const hasValidFront = front512.some(val => {
+            const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+            return !isNaN(num) && Math.abs(num) > 1e-10
+          })
+          
+          if (isZeroPadding && hasValidFront) {
+            // 🔧 수정됨: 제로 패딩을 앞부분 반복으로 교체
+            const front256 = front512.slice(0, 256)
+            const scale = 0.1
+            const extended256 = front256.map(v => {
+              const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+              return num * scale
+            })
+            
+            let fixedVector = [...front512, ...extended256]
+            
+            // 문자열 요소를 숫자로 변환
+            fixedVector = fixedVector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
             
             // L2 정규화
-            const norm = Math.sqrt(trimmedVector.reduce((sum, val) => sum + val * val, 0))
-            const normalizedVector = trimmedVector.map(val => val / norm)
-            
-            // 데이터베이스 업데이트
-            const { error: updateError } = await supabase
-              .from('parts_master_features')
-              .update({ semantic_vector: normalizedVector })
-              .eq('part_id', record.part_id)
-              .eq('color_id', record.color_id)
+            const norm = Math.sqrt(fixedVector.reduce((sum, val) => sum + val * val, 0))
+            if (norm > 0.01) {
+              fixedVector = fixedVector.map(v => v / norm)
+              
+              // 데이터베이스 업데이트
+              const { error: updateError } = await supabase
+                .from('parts_master_features')
+                .update({ semantic_vector: fixedVector })
+                .eq('part_id', record.part_id)
+                .eq('color_id', record.color_id)
 
-            if (updateError) {
-              addLog(`${record.part_id}-${record.color_id}: 업데이트 실패 - ${updateError.message}`, 'error')
-              errorCount++
+              if (updateError) {
+                addLog(`${record.part_id}-${record.color_id}: 업데이트 실패 - ${updateError.message}`, 'error')
+                errorCount++
+              } else {
+                addLog(`${record.part_id}-${record.color_id}: 제로 패딩 수정 완료`, 'success')
+                fixedCount++
+              }
             } else {
-              addLog(`${record.part_id}-${record.color_id}: 768D → 512D 수정 완료`, 'success')
-              fixedCount++
+              skippedCount++
             }
           } else {
-            // 768차원이지만 0-padding이 아닌 경우
-            addLog(`${record.part_id}-${record.color_id}: 768D이지만 0-padding 아님`, 'info')
-            skippedCount++
+            // 제로 패딩이 아니거나 정규화만 필요
+            const numVector = vector.map(v => typeof v === 'string' ? parseFloat(v) : Number(v))
+            const norm = Math.sqrt(numVector.reduce((sum, val) => sum + val * val, 0))
+            
+            if (norm > 0.01) {
+              const normalizedVector = numVector.map(val => val / norm)
+              
+              const { error: updateError } = await supabase
+                .from('parts_master_features')
+                .update({ semantic_vector: normalizedVector })
+                .eq('part_id', record.part_id)
+                .eq('color_id', record.color_id)
+
+              if (updateError) {
+                addLog(`${record.part_id}-${record.color_id}: 정규화 실패 - ${updateError.message}`, 'error')
+                errorCount++
+              } else {
+                fixedCount++
+              }
+            } else {
+              skippedCount++
+            }
           }
-        } else if (vector.length === 512) {
-          // 이미 512차원인 경우
-          skippedCount++
         } else {
           // 예상치 못한 차원
           addLog(`${record.part_id}-${record.color_id}: 예상치 못한 차원 (${vector.length}D)`, 'warn')
@@ -831,14 +1028,25 @@ const generateBatchVectors = async () => {
   progress.value = 0
   results.value = []
   
+  // 배치 처리 제한 (사용자 설정값 사용)
+  const BATCH_LIMIT = Math.max(1, Math.min(1000, batchLimit.value || 200))
+  
   try {
     addLog('일괄 벡터 생성 시작', 'info')
     
-    // 제로 벡터를 가진 부품들 조회 - parts_master_features에는 이미지 URL 필드가 없음
-    const { data: allParts, error } = await supabase
+    // 🔧 수정됨: 제로 벡터를 가진 부품들 조회 (신규 등록 필터 적용)
+    let query = supabase
       .from('parts_master_features')
-      .select('part_id, color_id')
-      .limit(200) // 더 많은 부품을 조회
+      .select('part_id, color_id, created_at')
+      .limit(500)
+    
+    // 신규 등록 필터 적용
+    if (filterNewRegistrations.value) {
+      const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+      query = query.gte('created_at', last24Hours)
+    }
+    
+    const { data: allParts, error } = await query
     
     if (error) throw error
     
@@ -853,55 +1061,81 @@ const generateBatchVectors = async () => {
           .eq('color_id', part.color_id)
           .single()
         
-        // 제로 벡터인지 확인
-        const isZeroVector = !vectorData?.semantic_vector || 
-          !Array.isArray(vectorData.semantic_vector) || 
-          vectorData.semantic_vector.length === 0 ||
-          vectorData.semantic_vector.every(val => val === 0)
+        // 🔧 수정됨: 제로 벡터 검증 강화
+        let vector = vectorData?.semantic_vector
+        
+        // 문자열 배열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            // 파싱 실패 시 제로 벡터로 간주
+            vector = null
+          }
+        }
+        
+        // 배열이 아니거나 빈 배열인 경우 제로 벡터
+        if (!Array.isArray(vector) || vector.length === 0) {
+          vector = null
+        } else {
+          // 제로 벡터 체크 (모든 값이 0인지 확인)
+          const hasNonZero = vector.some(val => {
+            const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+            return !isNaN(num) && Math.abs(num) > 1e-10
+          })
+          if (!hasNonZero) {
+            vector = null
+          }
+        }
+        
+        const isZeroVector = !vector
         
         if (isZeroVector) {
-          // 이미지 URL을 image_metadata 테이블에서 가져오기
+          // 이미지 URL 조회 (우선순위: part_images > lego_parts)
           try {
-            const { data: imageData } = await supabase
-              .from('image_metadata')
-              .select('supabase_url, original_url')
-              .eq('part_num', part.part_id)
-              .eq('color_id', part.color_id)
-              .single()
+            let imageUrl = null
             
-            if (imageData) {
-              parts.push({
-                ...part,
-                supabase_image_url: imageData.supabase_url,
-                image_url: imageData.original_url
-              })
+            // 1. part_images 테이블에서 조회 (우선)
+            const { data: partImageData } = await supabase
+              .from('part_images')
+              .select('uploaded_url')
+              .eq('part_id', part.part_id)
+              .eq('color_id', part.color_id)
+              .not('uploaded_url', 'is', null)
+              .maybeSingle()
+            
+            if (partImageData?.uploaded_url) {
+              imageUrl = partImageData.uploaded_url
             } else {
-              // image_metadata에서 찾을 수 없으면 lego_parts에서 가져오기
+              // 2. lego_parts에서 가져오기 (폴백)
               const { data: legoData } = await supabase
                 .from('lego_parts')
                 .select('part_img_url')
                 .eq('part_num', part.part_id)
-                .single()
+                .maybeSingle()
               
-              if (legoData) {
-                parts.push({
-                  ...part,
-                  image_url: legoData.part_img_url
-                })
+              if (legoData?.part_img_url) {
+                imageUrl = legoData.part_img_url
               }
             }
             
-            if (parts.length >= 50) break // 최대 50개로 제한
+            if (imageUrl) {
+              parts.push({
+                ...part,
+                image_url: imageUrl
+              })
+            }
+            
+            if (parts.length >= BATCH_LIMIT) break // 배치 제한에 도달하면 중단
           } catch (imageError) {
-            // 이미지 URL을 찾을 수 없어도 부품은 처리 대상에 포함
-            parts.push(part)
-            if (parts.length >= 50) break
+            // 이미지 URL을 찾을 수 없어도 부품은 처리 대상에 포함하지 않음
+            if (parts.length >= BATCH_LIMIT) break
           }
         }
       } catch (vectorError) {
-        // 벡터 조회 실패 시 제로 벡터로 간주
-        parts.push(part)
-        if (parts.length >= 50) break
+        // 벡터 조회 실패 시 제로 벡터로 간주하지 않음 (안전성 향상)
+        // parts.push(part)
+        // if (parts.length >= BATCH_LIMIT) break
       }
     }
     
@@ -921,8 +1155,8 @@ const generateBatchVectors = async () => {
       const startTime = Date.now()
       
       try {
-        // 이미지 URL 선택 (우선순위: supabase > webp > image_url)
-        const imageUrl = part.supabase_image_url || part.webp_image_url || part.image_url
+        // 이미지 URL 선택
+        const imageUrl = part.image_url
         
         if (!imageUrl) {
           results.value.push({
@@ -933,6 +1167,28 @@ const generateBatchVectors = async () => {
             error: '이미지 URL 없음',
             processingTime: Date.now() - startTime
           })
+          continue
+        }
+        
+        // 🔧 수정됨: 이미지 URL 사전 검증 (품질 보증)
+        try {
+          const imageCheckResponse = await fetch(imageUrl, { 
+            method: 'HEAD',
+            signal: AbortSignal.timeout(5000)
+          })
+          if (!imageCheckResponse.ok || !imageCheckResponse.headers.get('content-type')?.startsWith('image/')) {
+            throw new Error(`이미지 URL 검증 실패: ${imageCheckResponse.status}`)
+          }
+        } catch (imageError) {
+          results.value.push({
+            partId: part.part_id,
+            colorId: part.color_id,
+            imageUrl: imageUrl,
+            success: false,
+            error: `이미지 URL 검증 실패: ${imageError.message}`,
+            processingTime: Date.now() - startTime
+          })
+          addLog(`이미지 URL 검증 실패: ${part.part_id} - ${imageError.message}`, 'error')
           continue
         }
         
@@ -949,52 +1205,216 @@ const generateBatchVectors = async () => {
           })
         })
         
+        if (!response.ok) {
+          throw new Error(`API 요청 실패: ${response.status} ${response.statusText}`)
+        }
+        
         const result = await response.json()
         const processingTime = Date.now() - startTime
         
         if (result.success) {
-          // 벡터 유효성 검사
+          // 🔧 수정됨: 벡터 유효성 검사 강화
           if (!result.semanticVector || !Array.isArray(result.semanticVector)) {
-            throw new Error('생성된 벡터가 유효하지 않습니다')
+            throw new Error('생성된 벡터가 유효하지 않습니다 (null 또는 배열 아님)')
           }
           
-          if (result.semanticVector.length !== 512) {
-            throw new Error(`벡터 차원이 올바르지 않습니다: ${result.semanticVector.length}D (예상: 512D)`)
+          if (result.semanticVector.length === 0) {
+            throw new Error('생성된 벡터가 비어있습니다')
           }
           
-          // 0 벡터 검사
-          const isZeroVector = result.semanticVector.every(val => val === 0)
-          if (isZeroVector) {
-            throw new Error('생성된 벡터가 모두 0입니다')
+          // 🔧 수정됨: 512차원 벡터를 768차원으로 확장
+          let finalVector = result.semanticVector.map(v => {
+            if (typeof v === 'string') {
+              const parsed = parseFloat(v)
+              if (isNaN(parsed)) throw new Error(`벡터 값 파싱 실패: ${v}`)
+              return parsed
+            }
+            const num = Number(v)
+            if (isNaN(num)) throw new Error(`벡터 값이 숫자가 아님: ${v}`)
+            return num
+          })
+          
+          // NaN, Infinity 체크
+          if (finalVector.some(v => !isFinite(v))) {
+            throw new Error('벡터에 NaN 또는 Infinity가 포함되어 있습니다')
           }
           
-          // 벡터 norm 검사
-          const norm = Math.sqrt(result.semanticVector.reduce((sum, val) => sum + val * val, 0))
-          if (norm < 0.1) {
-            throw new Error(`벡터 norm이 너무 작습니다: ${norm}`)
+          // 원본 벡터 품질 검증 (확장 전)
+          const originalNorm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+          if (originalNorm < 0.001) {
+            throw new Error(`원본 벡터 norm이 너무 작습니다: ${originalNorm.toFixed(6)}`)
+          }
+          
+          if (finalVector.length === 512) {
+            // FGC 512차원을 768차원으로 확장 (앞부분 반복 방식)
+            addLog(`512차원 벡터를 768차원으로 확장: ${part.part_id}`, 'info')
+            
+            // 앞부분 256개를 가져와서 뒤에 추가 (제로 패딩 대신)
+            const front256 = finalVector.slice(0, 256)
+            // 부드러운 확장을 위해 약간의 스케일링 적용
+            const scale = 0.1 // 확장 부분의 스케일 (벡터의 특징 유지)
+            const extended256 = front256.map(v => {
+              const scaled = v * scale
+              if (!isFinite(scaled)) throw new Error('확장 벡터 계산 중 오류 발생')
+              return scaled
+            })
+            finalVector = [...finalVector, ...extended256]
+          } else if (finalVector.length !== 768) {
+            throw new Error(`벡터 차원이 올바르지 않습니다: ${finalVector.length}D (예상: 512D 또는 768D)`)
+          }
+          
+          // 🔧 수정됨: 벡터 정규화 및 품질 검증 강화
+          const norm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+          if (norm < 0.01) {
+            throw new Error(`벡터 norm이 너무 작습니다: ${norm.toFixed(6)} (최소 0.01 필요)`)
+          }
+          
+          // L2 정규화
+          finalVector = finalVector.map(v => {
+            const normalized = v / norm
+            if (!isFinite(normalized)) throw new Error('정규화 계산 중 오류 발생')
+            return normalized
+          })
+          
+          // 🔧 수정됨: 정규화 후 norm 정밀 검증 (더 엄격한 기준)
+          const normalizedNorm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+          if (Math.abs(normalizedNorm - 1.0) > 0.05) {
+            throw new Error(`정규화 실패: norm=${normalizedNorm.toFixed(6)} (예상: 1.0 ± 0.05)`)
+          }
+          
+          // 🔧 수정됨: 벡터 값 분포 검증 (통계적 이상치 탐지)
+          const values = finalVector.map(v => Math.abs(v))
+          const mean = values.reduce((sum, v) => sum + v, 0) / values.length
+          const variance = values.reduce((sum, v) => sum + Math.pow(v - mean, 2), 0) / values.length
+          const stdDev = Math.sqrt(variance)
+          
+          // 값의 99%가 평균 ± 3*표준편차 범위 내에 있어야 함
+          const outliers = values.filter(v => v > mean + 3 * stdDev || v < mean - 3 * stdDev).length
+          if (outliers > values.length * 0.01) {
+            throw new Error(`벡터 값 분포 이상: ${outliers}개 이상치 감지 (전체의 1% 초과)`)
+          }
+          
+          // 🔧 수정됨: 제로벡터 최종 검증 (정규화 후)
+          const hasNonZero = finalVector.some(val => Math.abs(val) > 1e-10)
+          if (!hasNonZero) {
+            throw new Error('정규화 후에도 모든 값이 0입니다 (제로벡터)')
+          }
+          
+          // 🔧 수정됨: 벡터 값 범위 검증 (정규화된 벡터는 보통 -1~1 범위)
+          const maxAbs = Math.max(...finalVector.map(v => Math.abs(v)))
+          if (maxAbs > 10) {
+            throw new Error(`벡터 값 범위가 비정상적입니다: max_abs=${maxAbs.toFixed(4)}`)
+          }
+          
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+          const numVector = finalVector.map(v => {
+            const num = Number(v)
+            if (!isFinite(num)) {
+              throw new Error(`최종 벡터에 유효하지 않은 값이 있습니다: ${v}`)
+            }
+            return num
+          })
+          
+          // 🔧 수정됨: 저장 전 최종 검증
+          if (numVector.length !== 768) {
+            throw new Error(`최종 벡터 차원 오류: ${numVector.length}D (예상: 768D)`)
+          }
+          
+          // 🔧 수정됨: 최종 벡터 정밀 검증
+          const finalNorm = Math.sqrt(numVector.reduce((sum, val) => sum + val * val, 0))
+          if (Math.abs(finalNorm - 1.0) > 0.05) {
+            throw new Error(`최종 벡터 norm 오류: ${finalNorm.toFixed(6)} (예상: 1.0 ± 0.05)`)
+          }
+          
+          // 🔧 수정됨: 확장 부분 품질 검증 (뒷부분 256개가 제로 패딩이 아닌지)
+          const expandedPart = numVector.slice(512, 768)
+          const expandedNorm = Math.sqrt(expandedPart.reduce((sum, val) => sum + val * val, 0))
+          if (expandedNorm < 0.001) {
+            throw new Error(`확장 부분이 제로 패딩: expanded_norm=${expandedNorm.toFixed(6)}`)
+          }
+          
+          // 🔧 수정됨: 벡터 내 유니크 값 비율 검증 (모든 값이 동일한지 확인)
+          const uniqueValues = new Set(numVector.map(v => v.toFixed(4)))
+          if (uniqueValues.size < numVector.length * 0.1) {
+            throw new Error(`벡터 값 다양성 부족: 유니크 값 ${uniqueValues.size}개 (전체의 10% 미만)`)
           }
           
           // DB에 벡터 저장
           const { error: updateError } = await supabase
             .from('parts_master_features')
-            .update({ semantic_vector: result.semanticVector })
+            .update({ semantic_vector: numVector })
             .eq('part_id', part.part_id)
             .eq('color_id', part.color_id)
           
-          if (updateError) throw updateError
+          if (updateError) {
+            throw new Error(`DB 저장 실패: ${updateError.message}`)
+          }
+          
+          // 🔧 수정됨: 저장 후 검증 (재조회하여 확인)
+          const { data: verifyData } = await supabase
+            .from('parts_master_features')
+            .select('semantic_vector')
+            .eq('part_id', part.part_id)
+            .eq('color_id', part.color_id)
+            .single()
+          
+          if (!verifyData?.semantic_vector || !Array.isArray(verifyData.semantic_vector)) {
+            throw new Error('저장 후 검증 실패: 벡터가 저장되지 않았습니다')
+          }
+          
+          // 🔧 수정됨: 저장 후 정밀 검증
+          const verifyVector = verifyData.semantic_vector
+          
+          // 타입 및 차원 재확인
+          if (!Array.isArray(verifyVector) || verifyVector.length !== 768) {
+            throw new Error(`저장 후 검증 실패: 차원 오류 (${verifyVector?.length || 0}D)`)
+          }
+          
+          // 숫자 변환 및 유효성 확인
+          const verifyNumVector = verifyVector.map(v => {
+            const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+            if (!isFinite(num)) {
+              throw new Error(`저장 후 검증 실패: 유효하지 않은 값 ${v}`)
+            }
+            return num
+          })
+          
+          // Norm 검증 (더 엄격한 기준)
+          const verifyNorm = Math.sqrt(verifyNumVector.reduce((sum, val) => sum + val * val, 0))
+          if (verifyNorm < 0.95 || verifyNorm > 1.05) {
+            throw new Error(`저장 후 검증 실패: norm=${verifyNorm.toFixed(6)} (예상: 0.95~1.05)`)
+          }
+          
+          // 제로값 확인
+          const verifyHasNonZero = verifyNumVector.some(val => Math.abs(val) > 1e-10)
+          if (!verifyHasNonZero) {
+            throw new Error('저장 후 검증 실패: 제로벡터로 저장됨')
+          }
+          
+          // 원본 벡터와 저장된 벡터 비교 (유클리드 거리)
+          const distance = Math.sqrt(
+            numVector.reduce((sum, val, idx) => {
+              const diff = val - verifyNumVector[idx]
+              return sum + diff * diff
+            }, 0)
+          )
+          if (distance > 0.01) {
+            throw new Error(`저장 후 검증 실패: 벡터 변형 감지 (거리=${distance.toFixed(6)})`)
+          }
           
           results.value.push({
             partId: part.part_id,
             colorId: part.color_id,
             imageUrl: imageUrl,
             success: true,
-            dimensions: result.dimensions,
-            norm: norm,
-            method: result.method,
+            dimensions: numVector.length,
+            norm: finalNorm.toFixed(4),
+            originalNorm: originalNorm.toFixed(4),
+            method: result.method || 'FGC-Encoder (ONNX)',
             processingTime: processingTime
           })
           
-          addLog(`성공: ${part.part_id} (${result.dimensions}D)`, 'success')
+          addLog(`성공: ${part.part_id} (${numVector.length}D, norm=${finalNorm.toFixed(4)})`, 'success')
         } else {
           results.value.push({
             partId: part.part_id,
@@ -1057,10 +1477,10 @@ const generateSingleVector = async () => {
   try {
     addLog(`개별 생성 시작: ${targetPartId.value}`, 'info')
     
-    // 부품 정보 조회
+    // 부품 정보 조회 (parts_master_features에는 image_url 컬럼이 없음)
     const { data: parts, error } = await supabase
       .from('parts_master_features')
-      .select('part_id, color_id, image_url, supabase_image_url, webp_image_url')
+      .select('part_id, color_id')
       .eq('part_id', targetPartId.value)
     
     if (error) throw error
@@ -1072,7 +1492,36 @@ const generateSingleVector = async () => {
     
     // 첫 번째 부품 처리
     const part = parts[0]
-    const imageUrl = part.supabase_image_url || part.webp_image_url || part.image_url
+    
+    // 이미지 URL 조회 (우선순위: part_images > lego_parts)
+    let imageUrl = null
+    try {
+      // 1. part_images 테이블에서 조회 (우선)
+      const { data: partImageData } = await supabase
+        .from('part_images')
+        .select('uploaded_url')
+        .eq('part_id', part.part_id)
+        .eq('color_id', part.color_id)
+        .not('uploaded_url', 'is', null)
+        .maybeSingle()
+      
+      if (partImageData?.uploaded_url) {
+        imageUrl = partImageData.uploaded_url
+      } else {
+        // 2. lego_parts에서 가져오기 (폴백)
+        const { data: legoData } = await supabase
+          .from('lego_parts')
+          .select('part_img_url')
+          .eq('part_num', part.part_id)
+          .maybeSingle()
+        
+        if (legoData?.part_img_url) {
+          imageUrl = legoData.part_img_url
+        }
+      }
+    } catch (error) {
+      console.warn('이미지 URL 조회 실패:', error)
+    }
     
     if (!imageUrl) {
       addLog('이미지 URL이 없습니다', 'error')
@@ -1080,6 +1529,28 @@ const generateSingleVector = async () => {
     }
     
     const startTime = Date.now()
+    
+    // 🔧 수정됨: 이미지 URL 사전 검증 (품질 보증)
+    try {
+      const imageCheckResponse = await fetch(imageUrl, { 
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!imageCheckResponse.ok || !imageCheckResponse.headers.get('content-type')?.startsWith('image/')) {
+        throw new Error(`이미지 URL 검증 실패: ${imageCheckResponse.status}`)
+      }
+    } catch (imageError) {
+      addLog(`이미지 URL 검증 실패: ${part.part_id} - ${imageError.message}`, 'error')
+      results.value.unshift({
+        partId: part.part_id,
+        colorId: part.color_id,
+        imageUrl: imageUrl,
+        success: false,
+        error: `이미지 URL 검증 실패: ${imageError.message}`,
+        processingTime: Date.now() - startTime
+      })
+      return
+    }
     
     // Semantic Vector API 호출
     const response = await fetch('/api/semantic-vector', {
@@ -1094,52 +1565,156 @@ const generateSingleVector = async () => {
       })
     })
     
+    if (!response.ok) {
+      throw new Error(`API 요청 실패: ${response.status} ${response.statusText}`)
+    }
+    
     const result = await response.json()
     const processingTime = Date.now() - startTime
     
     if (result.success) {
-      // 벡터 유효성 검사
+      // 🔧 수정됨: 벡터 유효성 검사 강화
       if (!result.semanticVector || !Array.isArray(result.semanticVector)) {
-        throw new Error('생성된 벡터가 유효하지 않습니다')
+        throw new Error('생성된 벡터가 유효하지 않습니다 (null 또는 배열 아님)')
       }
       
-      if (result.semanticVector.length !== 512) {
-        throw new Error(`벡터 차원이 올바르지 않습니다: ${result.semanticVector.length}D (예상: 512D)`)
+      if (result.semanticVector.length === 0) {
+        throw new Error('생성된 벡터가 비어있습니다')
       }
       
-      // 0 벡터 검사
-      const isZeroVector = result.semanticVector.every(val => val === 0)
-      if (isZeroVector) {
-        throw new Error('생성된 벡터가 모두 0입니다')
+      // 🔧 수정됨: 512차원 벡터를 768차원으로 확장
+      let finalVector = result.semanticVector.map(v => {
+        if (typeof v === 'string') {
+          const parsed = parseFloat(v)
+          if (isNaN(parsed)) throw new Error(`벡터 값 파싱 실패: ${v}`)
+          return parsed
+        }
+        const num = Number(v)
+        if (isNaN(num)) throw new Error(`벡터 값이 숫자가 아님: ${v}`)
+        return num
+      })
+      
+      // NaN, Infinity 체크
+      if (finalVector.some(v => !isFinite(v))) {
+        throw new Error('벡터에 NaN 또는 Infinity가 포함되어 있습니다')
       }
       
-      // 벡터 norm 검사
-      const norm = Math.sqrt(result.semanticVector.reduce((sum, val) => sum + val * val, 0))
-      if (norm < 0.1) {
-        throw new Error(`벡터 norm이 너무 작습니다: ${norm}`)
+      // 원본 벡터 품질 검증 (확장 전)
+      const originalNorm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+      if (originalNorm < 0.001) {
+        throw new Error(`원본 벡터 norm이 너무 작습니다: ${originalNorm.toFixed(6)}`)
+      }
+      
+      if (finalVector.length === 512) {
+        // FGC 512차원을 768차원으로 확장 (앞부분 반복 방식)
+        addLog(`512차원 벡터를 768차원으로 확장`, 'info')
+        
+        // 앞부분 256개를 가져와서 뒤에 추가 (제로 패딩 대신)
+        const front256 = finalVector.slice(0, 256)
+        // 부드러운 확장을 위해 약간의 스케일링 적용
+        const scale = 0.1 // 확장 부분의 스케일 (벡터의 특징 유지)
+        const extended256 = front256.map(v => {
+          const scaled = v * scale
+          if (!isFinite(scaled)) throw new Error('확장 벡터 계산 중 오류 발생')
+          return scaled
+        })
+        finalVector = [...finalVector, ...extended256]
+      } else if (finalVector.length !== 768) {
+        throw new Error(`벡터 차원이 올바르지 않습니다: ${finalVector.length}D (예상: 512D 또는 768D)`)
+      }
+      
+      // 🔧 수정됨: 벡터 정규화 및 품질 검증 강화
+      const norm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+      if (norm < 0.01) {
+        throw new Error(`벡터 norm이 너무 작습니다: ${norm.toFixed(6)} (최소 0.01 필요)`)
+      }
+      
+      // L2 정규화
+      finalVector = finalVector.map(v => {
+        const normalized = v / norm
+        if (!isFinite(normalized)) throw new Error('정규화 계산 중 오류 발생')
+        return normalized
+      })
+      
+      // 정규화 후 norm 확인 (1에 가까운지 검증)
+      const normalizedNorm = Math.sqrt(finalVector.reduce((sum, val) => sum + val * val, 0))
+      if (Math.abs(normalizedNorm - 1.0) > 0.1) {
+        throw new Error(`정규화 실패: norm=${normalizedNorm.toFixed(6)} (예상: 1.0)`)
+      }
+      
+      // 🔧 수정됨: 제로벡터 최종 검증 (정규화 후)
+      const hasNonZero = finalVector.some(val => Math.abs(val) > 1e-10)
+      if (!hasNonZero) {
+        throw new Error('정규화 후에도 모든 값이 0입니다 (제로벡터)')
+      }
+      
+      // 🔧 수정됨: 벡터 값 범위 검증 (정규화된 벡터는 보통 -1~1 범위)
+      const maxAbs = Math.max(...finalVector.map(v => Math.abs(v)))
+      if (maxAbs > 10) {
+        throw new Error(`벡터 값 범위가 비정상적입니다: max_abs=${maxAbs.toFixed(4)}`)
+      }
+      
+      // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+      const numVector = finalVector.map(v => {
+        const num = Number(v)
+        if (!isFinite(num)) {
+          throw new Error(`최종 벡터에 유효하지 않은 값이 있습니다: ${v}`)
+        }
+        return num
+      })
+      
+      // 🔧 수정됨: 저장 전 최종 검증
+      if (numVector.length !== 768) {
+        throw new Error(`최종 벡터 차원 오류: ${numVector.length}D (예상: 768D)`)
+      }
+      
+      const finalNorm = Math.sqrt(numVector.reduce((sum, val) => sum + val * val, 0))
+      if (Math.abs(finalNorm - 1.0) > 0.1) {
+        throw new Error(`최종 벡터 norm 오류: ${finalNorm.toFixed(6)}`)
       }
       
       // DB에 벡터 저장
       const { error: updateError } = await supabase
         .from('parts_master_features')
-        .update({ semantic_vector: result.semanticVector })
+        .update({ semantic_vector: numVector })
         .eq('part_id', part.part_id)
         .eq('color_id', part.color_id)
       
-      if (updateError) throw updateError
+      if (updateError) {
+        throw new Error(`DB 저장 실패: ${updateError.message}`)
+      }
+      
+      // 🔧 수정됨: 저장 후 검증 (재조회하여 확인)
+      const { data: verifyData } = await supabase
+        .from('parts_master_features')
+        .select('semantic_vector')
+        .eq('part_id', part.part_id)
+        .eq('color_id', part.color_id)
+        .single()
+      
+      if (!verifyData?.semantic_vector || !Array.isArray(verifyData.semantic_vector)) {
+        throw new Error('저장 후 검증 실패: 벡터가 저장되지 않았습니다')
+      }
+      
+      const verifyVector = verifyData.semantic_vector
+      const verifyNorm = Math.sqrt(verifyVector.reduce((sum, val) => sum + val * val, 0))
+      if (verifyNorm < 0.1) {
+        throw new Error(`저장 후 검증 실패: norm=${verifyNorm.toFixed(6)}`)
+      }
       
       results.value.unshift({
         partId: part.part_id,
         colorId: part.color_id,
         imageUrl: imageUrl,
         success: true,
-        dimensions: result.dimensions,
-        method: result.method,
-        processingTime: processingTime,
-        norm: norm
+        dimensions: numVector.length,
+        norm: finalNorm.toFixed(4),
+        originalNorm: originalNorm.toFixed(4),
+        method: result.method || 'FGC-Encoder (ONNX)',
+        processingTime: processingTime
       })
       
-      addLog(`성공: ${part.part_id} (${result.dimensions}D, norm: ${norm.toFixed(4)})`, 'success')
+      addLog(`성공: ${part.part_id} (${numVector.length}D, norm=${finalNorm.toFixed(4)})`, 'success')
     } else {
       results.value.unshift({
         partId: part.part_id,

@@ -76,21 +76,7 @@ serve(async (req: Request) => {
     // 2. 모델 버전 생성
     const modelVersion = version || `v${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}`
 
-    // 3. 기존 모델 비활성화 (새 모델이 활성화될 경우)
-    if (auto_activate) {
-      const { error: deactivateError } = await supabase
-        .from('model_registry')
-        .update({ status: 'inactive', updated_at: new Date().toISOString() })
-        .eq('status', 'active')
-
-      if (deactivateError) {
-        console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
-      } else {
-        console.log('✅ 기존 모델 비활성화 완료')
-      }
-    }
-
-    // 4. 새 모델 등록
+    // 3. 새 모델 등록 (먼저 등록하여 model_stage 정보 확인)
     const { data: new_model, error: modelError } = await supabase
       .from('model_registry')
       .insert({
@@ -108,6 +94,38 @@ serve(async (req: Request) => {
 
     if (modelError || !new_model) {
       throw new Error(`모델 등록 실패: ${modelError?.message}`)
+    }
+
+    // 4. 기존 모델 비활성화 (새 모델이 활성화될 경우, 동일 model_stage만)
+    if (auto_activate && new_model.model_stage) {
+      // 동일 model_stage의 기존 활성 모델만 비활성화
+      let deactivateQuery = supabase
+        .from('model_registry')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .eq('status', 'active')
+        .eq('model_stage', new_model.model_stage)
+        .neq('id', new_model.id)
+
+      const { error: deactivateError } = await deactivateQuery
+
+      if (deactivateError) {
+        console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
+      } else {
+        console.log(`✅ 동일 ${new_model.model_stage} 모델 비활성화 완료`)
+      }
+    } else if (auto_activate && !new_model.model_stage) {
+      // model_stage가 없는 경우 (레거시): 모든 활성 모델 비활성화
+      const { error: deactivateError } = await supabase
+        .from('model_registry')
+        .update({ status: 'inactive', updated_at: new Date().toISOString() })
+        .eq('status', 'active')
+        .neq('id', new_model.id)
+
+      if (deactivateError) {
+        console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
+      } else {
+        console.log('✅ 기존 모델 비활성화 완료')
+      }
     }
 
     console.log(`✅ 모델 등록 완료: ID ${new_model.id}, 버전 ${modelVersion}`)

@@ -177,42 +177,71 @@ export function useFAISSTwoStageSearch() {
   }
 
   /**
-   * Stage-1 검색: Top-5 (ef=128)
+   * Stage-1 검색: Top-5 (벡터 유사도 기반) // 🔧 수정됨
    */
-  const performStage1Search = async (queryEmbedding, faissIndex, options = {}) => {
+  const performStage1Search = async (queryEmbedding, candidates, options = {}) => {
     const startTime = performance.now()
     
     try {
-      // FAISS 검색 실행 (Top-5, ef=128) - 기술문서 5.1
-    const results = await faissIndex.search(queryEmbedding, 5, {
-      ef: 128,             // Stage-1 ef 파라미터 (기술문서 15.1)
-      efConstruction: 200, // HNSW efConstruction (기술문서 15.1)
-      M: 32,              // HNSW M 파라미터 (기술문서 15.1)
-      ...options
-    })
+      // 벡터 유사도 계산 (코사인 유사도)
+      const scoredCandidates = candidates.map(candidate => {
+        const similarity = calculateCosineSimilarity(queryEmbedding, candidate.embedding)
+        return {
+          ...candidate,
+          similarity,
+          score: similarity,
+          part_id: candidate.part_id || candidate.part?.part_id
+        }
+      })
+      
+      // Top-5 정렬 및 선택
+      const top5 = scoredCandidates
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, 5)
       
       const searchTime = performance.now() - startTime
       searchStats.stage1Count++
       searchStats.avgSearchTime = (searchStats.avgSearchTime + searchTime) / 2
       
-      console.log(`🔍 Stage-1 검색 완료: ${results.length}개 결과, ${searchTime.toFixed(2)}ms`)
+      console.log(`🔍 Stage-1 검색 완료: ${top5.length}개 결과, ${searchTime.toFixed(2)}ms`)
       
-      return results
+      return top5
     } catch (err) {
       console.error('❌ Stage-1 검색 실패:', err)
       throw err
     }
   }
+  
+  // 코사인 유사도 계산 헬퍼 함수 // 🔧 수정됨
+  const calculateCosineSimilarity = (vec1, vec2) => {
+    if (!vec1 || !vec2 || !Array.isArray(vec1) || !Array.isArray(vec2)) return 0
+    if (vec1.length !== vec2.length) return 0
+    
+    let dotProduct = 0
+    let norm1 = 0
+    let norm2 = 0
+    
+    for (let i = 0; i < vec1.length; i++) {
+      dotProduct += vec1[i] * vec2[i]
+      norm1 += vec1[i] * vec1[i]
+      norm2 += vec2[i] * vec2[i]
+    }
+    
+    const denominator = Math.sqrt(norm1) * Math.sqrt(norm2)
+    if (denominator === 0) return 0
+    
+    return dotProduct / denominator
+  }
 
   /**
-   * Stage-2 검색: Top-10 (ef=160) - confusions 포함 시에만
+   * Stage-2 검색: Top-10 (벡터 유사도 기반, confusions 포함 시에만) // 🔧 수정됨
    */
-  const performStage2Search = async (queryEmbedding, faissIndex, queryClass, top5Results, options = {}) => {
+  const performStage2Search = async (queryEmbedding, candidates, queryClass, top5Results, options = {}) => {
     const startTime = performance.now()
     
     try {
       // Top-5 결과에서 클래스 추출
-      const top5Classes = new Set(top5Results.map(r => r.class || r.part_id))
+      const top5Classes = new Set(top5Results.map(r => r.part_id || r.class))
       
       // Confusion-aware 게이트 사용
       const needsStage2 = checkConfusionGate(queryClass, top5Results)
@@ -224,21 +253,29 @@ export function useFAISSTwoStageSearch() {
       
       console.log('🔍 Stage-2 검색 시작: confusions 미포함')
       
-      // Stage-2 검색 실행 (Top-10, ef=160) - 기술문서 5.1
-    const results = await faissIndex.search(queryEmbedding, 10, {
-      ef: 160,             // Stage-2 ef 파라미터 (기술문서 15.1)
-      efConstruction: 300, // HNSW efConstruction (Stage-2) (기술문서 15.1)
-      M: 48,              // HNSW M 파라미터 (Stage-2) (기술문서 15.1)
-      ...options
-    })
+      // Stage-2: Top-10 확장 검색 (벡터 유사도 기반)
+      const scoredCandidates = candidates.map(candidate => {
+        const similarity = calculateCosineSimilarity(queryEmbedding, candidate.embedding)
+        return {
+          ...candidate,
+          similarity,
+          score: similarity,
+          part_id: candidate.part_id || candidate.part?.part_id
+        }
+      })
+      
+      // Top-10 정렬 및 선택
+      const top10 = scoredCandidates
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, 10)
       
       const searchTime = performance.now() - startTime
       searchStats.stage2Count++
       searchStats.stage2TriggerRate = searchStats.stage2Count / (searchStats.stage1Count + searchStats.stage2Count) * 100
       
-      console.log(`🔍 Stage-2 검색 완료: ${results.length}개 결과, ${searchTime.toFixed(2)}ms`)
+      console.log(`🔍 Stage-2 검색 완료: ${top10.length}개 결과, ${searchTime.toFixed(2)}ms`)
       
-      return results
+      return top10
     } catch (err) {
       console.error('❌ Stage-2 검색 실패:', err)
       throw err
@@ -246,9 +283,9 @@ export function useFAISSTwoStageSearch() {
   }
 
   /**
-   * Two-Stage 검색 실행
+   * Two-Stage 검색 실행 (벡터 유사도 기반) // 🔧 수정됨
    */
-  const performTwoStageSearch = async (queryEmbedding, faissIndex, queryClass, options = {}) => {
+  const performTwoStageSearch = async (queryEmbedding, candidates, queryClass, options = {}) => {
     loading.value = true
     error.value = null
     
@@ -256,12 +293,12 @@ export function useFAISSTwoStageSearch() {
       console.log('🔍 FAISS Two-Stage 검색 시작...')
       
       // Stage-1: Top-5 검색
-      const stage1Results = await performStage1Search(queryEmbedding, faissIndex, options)
+      const stage1Results = await performStage1Search(queryEmbedding, candidates, options)
       
       // Stage-2: 필요시 Top-10 검색
       const stage2Results = await performStage2Search(
         queryEmbedding, 
-        faissIndex, 
+        candidates, 
         queryClass, 
         stage1Results, 
         options

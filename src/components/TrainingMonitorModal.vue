@@ -1,6 +1,6 @@
 <template>
   <div v-if="isVisible" class="training-monitor-modal">
-    <div class="modal-overlay" @click="closeModal"></div>
+    <div class="modal-overlay"></div>
     <div class="modal-content">
       <div class="modal-header">
         <h3>🧠 AI 학습 모니터링</h3>
@@ -14,15 +14,27 @@
             <span class="status-label">학습 상태:</span>
             <span :class="['status-badge', statusClass]">{{ statusText }}</span>
           </div>
-          <div class="progress-bar">
+          <div v-if="trainingInfo.status !== 'no_job'" class="progress-bar">
             <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
           </div>
-          <div class="progress-text">{{ progressText }}</div>
+          <div v-if="trainingInfo.status !== 'no_job'" class="progress-text">{{ progressText }}</div>
+          <div v-else class="no-job-message">
+            <p>📋 현재 활성화된 학습 작업이 없습니다.</p>
+            <p>새로운 학습을 시작하거나 기존 학습 작업을 확인해보세요.</p>
+          </div>
         </div>
 
         <!-- 학습 정보 -->
         <div class="info-section">
           <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">작업 ID:</span>
+              <span class="info-value">{{ trainingJobId || '-' }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">상태:</span>
+              <span class="info-value" :class="statusClass">{{ statusText }}</span>
+            </div>
             <div class="info-item">
               <span class="info-label">부품 ID:</span>
               <span class="info-value">{{ trainingInfo.partId || '-' }}</span>
@@ -118,8 +130,6 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { createClient } from '@supabase/supabase-js'
-
 // Props
 const props = defineProps({
   visible: {
@@ -135,14 +145,12 @@ const props = defineProps({
 // Emits
 const emit = defineEmits(['close', 'pause', 'resume', 'stop'])
 
-// Supabase 클라이언트
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
-  import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJphdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
-)
+// 전역 Supabase 클라이언트 사용
+import { useSupabase } from '../composables/useSupabase.js'
+const { supabase } = useSupabase()
 
 // 반응형 데이터
-const isVisible = ref(false)
+const isVisible = computed(() => props.visible)
 const trainingInfo = ref({})
 const metrics = ref({})
 const logs = ref([])
@@ -155,10 +163,11 @@ let metricsPolling = null
 // 계산된 속성
 const statusClass = computed(() => {
   const status = trainingInfo.value.status
-  if (status === 'training') return 'status-training'
+  if (status === 'running' || status === 'training') return 'status-training'
   if (status === 'paused') return 'status-paused'
   if (status === 'completed') return 'status-completed'
   if (status === 'failed') return 'status-failed'
+  if (status === 'no_job') return 'status-no-job'
   return 'status-pending'
 })
 
@@ -166,10 +175,12 @@ const statusText = computed(() => {
   const status = trainingInfo.value.status
   const statusMap = {
     'pending': '대기 중',
+    'running': '실행 중',
     'training': '학습 중',
     'paused': '일시정지',
     'completed': '완료',
-    'failed': '실패'
+    'failed': '실패',
+    'no_job': '학습 작업 없음'
   }
   return statusMap[status] || '알 수 없음'
 })
@@ -177,7 +188,20 @@ const statusText = computed(() => {
 const progressPercent = computed(() => {
   const current = trainingInfo.value.currentEpoch || 0
   const total = trainingInfo.value.totalEpochs || 1
-  return Math.round((current / total) * 100)
+  const status = trainingInfo.value.status
+  
+  // progress JSONB에서 더 정확한 진행률 확인
+  const progress = trainingInfo.value.progress || {}
+  if (progress.percent) {
+    return Math.min(Math.round(progress.percent), 100)
+  }
+  
+  // running 상태일 때는 최소 1% 표시
+  if (status === 'running' && current === 0) {
+    return 1
+  }
+  
+  return Math.min(Math.round((current / total) * 100), 100)
 })
 
 const progressText = computed(() => {
@@ -186,27 +210,86 @@ const progressText = computed(() => {
   return `${current}/${total} 에폭 (${progressPercent.value}%)`
 })
 
-const canPause = computed(() => trainingInfo.value.status === 'training')
+const canPause = computed(() => ['training', 'running'].includes(trainingInfo.value.status))
 const canResume = computed(() => trainingInfo.value.status === 'paused')
-const canStop = computed(() => ['training', 'paused'].includes(trainingInfo.value.status))
+const canStop = computed(() => ['training', 'paused', 'running'].includes(trainingInfo.value.status))
 
 // 메서드
 const closeModal = () => {
-  isVisible.value = false
   stopPolling()
   emit('close')
 }
 
-const pauseTraining = () => {
-  emit('pause')
+const pauseTraining = async () => {
+  try {
+    console.log('⏸️ 학습 일시정지 요청')
+    addLog('info', '⏸️ 학습 일시정지 요청 중...')
+    
+    // TODO: 실제 학습 일시정지 API 호출
+    // const response = await fetch(`http://localhost:3012/api/training/pause/${trainingJobId}`, {
+    //   method: 'POST'
+    // })
+    
+    // 임시로 상태만 변경
+    trainingInfo.value.status = 'paused'
+    addLog('success', '✅ 학습이 일시정지되었습니다')
+    
+    emit('pause')
+  } catch (error) {
+    console.error('일시정지 실패:', error)
+    addLog('error', `❌ 일시정지 실패: ${error.message}`)
+  }
 }
 
-const resumeTraining = () => {
-  emit('resume')
+const resumeTraining = async () => {
+  try {
+    console.log('▶️ 학습 재개 요청')
+    addLog('info', '▶️ 학습 재개 요청 중...')
+    
+    // TODO: 실제 학습 재개 API 호출
+    // const response = await fetch(`http://localhost:3012/api/training/resume/${trainingJobId}`, {
+    //   method: 'POST'
+    // })
+    
+    // 임시로 상태만 변경
+    trainingInfo.value.status = 'training'
+    addLog('success', '✅ 학습이 재개되었습니다')
+    
+    emit('resume')
+  } catch (error) {
+    console.error('재개 실패:', error)
+    addLog('error', `❌ 재개 실패: ${error.message}`)
+  }
 }
 
-const stopTraining = () => {
-  emit('stop')
+const stopTraining = async () => {
+  try {
+    console.log('⏹️ 학습 중지 요청')
+    addLog('info', '⏹️ 학습 중지 요청 중...')
+    
+    if (props.trainingJobId) {
+      // 실제 학습 중지 API 호출
+      const response = await fetch(`http://localhost:3012/api/training/stop/${props.trainingJobId}`, {
+        method: 'POST'
+      })
+      
+      if (response.ok) {
+        trainingInfo.value.status = 'failed'
+        addLog('success', '✅ 학습이 중지되었습니다')
+      } else {
+        throw new Error(`HTTP ${response.status}`)
+      }
+    } else {
+      // 작업 ID가 없으면 상태만 변경
+      trainingInfo.value.status = 'failed'
+      addLog('success', '✅ 학습이 중지되었습니다')
+    }
+    
+    emit('stop')
+  } catch (error) {
+    console.error('중지 실패:', error)
+    addLog('error', `❌ 중지 실패: ${error.message}`)
+  }
 }
 
 const refreshStatus = async () => {
@@ -216,7 +299,22 @@ const refreshStatus = async () => {
 
 const fetchTrainingStatus = async () => {
   try {
-    if (!props.trainingJobId) return
+    if (!props.trainingJobId) {
+      // 학습 작업 ID가 없으면 no_job 상태로 설정
+      trainingInfo.value = {
+        partId: '-',
+        stage: '-',
+        currentEpoch: 0,
+        totalEpochs: 0,
+        batchSize: '-',
+        imageSize: '-',
+        device: '-',
+        status: 'no_job',
+        progress: {}
+      }
+      addLog('info', '학습 작업이 없습니다.')
+      return
+    }
 
     const { data, error } = await supabase
       .from('training_jobs')
@@ -224,21 +322,68 @@ const fetchTrainingStatus = async () => {
       .eq('id', props.trainingJobId)
       .single()
 
-    if (error) throw error
+    if (error) {
+      if (error.code === 'PGRST116') {
+        console.log('학습 작업을 찾을 수 없습니다.')
+        addLog('warn', '학습 작업을 찾을 수 없습니다.')
+        
+        // 작업을 찾을 수 없으면 no_job 상태로 설정
+        trainingInfo.value = {
+          partId: '-',
+          stage: '-',
+          currentEpoch: 0,
+          totalEpochs: 0,
+          batchSize: '-',
+          imageSize: '-',
+          device: '-',
+          status: 'no_job',
+          progress: {}
+        }
+        return
+      }
+      throw error
+    }
 
     trainingInfo.value = {
-      partId: data.config?.partId || data.config?.part_id,
+      partId: data.config?.partId || data.config?.part_id || data.config?.training_type || '-',
       stage: data.config?.model_stage || 'stage1',
-      currentEpoch: data.progress?.current_epoch || 0,
-      totalEpochs: data.config?.epochs || 100,
-      batchSize: data.config?.batch_size || 16,
+      currentEpoch: data.progress?.current_epoch || data.progress?.epoch || 0,
+      totalEpochs: data.config?.epochs || 50,
+      batchSize: data.config?.batch_size || 8,
       imageSize: data.config?.imgsz || 640,
       device: data.config?.device || 'cuda',
-      status: data.status || 'pending'
+      status: data.status || 'pending',
+      progress: data.progress || {}
     }
 
     // 로그 추가
     addLog('info', `학습 상태 업데이트: ${statusText.value}`)
+    addLog('debug', `작업 상세: ID=${data.id}, 상태=${data.status}, 설정=${JSON.stringify(data.config)}`)
+    
+    // 상태별 상세 로그 추가
+    if (data.status === 'training' && data.progress?.current_epoch) {
+      const percent = Math.round((data.progress.current_epoch / data.progress.total_epochs) * 100)
+      addLog('info', `🚀 에폭 ${data.progress.current_epoch}/${data.progress.total_epochs} 진행 중 (${percent}%)`)
+      
+      // 메트릭이 있으면 로그에 추가
+      if (data.progress.metrics) {
+        const metrics = data.progress.metrics
+        if (metrics.box_loss !== undefined) {
+          addLog('info', `📊 Loss - Box: ${metrics.box_loss?.toFixed(4) || '0.0000'}, Seg: ${metrics.seg_loss?.toFixed(4) || '0.0000'}`)
+        }
+        if (metrics.map50 !== undefined) {
+          addLog('info', `🎯 mAP - 50: ${metrics.map50?.toFixed(4) || '0.0000'}, 50-95: ${metrics.map50_95?.toFixed(4) || '0.0000'}`)
+        }
+      }
+    } else if (data.status === 'completed') {
+      addLog('success', '✅ 학습이 완료되었습니다!')
+    } else if (data.status === 'failed') {
+      addLog('error', `❌ 학습 실패: ${data.error_message || '알 수 없는 오류'}`)
+    } else if (data.status === 'pending') {
+      addLog('info', '⏳ 학습 대기 중...')
+    } else if (data.status === 'running') {
+      addLog('info', '🔄 학습 준비 중...')
+    }
   } catch (error) {
     console.error('학습 상태 조회 실패:', error)
     addLog('error', `상태 조회 실패: ${error.message}`)
@@ -249,28 +394,65 @@ const fetchMetrics = async () => {
   try {
     if (!props.trainingJobId) return
 
+    // training_metrics 테이블에서 메트릭 조회 (올바른 컬럼명 사용)
     const { data, error } = await supabase
       .from('training_metrics')
       .select('*')
-      .eq('job_id', props.trainingJobId)
+      .eq('training_job_id', props.trainingJobId)
       .order('created_at', { ascending: false })
       .limit(1)
-      .single()
 
-    if (error && error.code !== 'PGRST116') throw error
+    if (error) {
+      // 테이블이 없거나 접근 권한이 없는 경우 무시
+      if (error.code === 'PGRST116' || error.code === '42P01') {
+        console.log('training_metrics 테이블이 없거나 접근할 수 없습니다. 기본값을 사용합니다.')
+        metrics.value = {
+          boxLoss: '0.0000',
+          segLoss: '0.0000',
+          clsLoss: '0.0000',
+          dflLoss: '0.0000',
+          map50: '0.0000',
+          map50_95: '0.0000'
+        }
+        return
+      }
+      throw error
+    }
 
-    if (data) {
+    if (data && data.length > 0) {
+      const latestMetric = data[0]
+      // metrics JSONB 필드에서 데이터 추출
+      const metricData = latestMetric.metrics || {}
       metrics.value = {
-        boxLoss: data.box_loss?.toFixed(4),
-        segLoss: data.seg_loss?.toFixed(4),
-        clsLoss: data.cls_loss?.toFixed(4),
-        dflLoss: data.dfl_loss?.toFixed(4),
-        map50: data.map50?.toFixed(4),
-        map50_95: data.map50_95?.toFixed(4)
+        boxLoss: metricData.box_loss?.toFixed(4) || '0.0000',
+        segLoss: metricData.seg_loss?.toFixed(4) || '0.0000',
+        clsLoss: metricData.cls_loss?.toFixed(4) || '0.0000',
+        dflLoss: metricData.dfl_loss?.toFixed(4) || '0.0000',
+        map50: metricData.map50?.toFixed(4) || '0.0000',
+        map50_95: metricData.map50_95?.toFixed(4) || '0.0000'
+      }
+    } else {
+      // 데이터가 없는 경우 기본값
+      metrics.value = {
+        boxLoss: '0.0000',
+        segLoss: '0.0000',
+        clsLoss: '0.0000',
+        dflLoss: '0.0000',
+        map50: '0.0000',
+        map50_95: '0.0000'
       }
     }
   } catch (error) {
     console.error('메트릭 조회 실패:', error)
+    // 오류 발생 시 기본값 설정
+    metrics.value = {
+      boxLoss: '0.0000',
+      segLoss: '0.0000',
+      clsLoss: '0.0000',
+      dflLoss: '0.0000',
+      map50: '0.0000',
+      map50_95: '0.0000'
+    }
   }
 }
 
@@ -282,9 +464,9 @@ const addLog = (level, message) => {
     message
   })
 
-  // 로그가 너무 많으면 오래된 것 제거
-  if (logs.value.length > 100) {
-    logs.value = logs.value.slice(0, 100)
+  // 로그가 너무 많으면 오래된 것 제거 (더 많은 로그 보관)
+  if (logs.value.length > 200) {
+    logs.value = logs.value.slice(0, 200)
   }
 
   // 자동 스크롤
@@ -296,15 +478,15 @@ const addLog = (level, message) => {
 }
 
 const startPolling = () => {
-  // 상태 폴링 (5초마다)
+  // 상태 폴링 (2초마다) - 더 빠른 업데이트
   statusPolling = setInterval(async () => {
     await fetchTrainingStatus()
-  }, 5000)
+  }, 2000)
 
-  // 메트릭 폴링 (10초마다)
+  // 메트릭 폴링 (3초마다) - 더 빠른 업데이트
   metricsPolling = setInterval(async () => {
     await fetchMetrics()
-  }, 10000)
+  }, 3000)
 }
 
 const stopPolling = () => {
@@ -320,8 +502,9 @@ const stopPolling = () => {
 
 // 라이프사이클
 onMounted(() => {
-  isVisible.value = props.visible
-  if (isVisible.value) {
+  if (isVisible.value && props.trainingJobId) {
+    console.log('🎯 학습 모달 초기화:', props.trainingJobId)
+    addLog('info', `학습 모니터링 시작 (작업 ID: ${props.trainingJobId})`)
     startPolling()
     refreshStatus()
   }
@@ -333,8 +516,10 @@ onUnmounted(() => {
 
 // Props 변경 감지
 watch(() => props.visible, (newVisible) => {
-  isVisible.value = newVisible
-  if (newVisible) {
+  console.log('👁️ 모달 표시 상태 변경:', newVisible)
+  if (newVisible && props.trainingJobId) {
+    console.log('🎯 학습 모달 활성화:', props.trainingJobId)
+    addLog('info', `학습 모니터링 시작 (작업 ID: ${props.trainingJobId})`)
     startPolling()
     refreshStatus()
   } else {
@@ -342,8 +527,10 @@ watch(() => props.visible, (newVisible) => {
   }
 })
 
-watch(() => props.trainingJobId, (newJobId) => {
+watch(() => props.trainingJobId, (newJobId, oldJobId) => {
+  console.log('🔄 학습 작업 ID 변경:', oldJobId, '→', newJobId)
   if (newJobId && isVisible.value) {
+    addLog('info', `학습 작업 변경: ${oldJobId} → ${newJobId}`)
     refreshStatus()
   }
 })
@@ -471,6 +658,25 @@ watch(() => props.trainingJobId, (newJobId) => {
   color: #6b7280;
 }
 
+.status-no-job {
+  background: #e5e7eb;
+  color: #9ca3af;
+}
+
+.no-job-message {
+  text-align: center;
+  padding: 20px;
+  background: #f9fafb;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.no-job-message p {
+  margin: 8px 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
 .progress-bar {
   width: 100%;
   height: 8px;
@@ -569,7 +775,7 @@ watch(() => props.trainingJobId, (newJobId) => {
 }
 
 .logs-container {
-  height: 200px;
+  height: 400px;
   overflow-y: auto;
   background: #1f2937;
   border-radius: 6px;

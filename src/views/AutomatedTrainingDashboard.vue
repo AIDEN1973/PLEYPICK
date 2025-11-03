@@ -3,7 +3,7 @@
     <!-- 학습 모니터링 모달 -->
     <TrainingMonitorModal
       :visible="trainingMonitorStore.isModalVisible"
-      :training-job-id="trainingMonitorStore.currentTrainingJob"
+      :training-job-id="String(trainingMonitorStore.currentTrainingJob || '')"
       @close="closeTrainingModal"
       @pause="pauseTraining"
       @resume="resumeTraining"
@@ -326,9 +326,9 @@
         <div class="card-header">
           <h2>🎯 세트 단위 학습</h2>
           <HelpTooltip 
-            title="세트 단위 학습"
-            content="특정 레고 세트의 부품들만을 대상으로 모델을 학습하는 방식입니다. 중복을 제거하고 효율적으로 학습할 수 있습니다."
-            :examples="['세트별 부품 분류', '중복 제거', '효율적 학습']"
+            title="세트 단위 하이브리드 학습"
+            content="특정 레고 세트의 부품들을 대상으로 1단계(YOLO11n-seg)와 2단계(YOLO11s-seg) 모델을 순차적으로 학습합니다. 빠른 스캔과 정밀 검증을 모두 지원합니다."
+            :examples="['1단계: 빠른 스캔', '2단계: 정밀 검증', '하이브리드 시스템']"
           />
         </div>
         <div class="set-training-content">
@@ -369,6 +369,71 @@
             </div>
           </div>
 
+          <!-- 학습 파라미터 설정 -->
+          <div class="training-params-section">
+            <h3>⚙️ 학습 파라미터 설정</h3>
+            <div class="params-grid">
+              <div class="param-group">
+                <label for="epochs">에폭 수</label>
+                <input 
+                  id="epochs"
+                  v-model.number="trainingParams.epochs" 
+                  type="number" 
+                  min="1" 
+                  max="1000"
+                  class="param-input"
+                />
+                <small class="param-help">학습 반복 횟수 (기술문서 권장: 100, Early Stopping=15)</small>
+              </div>
+              <div class="param-group">
+                <label for="batchSize">배치 크기</label>
+                <input 
+                  id="batchSize"
+                  v-model.number="trainingParams.batchSize" 
+                  type="number" 
+                  min="1" 
+                  max="64"
+                  class="param-input"
+                />
+                <small class="param-help">GPU 메모리에 따라 조정 (기술문서 권장: 16-32)</small>
+              </div>
+              <div class="param-group">
+                <label for="imageSize">이미지 크기</label>
+                <select 
+                  id="imageSize"
+                  v-model.number="trainingParams.imageSize" 
+                  class="param-select"
+                >
+                  <option value="416">416px (빠름)</option>
+                  <option value="512">512px (균형)</option>
+                  <option value="640">640px (빠름)</option>
+                  <option value="768">768px (기술문서 권장)</option>
+                  <option value="960">960px (최고품질)</option>
+                </select>
+                <small class="param-help">이미지 해상도 (높을수록 정확하지만 느림)</small>
+              </div>
+              <div class="param-group">
+                <label for="device">사용 디바이스</label>
+                <select 
+                  id="device"
+                  v-model="trainingParams.device" 
+                  class="param-select"
+                >
+                  <option value="cuda">GPU (CUDA)</option>
+                  <option value="cpu">CPU</option>
+                  <option value="auto">자동 선택</option>
+                </select>
+                <small class="param-help">학습에 사용할 디바이스</small>
+              </div>
+            </div>
+            <div class="params-actions">
+              <button @click="resetTrainingParams" class="btn-reset">기본값으로 초기화</button>
+              <button @click="applyPreset('fast')" class="btn-preset fast">빠른 프로토타이핑 (10 에폭)</button>
+              <button @click="applyPreset('balanced')" class="btn-preset balanced">기술문서 권장 (100 에폭)</button>
+              <button @click="applyPreset('quality')" class="btn-preset quality">고품질 학습 (150 에폭)</button>
+            </div>
+          </div>
+
           <!-- 세트 단위 학습 입력 -->
           <div v-if="trainingType === 'set'" class="set-input-section">
             <div class="input-group">
@@ -396,6 +461,10 @@
 
           <!-- 부품 단위 학습 입력 -->
           <div v-if="trainingType === 'part'" class="part-input-section">
+            <div class="hybrid-info">
+              <h4>🧠 하이브리드 학습 시스템</h4>
+              <p>1단계(YOLO11n-seg)와 2단계(YOLO11s-seg) 모델을 순차적으로 학습하여 빠른 스캔과 정밀 검증을 모두 지원합니다.</p>
+            </div>
             <div class="input-group">
               <label for="partId">부품 ID 또는 엘리먼트 ID</label>
               <div class="input-row">
@@ -448,7 +517,7 @@
                 :disabled="!setInfo || isLoading || setInfo.new_parts === 0"
                 class="btn-start-training"
               >
-                🎯 세트 학습 시작
+                🎯 세트 하이브리드 학습 시작
               </button>
               <button 
                 @click="checkSetTrainingStatus" 
@@ -503,7 +572,7 @@
                 :disabled="!partInfo || isLoading || partInfo.image_count === 0"
                 class="btn-start-training"
               >
-                🧩 부품 학습 시작
+                🧩 부품 하이브리드 학습 시작
               </button>
               <button 
                 @click="checkPartTrainingStatus" 
@@ -626,15 +695,12 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAutomatedModelRegistry } from '@/composables/useAutomatedModelRegistry.js'
 import { useTrainingMonitorStore } from '@/stores/trainingMonitor.js'
-import { createClient } from '@supabase/supabase-js'
 import HelpTooltip from '../components/HelpTooltip.vue'
 import TrainingMonitorModal from '../components/TrainingMonitorModal.vue'
+import { useSupabase } from '../composables/useSupabase.js'
 
-// Supabase 클라이언트 생성
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
-  import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
-)
+// 전역 Supabase 클라이언트 사용
+const { supabase } = useSupabase()
 
 // 모델 레지스트리 훅
 const {
@@ -649,7 +715,7 @@ const {
   fetchModelHistory,
   activateModel,
   activateLatestModel,
-  startTraining: startTrainingJob
+  startTraining
 } = useAutomatedModelRegistry()
 
 // 학습 모니터링 스토어
@@ -669,6 +735,14 @@ const partInfo = ref(null)
 
 // 자동 새로고침 상태
 const autoRefreshEnabled = ref(true)
+
+// 학습 파라미터 설정 (기술문서 기준)
+const trainingParams = ref({
+  epochs: 100,
+  batchSize: 16,
+  imageSize: 768,
+  device: 'cuda'
+})
 
 // 성능 모니터링 관련 (2단계 모델)
 const performanceMetrics = ref({
@@ -716,6 +790,48 @@ const recommendedAction = ref('none')
 const isLoadingMetrics = ref(false)
 
 // 학습 작업 목록 조회
+// 학습 파라미터 관련 메서드들
+const resetTrainingParams = () => {
+  trainingParams.value = {
+    epochs: 100,
+    batchSize: 16,
+    imageSize: 768,
+    device: 'cuda'
+  }
+}
+
+const applyPreset = (preset) => {
+  switch (preset) {
+    case 'fast':
+      // 빠른 프로토타이핑용 (기술문서 기준의 1/10)
+      trainingParams.value = {
+        epochs: 10,
+        batchSize: 32,
+        imageSize: 640,
+        device: 'cuda'
+      }
+      break
+    case 'balanced':
+      // 기술문서 권장 기준
+      trainingParams.value = {
+        epochs: 100,
+        batchSize: 16,
+        imageSize: 768,
+        device: 'cuda'
+      }
+      break
+    case 'quality':
+      // 고품질 학습 (기술문서 기준의 1.5배)
+      trainingParams.value = {
+        epochs: 150,
+        batchSize: 8,
+        imageSize: 960,
+        device: 'cuda'
+      }
+      break
+  }
+}
+
 const fetchTrainingJobs = async () => {
   try {
     // 학습 작업 목록 조회 시작
@@ -1189,14 +1305,15 @@ const startSetTraining = async () => {
       console.warn('세트 학습 상태 업데이트 실패:', updateError)
     }
     
-    // 3. 로컬 PC 학습 시작
-    await startTrainingJob('latest', {
-      epochs: 100,
-      batch_size: 16,
-      imgsz: 640,
-      device: 'cuda',
+    // 3. 로컬 PC 학습 시작 (하이브리드)
+    await startTraining('latest', {
+      epochs: trainingParams.value.epochs,
+      batch_size: trainingParams.value.batchSize,
+      imgsz: trainingParams.value.imageSize,
+      device: trainingParams.value.device,
       set_num: selectedSetNum.value, // 세트 번호 전달
-      training_type: 'local' // 로컬 학습 표시
+      training_type: 'local', // 로컬 학습 표시
+      model_stage: 'hybrid' // 하이브리드 학습 (1단계 + 2단계)
     })
     
     // 3. 세트 정보 새로고침
@@ -1215,10 +1332,10 @@ const startSetTraining = async () => {
 3. 다음 명령어를 실행하세요:
 
 cd scripts
-python local_yolo_training.py --set_num ${selectedSetNum.value} --epochs 100
+python local_yolo_training.py --set_num ${selectedSetNum.value} --epochs ${trainingParams.epochs}
 
 또는 배치 파일을 사용하세요:
-run_local_training.bat ${selectedSetNum.value} 100 16 640
+run_local_training.bat ${selectedSetNum.value} ${trainingParams.epochs} ${trainingParams.batchSize} ${trainingParams.imageSize}
 
 📊 학습 진행 상황:
 - 학습 상태는 대시보드에서 실시간으로 확인할 수 있습니다
@@ -1246,10 +1363,63 @@ run_local_training.bat ${selectedSetNum.value} 100 16 640
 const checkSetTrainingStatus = async () => {
   try {
     console.log(`📊 세트 ${selectedSetNum.value} 학습 상태 확인 중...`)
+    
+    // 1. 세트 정보 로드
     await loadSetInfo()
+    
+    // 2. 최근 학습 작업 조회
+    const { data: recentJobs, error: jobsError } = await supabase
+      .from('training_jobs')
+      .select('*')
+      .eq('config->set_num', selectedSetNum.value)
+      .order('created_at', { ascending: false })
+      .limit(1)
+    
+    if (jobsError) {
+      console.error('학습 작업 조회 실패:', jobsError)
+      alert('학습 작업을 찾을 수 없습니다.')
+      return
+    }
+    
+    if (recentJobs && recentJobs.length > 0) {
+      const latestJob = recentJobs[0]
+      console.log('📋 최근 학습 작업:', latestJob)
+      
+      // 3. 학습 모니터링 모달 표시
+      const trainingJob = {
+        id: latestJob.id,
+        status: latestJob.status,
+        config: latestJob.config,
+        progress: latestJob.progress
+      }
+      
+      trainingMonitorStore.addTrainingJob(trainingJob)
+      trainingMonitorStore.showModal(latestJob.id)
+      trainingMonitorStore.saveToLocalStorage()
+      
+      console.log('✅ 학습 모니터링 모달 표시됨')
+    } else {
+      console.log('📋 학습 작업이 없습니다.')
+      
+      // 학습 작업이 없어도 모달을 표시 (빈 상태로)
+      const emptyJob = {
+        id: null,
+        status: 'no_job',
+        config: { set_num: selectedSetNum.value },
+        progress: {}
+      }
+      
+      trainingMonitorStore.addTrainingJob(emptyJob)
+      trainingMonitorStore.showModal(null)
+      trainingMonitorStore.saveToLocalStorage()
+      
+      console.log('✅ 빈 학습 모니터링 모달 표시됨')
+    }
+    
     console.log('✅ 세트 학습 상태 확인 완료')
   } catch (err) {
     console.error('세트 학습 상태 확인 실패:', err)
+    alert(`학습 상태 확인 실패: ${err.message}`)
   }
 }
 
@@ -1355,10 +1525,13 @@ const loadPartInfo = async () => {
     // 3. 부품 학습 상태 조회 (실제 part_id 사용)
     let trainingStatus = null
     try {
+      // 엘리먼트 ID인 경우 매핑된 부품 ID로 조회
+      const statusPartId = isElementId ? partId : partId
+      
       const { data: statusRows, error: statusError } = await supabase
         .from('part_training_status')
         .select('*')
-        .eq('part_id', partId)
+        .eq('part_id', statusPartId)
         .order('updated_at', { ascending: false })
         .limit(1)
       
@@ -1369,6 +1542,12 @@ const loadPartInfo = async () => {
         console.log('부품 학습 상태:', trainingStatus)
       } else {
         console.log('부품 학습 상태 없음 (초기 상태)')
+        // 학습 상태가 없으면 기본값 설정
+        trainingStatus = {
+          part_id: statusPartId,
+          status: 'not_started',
+          last_trained_at: null
+        }
       }
     } catch (error) {
       console.warn('부품 학습 상태 조회 중 오류:', error)
@@ -1519,25 +1698,48 @@ const startPartTraining = async () => {
     }
     
     // 2. 로컬 PC 학습 시작 (실제 부품 ID 전달)
-    const jobResult = await startTrainingJob('latest', {
-      epochs: 50, // 부품 단위는 더 적은 에폭
-      batch_size: 8,
-      imgsz: 640,
-      device: 'cuda',
+    const jobResult = await startTraining('latest', {
+      epochs: trainingParams.value.epochs,
+      batch_size: trainingParams.value.batchSize,
+      imgsz: trainingParams.value.imageSize,
+      device: trainingParams.value.device,
       partId: actualPartId, // 실제 부품 ID 전달 (partId로 수정)
       training_type: 'part', // 부품 학습 표시
-      model_stage: 'stage1' // 1단계 모델 사용
+      model_stage: 'hybrid' // 하이브리드 학습 (1단계 + 2단계)
     })
     
     // 학습 작업이 생성되면 모달 표시
-    if (jobResult && jobResult.id) {
-      trainingMonitorStore.addTrainingJob({
-        id: jobResult.id,
+    console.log('🔍 학습 결과 확인:', jobResult)
+    
+    if (jobResult && jobResult.training_job_id) {
+      const trainingJob = {
+        id: jobResult.training_job_id,
         status: 'training',
-        config: jobResult.config
-      })
-      trainingMonitorStore.showModal(jobResult.id)
+        config: {
+          partId: actualPartId,
+          model_stage: 'stage1',
+          epochs: trainingParams.value.epochs,
+          batch_size: trainingParams.value.batchSize,
+          imgsz: trainingParams.value.imageSize,
+          device: 'cuda'
+        }
+      }
+      
+      console.log('📝 학습 작업 추가:', trainingJob)
+      trainingMonitorStore.addTrainingJob(trainingJob)
+      
+      console.log('👁️ 모달 표시 시도:', jobResult.training_job_id)
+      trainingMonitorStore.showModal(jobResult.training_job_id)
       trainingMonitorStore.saveToLocalStorage()
+      
+      console.log('✅ 학습 모달 표시됨:', jobResult.training_job_id)
+      console.log('🔍 모달 상태:', {
+        isModalVisible: trainingMonitorStore.isModalVisible,
+        currentTrainingJob: trainingMonitorStore.currentTrainingJob,
+        trainingJobs: trainingMonitorStore.trainingJobs
+      })
+    } else {
+      console.warn('⚠️ 학습 작업 생성 실패 또는 ID 없음:', jobResult)
     }
     
     // 3. 부품 정보 새로고침
@@ -1556,10 +1758,10 @@ const startPartTraining = async () => {
 3. 다음 명령어를 실행하세요:
 
 cd scripts
-python local_yolo_training.py --part_id ${selectedPartId.value} --epochs 50
+python local_yolo_training.py --part_id ${selectedPartId.value} --epochs ${trainingParams.epochs}
 
 또는 배치 파일을 사용하세요:
-run_local_training.bat ${selectedPartId.value} 50 8 640
+run_local_training.bat ${selectedPartId.value} ${trainingParams.epochs} ${trainingParams.batchSize} ${trainingParams.imageSize}
 
 📊 학습 진행 상황:
 - 학습 상태는 대시보드에서 실시간으로 확인할 수 있습니다
@@ -1583,10 +1785,69 @@ run_local_training.bat ${selectedPartId.value} 50 8 640
 const checkPartTrainingStatus = async () => {
   try {
     console.log(`📊 부품 ${selectedPartId.value} 학습 상태 확인 중...`)
+    
+    // 1. 부품 정보 로드
     await loadPartInfo()
+    
+    // 2. 최근 학습 작업 조회 (모든 로컬 학습 작업)
+    const { data: recentJobs, error: jobsError } = await supabase
+      .from('training_jobs')
+      .select('*')
+      .or(`config->partId.eq.${selectedPartId.value},config->part_id.eq.${selectedPartId.value},config->training_type.eq.local`)
+      .order('created_at', { ascending: false })
+      .limit(10) // 최근 10개 작업 조회
+    
+    if (jobsError) {
+      console.error('학습 작업 조회 실패:', jobsError)
+      alert('학습 작업을 찾을 수 없습니다.')
+      return
+    }
+    
+    if (recentJobs && recentJobs.length > 0) {
+      // 가장 최근의 활성 학습 작업 찾기 (training, running, pending 상태 우선)
+      const activeJobs = recentJobs.filter(job => 
+        ['training', 'running', 'pending'].includes(job.status)
+      )
+      
+      const latestJob = activeJobs.length > 0 ? activeJobs[0] : recentJobs[0]
+      console.log('📋 최근 학습 작업:', latestJob)
+      console.log('📋 전체 작업 목록:', recentJobs.map(j => ({ id: j.id, status: j.status, created_at: j.created_at })))
+      
+      // 3. 학습 모니터링 모달 표시
+      const trainingJob = {
+        id: latestJob.id,
+        status: latestJob.status,
+        config: latestJob.config,
+        progress: latestJob.progress
+      }
+      
+      trainingMonitorStore.addTrainingJob(trainingJob)
+      trainingMonitorStore.showModal(latestJob.id)
+      trainingMonitorStore.saveToLocalStorage()
+      
+      console.log('✅ 학습 모니터링 모달 표시됨 (작업 ID:', latestJob.id, ')')
+    } else {
+      console.log('📋 학습 작업이 없습니다.')
+      
+      // 학습 작업이 없어도 모달을 표시 (빈 상태로)
+      const emptyJob = {
+        id: null,
+        status: 'no_job',
+        config: { partId: selectedPartId.value },
+        progress: {}
+      }
+      
+      trainingMonitorStore.addTrainingJob(emptyJob)
+      trainingMonitorStore.showModal(null)
+      trainingMonitorStore.saveToLocalStorage()
+      
+      console.log('✅ 빈 학습 모니터링 모달 표시됨')
+    }
+    
     console.log('✅ 부품 학습 상태 확인 완료')
   } catch (err) {
     console.error('부품 학습 상태 확인 실패:', err)
+    alert(`학습 상태 확인 실패: ${err.message}`)
   }
 }
 
@@ -3693,6 +3954,141 @@ onUnmounted(() => {
   .part-actions {
     flex-direction: column;
   }
+}
+
+/* 학습 파라미터 설정 스타일 */
+.training-params-section {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+}
+
+.training-params-section h3 {
+  margin: 0 0 20px 0;
+  color: #1f2937;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.params-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.param-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-group label {
+  font-weight: 500;
+  color: #374151;
+  font-size: 14px;
+}
+
+.param-input,
+.param-select {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.param-input:focus,
+.param-select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.param-help {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.params-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn-reset {
+  padding: 8px 16px;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-reset:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.btn-preset {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-preset.fast {
+  background: #10b981;
+  color: white;
+}
+
+.btn-preset.fast:hover {
+  background: #059669;
+}
+
+.btn-preset.balanced {
+  background: #3b82f6;
+  color: white;
+}
+
+.btn-preset.balanced:hover {
+  background: #2563eb;
+}
+
+.btn-preset.quality {
+  background: #8b5cf6;
+  color: white;
+}
+
+.btn-preset.quality:hover {
+  background: #7c3aed;
+}
+
+@media (max-width: 768px) {
+  .params-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .params-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .btn-preset,
+  .btn-reset {
+    width: 100%;
+    text-align: center;
+  }
   
   .trigger-buttons {
     flex-direction: column;
@@ -3705,6 +4101,29 @@ onUnmounted(() => {
   .training-type-option {
     min-width: auto;
   }
+}
+
+/* 하이브리드 학습 정보 스타일 */
+.hybrid-info {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.hybrid-info h4 {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.hybrid-info p {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.9;
+  line-height: 1.4;
 }
 
 @media (max-width: 480px) {

@@ -196,11 +196,21 @@ export const useAutomatedModelRegistry = () => {
       const latestModel = allModels[0]
       console.log(`📦 최신 모델 발견: ${latestModel.model_name} (v${latestModel.version})`)
       
-      // 기존 활성 모델 비활성화
-      const { error: deactivateError } = await supabase
+      // 최신 모델의 model_stage 확인
+      const latestModelStage = latestModel.model_stage
+      
+      // 동일 model_stage의 기존 활성 모델 비활성화
+      let deactivateQuery = supabase
         .from('model_registry')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .update({ is_active: false, status: 'inactive', updated_at: new Date().toISOString() })
         .eq('is_active', true)
+      
+      // model_stage가 있으면 동일 stage만, 없으면 모든 모델 비활성화 (레거시 호환)
+      if (latestModelStage) {
+        deactivateQuery = deactivateQuery.eq('model_stage', latestModelStage)
+      }
+      
+      const { error: deactivateError } = await deactivateQuery
       
       if (deactivateError) {
         console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
@@ -210,7 +220,8 @@ export const useAutomatedModelRegistry = () => {
       const { error: activateError } = await supabase
         .from('model_registry')
         .update({ 
-          is_active: true, 
+          is_active: true,
+          status: 'active',
           updated_at: new Date().toISOString() 
         })
         .eq('id', latestModel.id)
@@ -246,11 +257,29 @@ export const useAutomatedModelRegistry = () => {
     try {
       isLoading.value = true
 
-      // 기존 활성 모델 비활성화
-      const { error: deactivateError } = await supabase
+      // 활성화할 모델 정보 조회
+      const { data: targetModel, error: fetchError } = await supabase
         .from('model_registry')
-        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .select('model_stage')
+        .eq('id', modelId)
+        .single()
+
+      if (fetchError || !targetModel) {
+        throw new Error(`모델 조회 실패: ${fetchError?.message}`)
+      }
+
+      // 동일 model_stage의 기존 활성 모델 비활성화
+      let deactivateQuery = supabase
+        .from('model_registry')
+        .update({ is_active: false, status: 'inactive', updated_at: new Date().toISOString() })
         .eq('is_active', true)
+
+      // model_stage가 있으면 동일 stage만, 없으면 모든 모델 비활성화 (레거시 호환)
+      if (targetModel.model_stage) {
+        deactivateQuery = deactivateQuery.eq('model_stage', targetModel.model_stage)
+      }
+
+      const { error: deactivateError } = await deactivateQuery
 
       if (deactivateError) {
         console.warn('⚠️ 기존 모델 비활성화 실패:', deactivateError)
@@ -260,7 +289,8 @@ export const useAutomatedModelRegistry = () => {
       const { error: activateError } = await supabase
         .from('model_registry')
         .update({ 
-          is_active: true, 
+          is_active: true,
+          status: 'active',
           updated_at: new Date().toISOString() 
         })
         .eq('id', modelId)
@@ -428,18 +458,19 @@ export const useAutomatedModelRegistry = () => {
           })
           .eq('id', jobData.id)
 
-        // 학습 실행 서버에 직접 요청
+        // 학습 실행 서버에 직접 요청 (job_id 포함)
         const response = await fetch('http://localhost:3012/api/training/execute', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
+            jobId: jobData.id, // 생성된 job_id 전달
             partId: config.partId || config.part_id,
             modelStage: config.model_stage || 'stage1',
-            epochs: config.epochs || 50,
+            epochs: config.epochs || 100,
             batchSize: config.batch_size || 16,
-            imageSize: config.imgsz || 640,
+            imageSize: config.imgsz || 768,
             device: config.device || 'cuda'
           })
         })

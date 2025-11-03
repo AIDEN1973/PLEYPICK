@@ -1,0 +1,104 @@
+
+=== BrickBox WebP 품질 검증 보고서 ===
+검증 시간: 83개 항목
+
+=== 요약 ===
+전체: 83
+통과: 0 (0.0%)
+경고: 83 (100.0%)
+실패: 0 (0.0%)
+
+=== 기술문서 기준 ===
+- 품질: q=90
+- 메서드: -m 6
+- AF: -af on
+- SSIM 임계값: 0.965
+- 최소 해상도: 512x512
+- 권장 해상도: 1024x1024
+
+=== 상세 결과 ===
+
+--- WARN (83개) ---
+output\synthetic\6335317\images\6335317_000.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_000.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 26.98 / 노이즈 높음: 60.16
+output\synthetic\6335317\images\6335317_001.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_001.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 41.00 / 노이즈 높음: 68.02
+output\synthetic\6335317\images\6335317_002.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_002.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 23.68 / 노이즈 높음: 58.06
+output\synthetic\6335317\images\6335317_003.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_003.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 30.91 / 노이즈 높음: 61.90
+output\synthetic\6335317\images\6335317_004.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_004.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 26.82 / 노이즈 높음: 68.31
+output\synthetic\6335317\images\6335317_005.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_005.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 23.83 / 노이즈 높음: 54.02
+output\synthetic\6335317\images\6335317_006.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_006.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 27.59
+output\synthetic\6335317\images\6335317_007.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_007.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 25.32 / 노이즈 높음: 53.43
+output\synthetic\6335317\images\6335317_008.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_008.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 33.09 / 노이즈 높음: 52.84
+output\synthetic\6335317\images\6335317_009.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_009.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 31.66 / 노이즈 높음: 70.91
+output\synthetic\6335317\images\6335317_010.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_010.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 30.75 / 노이즈 높음: 57.29
+output\synthetic\6335317\images\6335317_011.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_011.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 39.34 / 노이즈 높음: 57.93
+output\synthetic\6335317\images\6335317_012.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_012.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 28.46 / 노이즈 높음: 54.18
+output\synthetic\6335317\images\6335317_013.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_013.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 30.87 / 노이즈 높음: 55.66
+output\synthetic\6335317\images\6335317_014.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_014.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 27.11 / 노이즈 높음: 54.32
+output\synthetic\6335317\images\6335317_015.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_015.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 31.16 / 노이즈 높음: 60.76
+output\synthetic\6335317\images\6335317_016.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_016.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 32.42 / 노이즈 높음: 63.30
+output\synthetic\6335317\images\6335317_017.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_017.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 34.88
+output\synthetic\6335317\images\6335317_018.webp: 품질 정보 없음 / ICC 프로파일 없음
+output\synthetic\6335317\images\6335317_018.webp: 권장 해상도: 1024x1024 / 선명도 낮음: 25.13 / 노이즈 높음: 51.24
+Unknown: SSIM: 852.3359 >= 0.965
+Unknown: SSIM: 451.4575 >= 0.965
+Unknown: SSIM: 795.7213 >= 0.965
+Unknown: SSIM: 884.7042 >= 0.965
+Unknown: SSIM: 636.0527 >= 0.965
+Unknown: SSIM: 213.7179 >= 0.965
+Unknown: SSIM: 942.9183 >= 0.965
+Unknown: SSIM: 1223.1358 >= 0.965
+Unknown: SSIM: 624.8083 >= 0.965
+Unknown: SSIM: 1300.7603 >= 0.965
+Unknown: SSIM: 828.9757 >= 0.965
+Unknown: SSIM: 783.0532 >= 0.965
+Unknown: SSIM: 961.5642 >= 0.965
+Unknown: SSIM: 451.7637 >= 0.965
+Unknown: SSIM: 1209.0046 >= 0.965
+Unknown: SSIM: 1361.6254 >= 0.965
+Unknown: SSIM: 573.2917 >= 0.965
+Unknown: SSIM: 947.8171 >= 0.965
+Unknown: SSIM: 1149.9714 >= 0.965
+Unknown: SSIM: 2371.7617 >= 0.965
+Unknown: SSIM: 948.8146 >= 0.965
+Unknown: SSIM: 289.6250 >= 0.965
+Unknown: SSIM: 1053.5870 >= 0.965
+Unknown: SSIM: 663.1248 >= 0.965
+Unknown: SSIM: 1223.1243 >= 0.965
+Unknown: SSIM: 1367.6292 >= 0.965
+Unknown: SSIM: 473.8853 >= 0.965
+Unknown: SSIM: 709.0568 >= 0.965
+Unknown: SSIM: 877.6375 >= 0.965
+Unknown: SSIM: 683.3957 >= 0.965
+Unknown: SSIM: 721.5072 >= 0.965
+Unknown: SSIM: 352.1684 >= 0.965
+Unknown: SSIM: 608.7863 >= 0.965
+Unknown: SSIM: 1305.2047 >= 0.965
+Unknown: SSIM: 908.8491 >= 0.965
+Unknown: SSIM: 353.9208 >= 0.965
+Unknown: SSIM: 504.6356 >= 0.965
+Unknown: SSIM: 1304.3383 >= 0.965
+Unknown: SSIM: 593.5410 >= 0.965
+Unknown: SSIM: 1271.5315 >= 0.965
+Unknown: SSIM: 366.3391 >= 0.965
+Unknown: SSIM: 462.3871 >= 0.965
+Unknown: SSIM: 703.3348 >= 0.965
+Unknown: SSIM: 556.6464 >= 0.965
+Unknown: SSIM: 921.2758 >= 0.965

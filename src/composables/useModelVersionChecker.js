@@ -35,11 +35,11 @@ export function useModelVersionChecker() {
       // 현재 코드에서 사용 중인 모델 경로 확인
       const currentPath = import.meta.env.VITE_DEFAULT_MODEL_URL || 'https://your-supabase-url.supabase.co/storage/v1/object/public/models/your-model-path/default_model.onnx'
       
-      // 모델 레지스트리에서 해당 모델 정보 조회 (URL 인코딩 문제 해결)
+      // 모델 레지스트리에서 해당 모델 정보 조회
       const { data, error } = await supabase
         .from('model_registry')
         .select('*')
-        .eq('is_active', true)
+        .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
       
@@ -49,9 +49,20 @@ export function useModelVersionChecker() {
         return
       }
       
-      // 배열에서 첫 번째 요소 추출
+      // 배열에서 첫 번째 요소 추출 및 메트릭 정규화
       const modelData = Array.isArray(data) ? data[0] : data
-      currentModel.value = modelData || null
+      if (modelData) {
+        // metrics JSONB 필드를 performance_metrics로 정규화
+        currentModel.value = {
+          ...modelData,
+          model_version: modelData.version,
+          model_type: modelData.model_type || 'yolo',
+          is_active: modelData.status === 'active',
+          performance_metrics: modelData.metrics || {}
+        }
+      } else {
+        currentModel.value = null
+      }
       
       console.log('📋 현재 모델:', currentModel.value)
       console.log('📊 원본 데이터:', { data, error, isArray: Array.isArray(data), length: Array.isArray(data) ? data.length : 'N/A' })
@@ -71,7 +82,7 @@ export function useModelVersionChecker() {
       const { data, error } = await supabase
         .from('model_registry')
         .select('*')
-        .eq('is_active', true)
+        .eq('status', 'active')
         .order('created_at', { ascending: false })
         .limit(1)
       
@@ -80,10 +91,16 @@ export function useModelVersionChecker() {
         return
       }
       
-      // 배열에서 첫 번째 요소 추출
+      // 배열에서 첫 번째 요소 추출 및 메트릭 정규화
       const modelData = Array.isArray(data) ? data[0] : data
       if (modelData) {
-        latestModel.value = modelData
+        latestModel.value = {
+          ...modelData,
+          model_version: modelData.version,
+          model_type: modelData.model_type || 'yolo',
+          is_active: modelData.status === 'active',
+          performance_metrics: modelData.metrics || {}
+        }
         
         // 버전 비교
         if (currentModel.value && latestModel.value) {
@@ -120,11 +137,16 @@ export function useModelVersionChecker() {
     const currentMetrics = currentModel.value.performance_metrics || {}
     const latestMetrics = latestModel.value.performance_metrics || {}
     
+    // validation 메트릭이 있으면 우선 사용
+    const getMetric = (metrics, key) => {
+      return metrics[`validation_${key}`] || metrics[key] || 0
+    }
+    
     const improvements = {
-      mAP50: (latestMetrics.mAP50 || 0) - (currentMetrics.mAP50 || 0),
-      mAP50_95: (latestMetrics.mAP50_95 || 0) - (currentMetrics.mAP50_95 || 0),
-      precision: (latestMetrics.precision || 0) - (currentMetrics.precision || 0),
-      recall: (latestMetrics.recall || 0) - (currentMetrics.recall || 0)
+      mAP50: getMetric(latestMetrics, 'mAP50') - getMetric(currentMetrics, 'mAP50'),
+      mAP50_95: getMetric(latestMetrics, 'mAP50_95') - getMetric(currentMetrics, 'mAP50_95'),
+      precision: getMetric(latestMetrics, 'precision') - getMetric(currentMetrics, 'precision'),
+      recall: getMetric(latestMetrics, 'recall') - getMetric(currentMetrics, 'recall')
     }
     
     const avgImprovement = Object.values(improvements).reduce((sum, val) => sum + val, 0) / Object.keys(improvements).length
@@ -154,14 +176,14 @@ export function useModelVersionChecker() {
       if (currentModel.value) {
         await supabase
           .from('model_registry')
-          .update({ is_active: false })
+          .update({ status: 'inactive' })
           .eq('id', currentModel.value.id)
       }
       
       // 2. 최신 모델 활성화
       await supabase
         .from('model_registry')
-        .update({ is_active: true })
+        .update({ status: 'active' })
         .eq('id', latestModel.value.id)
       
       // 3. 현재 모델 정보 업데이트
@@ -203,7 +225,14 @@ export function useModelVersionChecker() {
       
       if (error) throw error
       
-      modelHistory.value = data || []
+      // 메트릭 정규화
+      modelHistory.value = (data || []).map(model => ({
+        ...model,
+        model_version: model.version,
+        model_type: model.model_type || 'yolo',
+        is_active: model.status === 'active',
+        performance_metrics: model.metrics || {}
+      }))
       
     } catch (error) {
       console.error('❌ 모델 히스토리 조회 실패:', error)

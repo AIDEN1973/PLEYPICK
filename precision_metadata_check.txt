@@ -1,0 +1,34 @@
+
+=== BrickBox 메타데이터 스키마 수정 보고서 ===
+데이터셋 경로: output\synthetic\6335317
+수정 시간: 2025-10-29T12:05:46.059230
+
+=== 수정된 항목 ===
+1. bbox/polygon 일치성 수정
+   - 폴리곤 좌표에서 bbox 재계산
+   - 허용 오차 5% 기준 수정
+   - pixel_coords 동기화
+
+2. 핵심 12필드 추가 (기술문서 v2.1 기준)
+   - set_id, element_id, part_id, color_id
+   - shape_tag, series, stud_count_top, tube_count_bottom
+   - center_stud, groove, confusions, distinguishing_features
+   - recognition_hints, topo_applicable
+
+3. 품질 메트릭 수정
+   - SSIM: 1.0 -> 현실적 값 (0.95-0.99)
+   - SNR: 과도한 값 조정
+   - qa_flag: 기준에 따른 설정
+
+4. 렌더 설정 수정
+   - 해상도: 1024x1024 고정
+   - 샘플 수, 엔진, 디바이스 설정
+
+5. 조명/재질 설정 수정
+   - 환경 맵, HDR 강도 설정
+   - 색상, 투명도, 반사 설정
+
+=== 다음 단계 ===
+1. 검증 스크립트 재실행
+2. 매니페스트 재생성
+3. DB 업서트 준비

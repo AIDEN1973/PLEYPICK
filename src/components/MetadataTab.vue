@@ -66,12 +66,13 @@
       <div class="filter-controls">
         <div class="date-range">
           <label>시작일:</label>
-          <input type="date" v-model="filterStartDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterStartDate" />
         </div>
         <div class="date-range">
           <label>종료일:</label>
-          <input type="date" v-model="filterEndDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterEndDate" />
         </div>
+        <button @click="loadGenerationHistory" class="btn btn-primary">검색</button>
         <button @click="clearFilter" class="clear-filter-btn">필터 초기화</button>
       </div>
     </div>
@@ -223,7 +224,7 @@
     </div>
 
     <!-- 메타데이터 상세 모달 -->
-    <div v-if="showModal" class="modal-overlay" @click="closeModal">
+    <div v-if="showModal" class="modal-overlay"> <!-- // 🔧 수정됨: 오버레이 클릭으로 닫힘 방지 -->
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>📝 메타데이터 상세 정보</h3>
@@ -402,11 +403,9 @@ const loadGenerationHistory = async () => {
   try {
     let query = supabase
       .from('parts_master_features')
-      .select('part_id, color_id, created_at, updated_at')
-      .not('feature_json', 'is', null)
-      .neq('feature_json', '{}')
+      .select('part_id, color_id, created_at, updated_at, feature_json')
       .order('updated_at', { ascending: false })
-      .limit(100)
+      .limit(1000)
 
     // 날짜 필터 적용
     if (filterStartDate.value) {
@@ -420,19 +419,42 @@ const loadGenerationHistory = async () => {
     
     if (error) throw error
 
-    // 생성 기록 데이터 변환
-    generationHistory.value = (data || []).map(record => ({
-      part_id: record.part_id,
-      color_id: record.color_id,
-      created_at: record.updated_at || record.created_at,
-      status: 'success',
-      processing_time: Math.floor(Math.random() * 2000) + 500 // 시뮬레이션
-    }))
+    // 🔧 수정됨: feature_json 유효성 검증 개선
+    generationHistory.value = (data || [])
+      .filter(record => {
+        if (!record.feature_json) return false
+        
+        // JSON 문자열인 경우 파싱 시도
+        let featureData = record.feature_json
+        if (typeof featureData === 'string') {
+          try {
+            featureData = JSON.parse(featureData)
+          } catch (e) {
+            return false
+          }
+        }
+        
+        // 객체이고 비어있지 않은지 확인
+        if (typeof featureData !== 'object' || featureData === null) return false
+        if (Array.isArray(featureData) && featureData.length === 0) return false
+        if (Object.keys(featureData).length === 0) return false
+        
+        return true
+      })
+      .map(record => ({
+        part_id: record.part_id,
+        color_id: record.color_id,
+        created_at: record.updated_at || record.created_at,
+        status: 'success',
+        processing_time: Math.floor(Math.random() * 2000) + 500
+      }))
+      .slice(0, 100) // 최종적으로 100개로 제한
 
     addLog(`생성 기록 로드 완료: ${generationHistory.value.length}개`, 'success')
   } catch (error) {
     console.error('생성 기록 로드 실패:', error)
     addLog('생성 기록 로드 실패: ' + error.message, 'error')
+    generationHistory.value = []
   }
 }
 

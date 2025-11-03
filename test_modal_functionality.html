@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학습 모니터링 모달 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #2563eb;
+        }
+        .status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin: 5px;
+        }
+        .status-training { background: #dbeafe; color: #1e40af; }
+        .status-paused { background: #fef3c7; color: #d97706; }
+        .status-completed { background: #d1fae5; color: #059669; }
+        .status-failed { background: #fee2e2; color: #dc2626; }
+        .status-no-job { background: #e5e7eb; color: #9ca3af; }
+        .status-pending { background: #f3f4f6; color: #6b7280; }
+    </style>
+</head>
+<body>
+    <h1>🧠 학습 모니터링 모달 기능 테스트</h1>
+    
+    <div class="test-section">
+        <h2>1. 버튼 활성화 테스트</h2>
+        <p>다음 상태에서 각 버튼이 올바르게 활성화/비활성화되는지 확인:</p>
+        
+        <div>
+            <span class="status status-training">학습 중 (training)</span>
+            <span class="status status-running">실행 중 (running)</span>
+            <span class="status status-paused">일시정지 (paused)</span>
+            <span class="status status-completed">완료 (completed)</span>
+            <span class="status status-failed">실패 (failed)</span>
+            <span class="status status-no-job">작업 없음 (no_job)</span>
+        </div>
+        
+        <h3>예상 결과:</h3>
+        <ul>
+            <li><strong>일시정지:</strong> training, running 상태에서만 활성화</li>
+            <li><strong>재개:</strong> paused 상태에서만 활성화</li>
+            <li><strong>중지:</strong> training, paused, running 상태에서 활성화</li>
+            <li><strong>새로고침:</strong> 모든 상태에서 활성화</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. 'no_job' 상태 테스트</h2>
+        <p>학습 작업이 없을 때:</p>
+        <ul>
+            <li>상태: "학습 작업 없음"</li>
+            <li>진행률 바 숨김</li>
+            <li>특별 메시지 표시: "현재 활성화된 학습 작업이 없습니다"</li>
+            <li>버튼: 새로고침만 활성화</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. 모달 닫기 테스트</h2>
+        <p>다음 방법으로만 모달이 닫혀야 함:</p>
+        <ul>
+            <li>✅ X 버튼 클릭</li>
+            <li>❌ 모달 외부 클릭 (비활성화됨)</li>
+            <li>❌ ESC 키 (현재 구현되지 않음)</li>
+        </ul>
+    </div>
+    
+    <div class="test-section">
+        <h2>4. 실제 테스트 방법</h2>
+        <ol>
+            <li><a href="http://localhost:3000/automated-training" target="_blank">http://localhost:3000/automated-training</a> 접속</li>
+            <li>부품 ID 입력 (예: 6335317)</li>
+            <li>"부품 정보 로드" 클릭</li>
+            <li>"📊 학습 상태 확인" 클릭</li>
+            <li>모달이 표시되는지 확인</li>
+            <li>각 버튼의 활성화 상태 확인</li>
+            <li>X 버튼으로만 모달 닫기 가능한지 확인</li>
+        </ol>
+    </div>
+    
+    <div class="test-section">
+        <h2>5. 학습 중인 경우 테스트</h2>
+        <ol>
+            <li>학습을 시작한 후</li>
+            <li>"📊 학습 상태 확인" 클릭</li>
+            <li>실시간 진행률이 표시되는지 확인</li>
+            <li>일시정지/중지 버튼이 활성화되는지 확인</li>
+        </ol>
+    </div>
+</body>
+</html>

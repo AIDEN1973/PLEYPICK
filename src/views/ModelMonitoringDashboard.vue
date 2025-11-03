@@ -124,14 +124,49 @@
     </div>
 
     <!-- 성능 메트릭 -->
-    <div class="performance-section" v-if="currentModel?.performance_metrics">
-      <h2>📊 성능 메트릭
-        <HelpTooltip 
-          title="성능 메트릭"
-          content="AI 모델의 성능을 측정하는 다양한 지표들입니다. 정확도, 속도, 리소스 사용률 등을 확인할 수 있습니다."
-          :examples="['정확도', '처리 속도', '메모리 사용량']"
-        />
-      </h2>
+    <div class="performance-section" v-if="currentModel">
+      <div class="section-header">
+        <h2>📊 성능 메트릭
+          <HelpTooltip 
+            title="성능 메트릭"
+            content="AI 모델의 성능을 측정하는 다양한 지표들입니다. 정확도, 속도, 리소스 사용률 등을 확인할 수 있습니다."
+            :examples="['정확도', '처리 속도', '메모리 사용량']"
+          />
+        </h2>
+        <button 
+          @click="validateModel" 
+          :disabled="isValidating" 
+          class="btn btn-primary"
+        >
+          {{ isValidating ? '🔄 검증 중...' : '🔍 모델 검증 실행' }}
+        </button>
+      </div>
+      
+      <!-- 검증 진행률 -->
+      <div v-if="validationProgress > 0 && validationProgress < 100" class="validation-progress">
+        <div class="progress-bar-container">
+          <div class="progress-bar" :style="{ width: validationProgress + '%' }"></div>
+        </div>
+        <p class="progress-text">{{ validationStatus }}</p>
+      </div>
+      
+        <!-- 검증 결과 알림 -->
+        <div v-if="validationResult" class="validation-result" :class="validationResult.success ? 'success' : 'error'">
+          <p><strong>{{ validationResult.success ? '✅' : '❌' }} {{ validationResult.message }}</strong></p>
+          <div v-if="validationResult.metrics" class="validation-metrics">
+            <p>mAP50: {{ (validationResult.metrics.mAP50 * 100).toFixed(1) }}%</p>
+            <p>mAP50-95: {{ (validationResult.metrics.mAP50_95 * 100).toFixed(1) }}%</p>
+            <p>Precision: {{ (validationResult.metrics.precision * 100).toFixed(1) }}%</p>
+            <p>Recall: {{ (validationResult.metrics.recall * 100).toFixed(1) }}%</p>
+          </div>
+          <div v-if="validationResult.error && !validationResult.success" class="validation-error-details">
+            <details>
+              <summary>오류 상세 정보</summary>
+              <pre>{{ validationResult.error }}</pre>
+            </details>
+          </div>
+        </div>
+      
       <div class="metrics-grid">
         <div class="metric-card">
           <div class="metric-label">mAP50
@@ -141,7 +176,9 @@
               :examples="['0.85 = 85% 정확도', '0.90 = 90% 정확도']"
             />
           </div>
-          <div class="metric-value">{{ (currentModel.performance_metrics.mAP50 * 100).toFixed(1) }}%</div>
+          <div class="metric-value">
+            {{ formatMetric(currentModel.performance_metrics?.mAP50 || currentModel.performance_metrics?.validation_mAP50) }}
+          </div>
         </div>
         <div class="metric-card">
           <div class="metric-label">mAP50-95
@@ -151,7 +188,9 @@
               :examples="['0.70 = 70% 정확도', '0.75 = 75% 정확도']"
             />
           </div>
-          <div class="metric-value">{{ (currentModel.performance_metrics.mAP50_95 * 100).toFixed(1) }}%</div>
+          <div class="metric-value">
+            {{ formatMetric(currentModel.performance_metrics?.mAP50_95 || currentModel.performance_metrics?.validation_mAP50_95) }}
+          </div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Precision
@@ -161,7 +200,9 @@
               :examples="['0.90 = 90% 정확', '0.95 = 95% 정확']"
             />
           </div>
-          <div class="metric-value">{{ (currentModel.performance_metrics.precision * 100).toFixed(1) }}%</div>
+          <div class="metric-value">
+            {{ formatMetric(currentModel.performance_metrics?.precision || currentModel.performance_metrics?.validation_precision) }}
+          </div>
         </div>
         <div class="metric-card">
           <div class="metric-label">Recall
@@ -171,7 +212,9 @@
               :examples="['0.85 = 85% 검출', '0.90 = 90% 검출']"
             />
           </div>
-          <div class="metric-value">{{ (currentModel.performance_metrics.recall * 100).toFixed(1) }}%</div>
+          <div class="metric-value">
+            {{ formatMetric(currentModel.performance_metrics?.recall || currentModel.performance_metrics?.validation_recall) }}
+          </div>
         </div>
       </div>
     </div>
@@ -198,7 +241,7 @@
             <div class="model-date">{{ formatDate(model.created_at) }}</div>
           </div>
           <div class="history-status">
-            <span v-if="model.is_active" class="status-badge status-success">활성</span>
+            <span v-if="model.is_active || model.status === 'active'" class="status-badge status-success">활성</span>
             <span v-else class="status-badge status-secondary">비활성</span>
           </div>
         </div>
@@ -310,6 +353,10 @@ export default {
 
     const loading = ref(false)
     const isUpdating = ref(false)
+    const isValidating = ref(false)
+    const validationProgress = ref(0)
+    const validationStatus = ref('')
+    const validationResult = ref(null)
 
     // 데이터 새로고침
     const refreshData = async () => {
@@ -371,6 +418,133 @@ export default {
       if (!dateString) return '알 수 없음'
       return new Date(dateString).toLocaleString('ko-KR')
     }
+    
+    // 메트릭 포맷팅 (NaN 처리)
+    const formatMetric = (value) => {
+      if (value === null || value === undefined || isNaN(value)) {
+        return '데이터 없음'
+      }
+      return (value * 100).toFixed(1) + '%'
+    }
+    
+    // 모델 검증 실행
+    const validateModel = async () => {
+      if (!currentModel.value || !currentModel.value.id) {
+        alert('검증할 모델이 없습니다.')
+        return
+      }
+      
+      isValidating.value = true
+      validationProgress.value = 0
+      validationStatus.value = '검증 준비 중...'
+      validationResult.value = null
+      
+      try {
+        // 검증 API 호출 (training-executor 서버)
+        const apiBaseUrl = import.meta.env.VITE_TRAINING_EXECUTOR_URL || 'http://localhost:3012'
+        
+        console.log(`🔍 검증 API 호출: ${apiBaseUrl}/api/training/validate/${currentModel.value.id}`)
+        
+        const response = await fetch(`${apiBaseUrl}/api/training/validate/${currentModel.value.id}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        
+        if (!response.ok) {
+          // 404인 경우 서버 재시작 필요 안내
+          if (response.status === 404) {
+            throw new Error(`검증 API를 찾을 수 없습니다 (404). training-executor 서버가 재시작되었는지 확인하세요.`)
+          }
+          throw new Error(`검증 API 오류: ${response.status}`)
+        }
+        
+        // Content-Type 확인
+        const contentType = response.headers.get('content-type')
+        
+        if (contentType && contentType.includes('text/event-stream')) {
+          // Server-Sent Events로 진행률 수신
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder()
+          
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            
+            const chunk = decoder.decode(value)
+            const lines = chunk.split('\n')
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6))
+                  
+                  if (data.progress !== undefined) {
+                    validationProgress.value = data.progress
+                  }
+                  
+                  if (data.status) {
+                    validationStatus.value = data.status
+                  }
+                  
+                  if (data.complete) {
+                    validationResult.value = {
+                      success: data.success || false,
+                      message: data.message || '검증 완료',
+                      metrics: data.metrics || null,
+                      error: data.error || null
+                    }
+                    
+                    // 성공 시에만 모델 정보 새로고침
+                    if (data.success) {
+                      await refreshData()
+                    }
+                  }
+                } catch (parseError) {
+                  console.warn('SSE 파싱 오류:', parseError)
+                }
+              }
+            }
+          }
+        } else {
+          // 일반 JSON 응답 (폴백)
+          const result = await response.json()
+          validationProgress.value = 100
+          validationResult.value = {
+            success: result.success || false,
+            message: result.message || '검증 완료',
+            metrics: result.metrics || null
+          }
+          
+          if (result.success) {
+            await refreshData()
+          }
+        }
+        
+      } catch (error) {
+        console.error('모델 검증 실패:', error)
+        
+        // 404 오류인 경우 상세 안내
+        let errorMessage = error.message
+        if (error.message.includes('404')) {
+          errorMessage = `검증 API를 찾을 수 없습니다.\n\n` +
+            `해결 방법:\n` +
+            `1. training-executor 서버가 실행 중인지 확인\n` +
+            `2. 서버 재시작: npm run training-executor\n` +
+            `3. 또는 PowerShell에서: taskkill /F /PID <PID> 후 재시작`
+        }
+        
+        validationResult.value = {
+          success: false,
+          message: errorMessage,
+          metrics: null
+        }
+      } finally {
+        isValidating.value = false
+        validationProgress.value = 100
+      }
+    }
 
     // 생명주기
     onMounted(async () => {
@@ -410,7 +584,15 @@ export default {
       updateCheckInterval,
       updateAutoUpdate,
       updatePerformanceThreshold,
-      formatDate
+      formatDate,
+      formatMetric,
+      validateModel,
+      
+      // 검증 상태
+      isValidating,
+      validationProgress,
+      validationStatus,
+      validationResult
     }
   }
 }
@@ -713,5 +895,104 @@ export default {
 .no-model-message .help-text {
   font-size: 0.9rem;
   color: #999;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.validation-progress {
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 20px;
+  background: #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #007bff, #0056b3);
+  transition: width 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.progress-text {
+  margin: 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.validation-result {
+  margin-bottom: 20px;
+  padding: 15px;
+  border-radius: 8px;
+  border: 2px solid;
+}
+
+.validation-result.success {
+  background: #d4edda;
+  border-color: #28a745;
+  color: #155724;
+}
+
+.validation-result.error {
+  background: #f8d7da;
+  border-color: #dc3545;
+  color: #721c24;
+}
+
+.validation-metrics {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.validation-metrics p {
+  margin: 5px 0;
+  font-size: 0.9rem;
+}
+
+.validation-error-details {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(114, 28, 36, 0.3);
+}
+
+.validation-error-details summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: #721c24;
+  padding: 5px 0;
+}
+
+.validation-error-details pre {
+  margin-top: 10px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 </style>

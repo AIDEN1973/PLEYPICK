@@ -107,35 +107,45 @@ const validateBucketSync = async (localFiles, bucketName = 'synthetic-images') =
 // 로컬 파일 목록 수집
 const collectLocalFiles = async (sourcePath) => {
   const files = []
-  
   try {
     const items = await fs.readdir(sourcePath)
-    
     for (const item of items) {
+      if (item === 'dataset_synthetic') continue // 🔧 수정됨: 원천 검증에서 제외
       const itemPath = path.join(sourcePath, item)
       const stats = await fs.stat(itemPath)
-      
-      if (stats.isDirectory()) {
-        // 부품 폴더 내부 파일들 수집
-        const partItems = await fs.readdir(itemPath)
-        
-        for (const partItem of partItems) {
-          const partItemPath = path.join(itemPath, partItem)
-          const partItemStats = await fs.stat(partItemPath)
-          
-          if (partItemStats.isFile()) {
-            files.push({
-              fileName: partItem,
-              fullPath: partItemPath,
-              relativePath: path.relative(sourcePath, partItemPath),
-              size: partItemStats.size,
-              partId: item
-            })
+      if (!stats.isDirectory()) continue
+
+      // 새 구조 수집: images/, labels/, meta/, meta-e/ // 🔧 수정됨
+      const imagesDir = path.join(itemPath, 'images')
+      const labelsDir = path.join(itemPath, 'labels')
+      const metaDir = path.join(itemPath, 'meta')
+      const metaEDir = path.join(itemPath, 'meta-e')
+
+      const pushIfExists = async (dirPath, filterFn) => {
+        try {
+          const list = await fs.readdir(dirPath)
+          for (const f of list) {
+            if (filterFn && !filterFn(f)) continue
+            const fp = path.join(dirPath, f)
+            const st = await fs.stat(fp)
+            if (st.isFile()) {
+              files.push({
+                fileName: f,
+                fullPath: fp,
+                relativePath: path.relative(sourcePath, fp),
+                size: st.size,
+                partId: item
+              })
+            }
           }
-        }
+        } catch {}
       }
+
+      await pushIfExists(imagesDir, f => /\.(jpg|jpeg|png|bmp|tiff|webp)$/i.test(f))
+      await pushIfExists(labelsDir, f => f.endsWith('.txt'))
+      await pushIfExists(metaDir, f => f.endsWith('.json'))
+      await pushIfExists(metaEDir, f => f.endsWith('.json'))
     }
-    
     return files
   } catch (error) {
     console.error('로컬 파일 수집 오류:', error)
@@ -172,7 +182,7 @@ const validateImageFile = async (filePath) => {
   }
   
   // 이미지 파일 확장자 검증
-  const validExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']
+  const validExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'] // 🔧 수정됨
   const ext = path.extname(filePath).toLowerCase()
   
   if (!validExtensions.includes(ext)) {
@@ -263,11 +273,27 @@ const validateFolderStructure = async (sourcePath) => {
       const stats = await fs.stat(itemPath)
       
       if (stats.isDirectory()) {
+        // dataset_synthetic는 원천 검증에서 제외 // 🔧 수정됨
+        if (item === 'dataset_synthetic') continue
         // 부품 폴더 내부 구조 검증
-        const partItems = await fs.readdir(itemPath)
-        const hasImages = partItems.some(file => /\.(jpg|jpeg|png|bmp|tiff)$/i.test(file))
-        const hasLabels = partItems.some(file => file.endsWith('.txt'))
-        const hasMetadata = partItems.some(file => file.endsWith('.json'))
+        // 새 구조 지원: images/, labels/, meta/, meta-e/ // 🔧 수정됨
+        const imagesDir = path.join(itemPath, 'images')
+        const labelsDir = path.join(itemPath, 'labels')
+        const metaDir = path.join(itemPath, 'meta')
+        const metaEDir = path.join(itemPath, 'meta-e')
+
+        const listIfExists = async (p) => {
+          try { const arr = await fs.readdir(p); return arr } catch { return [] }
+        }
+
+        const images = await listIfExists(imagesDir)
+        const labels = await listIfExists(labelsDir)
+        const metas = await listIfExists(metaDir)
+        const metasE = await listIfExists(metaEDir)
+
+        const hasImages = images.some(file => /\.(jpg|jpeg|png|bmp|tiff|webp)$/i.test(file))
+        const hasLabels = labels.some(file => file.endsWith('.txt'))
+        const hasMetadata = metas.some(file => file.endsWith('.json')) || metasE.some(file => file.endsWith('.json'))
         
         if (!hasImages) {
           errors.push(`부품 ${item}: 이미지 파일이 없습니다`)
@@ -330,18 +356,28 @@ const performValidation = async (sourcePath, options) => {
       const stats = await fs.stat(itemPath)
       
       if (stats.isDirectory()) {
+        if (item === 'dataset_synthetic') continue // 🔧 수정됨
         results.totalParts++
         
-        const partItems = await fs.readdir(itemPath)
+        // 새 구조: images/, labels/, meta/, meta-e/ // 🔧 수정됨
+        const imagesDir = path.join(itemPath, 'images')
+        const labelsDir = path.join(itemPath, 'labels')
+        const metaDir = path.join(itemPath, 'meta')
+        const metaEDir = path.join(itemPath, 'meta-e')
+        const listIfExists = async (p) => { try { return await fs.readdir(p) } catch { return [] } }
+        const imageFiles = (await listIfExists(imagesDir)).filter(file => /\.(jpg|jpeg|png|bmp|tiff|webp)$/i.test(file))
+        const labelFiles = await listIfExists(labelsDir)
+        const metadataFiles = [
+          ...(await listIfExists(metaDir)).filter(f => f.endsWith('.json')),
+          ...(await listIfExists(metaEDir)).filter(f => f.endsWith('.json'))
+        ]
         let partValid = true
         let partErrors = []
         
-        // 이미지 파일 검증
-        const imageFiles = partItems.filter(file => /\.(jpg|jpeg|png|bmp|tiff)$/i.test(file))
         results.totalImages += imageFiles.length
         
         for (const imageFile of imageFiles) {
-          const imagePath = path.join(itemPath, imageFile)
+          const imagePath = path.join(imagesDir, imageFile)
           const imageValidation = await validateImageFile(imagePath)
           
           if (!imageValidation.valid) {
@@ -353,12 +389,10 @@ const performValidation = async (sourcePath, options) => {
           }
         }
         
-        // 라벨 파일 검증
-        const labelFiles = partItems.filter(file => file.endsWith('.txt'))
         results.totalLabels += labelFiles.length
         
         for (const labelFile of labelFiles) {
-          const labelPath = path.join(itemPath, labelFile)
+          const labelPath = path.join(labelsDir, labelFile)
           const labelValidation = await validateLabelFile(labelPath)
           
           if (!labelValidation.valid) {
@@ -367,12 +401,10 @@ const performValidation = async (sourcePath, options) => {
           }
         }
         
-        // 메타데이터 파일 검증
-        const metadataFiles = partItems.filter(file => file.endsWith('.json'))
         results.totalMetadata += metadataFiles.length
         
         for (const metadataFile of metadataFiles) {
-          const metadataPath = path.join(itemPath, metadataFile)
+          const metadataPath = path.join(metadataFile.endsWith('_e2.json') ? metaEDir : metaDir, metadataFile)
           const metadataValidation = await validateMetadataFile(metadataPath)
           
           if (!metadataValidation.valid) {

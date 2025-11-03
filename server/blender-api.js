@@ -113,9 +113,28 @@ async function ensurePartInMaster(partId) {
   try {
     console.log(`🔧 부품 ${partId} parts_master 등록 시도...`)
     
+    // 🔧 수정됨: lego_parts에서 실제 부품명 조회
+    let partName = `LEGO Element ${partId}`
+    try {
+      const { data: legoPart, error: legoError } = await supabase
+        .from('lego_parts')
+        .select('part_num, name')
+        .eq('part_num', partId)
+        .maybeSingle()
+      
+      if (!legoError && legoPart?.name) {
+        partName = legoPart.name
+        console.log(`✅ 부품명 조회 성공: ${partName}`)
+      } else {
+        console.warn(`⚠️ 부품명 조회 실패 (part_num: ${partId}), 기본값 사용`)
+      }
+    } catch (queryError) {
+      console.warn(`⚠️ 부품명 조회 중 오류: ${queryError.message}`)
+    }
+    
     const partRecord = {
       part_id: partId,
-      part_name: `LEGO Element ${partId}`,
+      part_name: partName,
       category: 'Unknown',
       color: 'Unknown',
       element_id: partId,

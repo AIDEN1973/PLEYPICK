@@ -1,18 +1,34 @@
 #!/usr/bin/env python3
 """Upload missing JSON files to Supabase"""
 
-from supabase import create_client
-from dotenv import load_dotenv
 import os
+import sys
 import glob
 import json
+from pathlib import Path
 
-# Load environment variables
-load_dotenv()
+# 프로젝트 루트를 sys.path에 추가
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 
-# Create Supabase client
-url = os.getenv('SUPABASE_URL')
-key = os.getenv('SUPABASE_KEY')
+# 통합 환경변수 관리 시스템 사용
+try:
+    from scripts.env_integration import get_supabase_config, apply_environment
+    apply_environment()
+    supabase_config = get_supabase_config()
+    url = supabase_config['url']
+    key = supabase_config['service_role']
+    print("통합 환경변수 관리 시스템을 사용합니다.")
+except ImportError:
+    # 폴백: 기존 방식
+    print("통합 환경변수 관리 시스템을 사용할 수 없습니다. 기본 방식을 사용합니다.")
+    from dotenv import load_dotenv
+    load_dotenv()
+    url = os.getenv('SUPABASE_URL')
+    key = os.getenv('SUPABASE_KEY')
+
+# Supabase 클라이언트 생성
+from supabase import create_client
 
 if not url or not key:
     print("[ERROR] Supabase credentials missing")

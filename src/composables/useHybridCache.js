@@ -123,6 +123,9 @@ export function useHybridCache() {
         request.onerror = () => reject(request.error)
       })
       
+      // 캐시 상태 동기화
+      cacheState.localVersion = versionData.version
+      
       console.log('📝 로컬 버전 저장 완료:', versionData.version)
     } catch (err) {
       console.error('❌ 로컬 버전 저장 실패:', err)
@@ -326,7 +329,7 @@ export function useHybridCache() {
         const chunk = partIdSet.slice(i, i + chunkSize)
         const { data, error } = await supabase
           .from('parts_master_features')
-          .select('part_id, color_id, feature_json, clip_text_emb')
+          .select('part_id, color_id, feature_json, clip_text_emb, semantic_vector') // 🔧 수정됨: semantic_vector 추가
           .in('part_id', chunk)
         if (error) continue
         fetched += data?.length || 0
@@ -337,16 +340,30 @@ export function useHybridCache() {
           if (!allowed.has(key)) continue
           // 유효 벡터만 저장: 셋 중 하나라도 존재해야 함
           const fj = row.feature_json || {}
-          const shapeVec = fj.shape_vector || fj.shape || null
+          // 🔧 수정됨: semantic_vector 폴백 적용
+          let shapeVec = fj.shape_vector || fj.shape || row.semantic_vector || null
+          // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+          if (shapeVec && Array.isArray(shapeVec)) {
+            shapeVec = normalizeVector(shapeVec)
+          }
+          
           const colorLab = fj.color_lab || fj.color || null
           const sizeStud = (fj.size_stud !== undefined ? fj.size_stud : fj.size)
           if (!shapeVec && !colorLab && typeof sizeStud !== 'number') continue
+          
+          // clip_text_emb도 숫자 배열로 변환 // 🔧 수정됨
+          let clipEmbedding = row.clip_text_emb || null
+          if (clipEmbedding && Array.isArray(clipEmbedding)) {
+            clipEmbedding = normalizeVector(clipEmbedding)
+          }
+          
           const vectorData = {
             shape_vector: shapeVec || null,
             color_lab: colorLab || null,
             size_stud: typeof sizeStud === 'number' ? sizeStud : null,
-            clip_embedding: row.clip_text_emb || null
+            clip_embedding: clipEmbedding || null
           }
+          // 🔧 수정됨: 로컬 저장 시 이미 숫자 배열로 변환된 상태
           const ok = await saveVectorToLocal(row.part_id, row.color_id, vectorData)
           if (ok) saved++
         }
@@ -370,16 +387,94 @@ export function useHybridCache() {
       const localVersion = await getLocalVersion()
       cacheState.localVersion = localVersion
       
-      // 2. 원격 버전 확인 (실제 데이터베이스 사용)
-      const { data: remoteData, error: remoteError } = await supabase
-        .from('lego_sets')
-        .select('id, set_num, name, created_at')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
+      // 2. 원격 버전 확인 (학습된 모델 버전 기준)
+      let remoteData = null
+      let versionSource = 'unknown'
       
-      if (remoteError) {
-        console.warn('원격 버전 조회 실패, 기본값 사용:', remoteError.message)
+      // 우선순위 1: model_registry에서 활성화된 최신 학습 모델
+      try {
+        const { data: activeModel, error: modelError } = await supabase
+          .from('model_registry')
+          .select('version, model_name, created_at, model_size')
+          .eq('status', 'active')
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        
+        if (!modelError && activeModel) {
+          const modelVersion = activeModel.version || activeModel.model_name || '1.0.0'
+          remoteData = {
+            version: modelVersion.startsWith('v') ? modelVersion : `v${modelVersion}`,
+            hash: `model_${activeModel.model_name || 'unknown'}`,
+            total_parts: 0,
+            total_size: activeModel.model_size || 0,
+            created_at: activeModel.created_at
+          }
+          versionSource = 'model_registry'
+          console.log('📊 model_registry에서 버전 확인:', remoteData.version, `(${activeModel.model_name})`)
+        }
+      } catch (err) {
+        console.warn('⚠️ model_registry 조회 실패:', err.message)
+      }
+      
+      // 우선순위 2: model_registry에서 최신 모델 (활성 여부 무관)
+      if (!remoteData) {
+        try {
+          const { data: latestModel, error: latestError } = await supabase
+            .from('model_registry')
+            .select('version, model_name, created_at, model_size')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          
+          if (!latestError && latestModel) {
+            const modelVersion = latestModel.version || latestModel.model_name || '1.0.0'
+            remoteData = {
+              version: modelVersion.startsWith('v') ? modelVersion : `v${modelVersion}`,
+              hash: `model_${latestModel.model_name || 'unknown'}`,
+              total_parts: 0,
+              total_size: latestModel.model_size || 0,
+              created_at: latestModel.created_at
+            }
+            versionSource = 'model_registry_latest'
+            console.log('📊 model_registry 최신 모델 버전 확인:', remoteData.version, `(${latestModel.model_name}, 활성 여부 미확인)`)
+          }
+        } catch (err) {
+          console.warn('⚠️ model_registry 최신 모델 조회 실패:', err.message)
+        }
+      }
+      
+      // 우선순위 3: dataset_versions에서 현재 활성 버전 (폴백)
+      if (!remoteData) {
+        try {
+          const { data: datasetVersion, error: datasetVersionError } = await supabase
+            .from('dataset_versions')
+            .select('version, created_at, metadata')
+            .eq('is_current', true)
+            .limit(1)
+            .maybeSingle()
+          
+          if (!datasetVersionError && datasetVersion) {
+            const versionNum = datasetVersion.version || '1.0.0'
+            remoteData = {
+              version: `v${versionNum}`,
+              hash: `dataset_${versionNum}`,
+              total_parts: datasetVersion.metadata?.file_counts?.total || 0,
+              total_size: 0,
+              created_at: datasetVersion.created_at
+            }
+            versionSource = 'dataset_versions'
+            console.log('📊 dataset_versions에서 버전 확인:', remoteData.version)
+          }
+        } catch (err) {
+          console.warn('⚠️ dataset_versions 조회 실패:', err.message)
+        }
+      }
+      
+      // 폴백: 기본값 사용
+      if (!remoteData) {
+        console.warn('원격 버전 조회 실패, 기본값 사용')
         const defaultData = {
           version: 'v1.0.0',
           hash: 'default-hash',
@@ -396,23 +491,16 @@ export function useHybridCache() {
         }
       }
       
-      const versionData = {
-        version: `v${remoteData.set_num}`,
-        hash: remoteData.id,
-        total_parts: 0,
-        total_size: 0,
-        created_at: remoteData.created_at
-      }
-      cacheState.remoteVersion = versionData
+      cacheState.remoteVersion = remoteData
       
       console.log(`📊 로컬 버전: ${localVersion || '없음'}`)
-      console.log(`📊 원격 버전: ${versionData.version}`)
+      console.log(`📊 원격 버전: ${remoteData.version} (출처: ${versionSource})`)
       
       return {
         local: localVersion,
-        remote: versionData.version,
-        needsUpdate: localVersion !== versionData.version,
-        remoteData: versionData
+        remote: remoteData.version,
+        needsUpdate: localVersion !== remoteData.version,
+        remoteData: remoteData
       }
       
     } catch (err) {
@@ -428,6 +516,16 @@ export function useHybridCache() {
       cacheState.syncStatus = 'downloading'
       console.log('📦 증분 동기화 시작...')
       
+      // remoteData가 없으면 버전 체크로 가져오기
+      if (!remoteData) {
+        console.log('📊 버전 정보 확인 중...')
+        const versionInfo = await checkVersion()
+        if (!versionInfo.remoteData) {
+          throw new Error('원격 버전 정보를 가져올 수 없습니다')
+        }
+        remoteData = versionInfo.remoteData
+      }
+      
       // 1. 변경된 부품 목록 조회 (실제 데이터베이스 사용)
       const { data: changedParts, error: partsError } = await supabase
         .from('set_parts')
@@ -439,7 +537,7 @@ export function useHybridCache() {
         return {
           success: 0,
           total: 0,
-          version: remoteData.version
+          version: remoteData?.version || 'unknown'
         }
       }
       
@@ -508,7 +606,7 @@ export function useHybridCache() {
       await saveLocalVersion(remoteData)
       
       cacheState.syncStatus = 'ready'
-      cacheState.lastSync = new Date()
+      cacheState.lastSync = new Date().toISOString()
       
       console.log(`✅ 증분 동기화 완료: ${successCount}개 다운로드, ${notRenderedCount}개 미렌더링, ${errorCount}개 오류`)
       
@@ -666,12 +764,23 @@ export function useHybridCache() {
         return 0.2
       }
       
+      // 🔧 수정됨: 로컬 벡터도 문자열 배열일 수 있으므로 숫자 배열로 변환
+      let shapeVector = vectorResult.shape_vector
+      if (shapeVector && Array.isArray(shapeVector)) {
+        shapeVector = normalizeVector(shapeVector)
+      }
+      
+      let clipEmbedding = vectorResult.clip_embedding
+      if (clipEmbedding && Array.isArray(clipEmbedding)) {
+        clipEmbedding = normalizeVector(clipEmbedding)
+      }
+      
       // 실제 벡터 유사도 계산
       const similarity = calculateVectorSimilarity(detection.features, {
-        shape_vector: vectorResult.shape_vector,
+        shape_vector: shapeVector,
         color_lab: vectorResult.color_lab,
         size_stud: vectorResult.size_stud,
-        clip_embedding: vectorResult.clip_embedding
+        clip_embedding: clipEmbedding
       })
       
       // 유사도가 0이면 기본 점수 부여
@@ -691,10 +800,10 @@ export function useHybridCache() {
   // 원격 벡터 비교 (Supabase에서 벡터만 조회)
   const compareRemoteVectors = async (detection, part) => {
     try {
-      // Supabase에서 벡터 데이터만 조회
+      // Supabase에서 벡터 데이터만 조회 (semantic_vector도 함께 조회) // 🔧 수정됨
       const { data: vectorData, error: vectorError } = await supabase
         .from('parts_master_features')
-        .select('feature_json, clip_text_emb')
+        .select('feature_json, clip_text_emb, semantic_vector') // 🔧 수정됨: semantic_vector 추가
         .eq('part_id', part.part_id)
         .eq('color_id', part.color_id)
         .single()
@@ -705,13 +814,41 @@ export function useHybridCache() {
         return 0.2
       }
       
+      // shape_vector 추출: feature_json 내부 우선, 없으면 semantic_vector 사용 // 🔧 수정됨
+      let shapeVector = vectorData.feature_json?.shape_vector || vectorData.semantic_vector || null
+      
+      // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+      if (shapeVector && Array.isArray(shapeVector)) {
+        shapeVector = normalizeVector(shapeVector)
+      }
+      
+      // clip_text_emb도 숫자 배열로 변환 // 🔧 수정됨
+      let clipEmbedding = vectorData.clip_text_emb || null
+      if (clipEmbedding && Array.isArray(clipEmbedding)) {
+        clipEmbedding = normalizeVector(clipEmbedding)
+      }
+      
+      // 🔧 수정됨: 벡터 구조 확인 로그 (정규화 후 타입 확인)
+      console.log(`🔧 원격 벡터 구조 확인: ${part.part_id}/${part.color_id}`, {
+        hasShapeVector: !!shapeVector,
+        shapeVectorType: shapeVector ? (Array.isArray(shapeVector) ? `array[${shapeVector.length}](${typeof shapeVector[0]})` : typeof shapeVector) : 'null',
+        hasClipEmbedding: !!clipEmbedding,
+        clipEmbeddingType: clipEmbedding ? (Array.isArray(clipEmbedding) ? `array[${clipEmbedding.length}](${typeof clipEmbedding[0]})` : typeof clipEmbedding) : 'null',
+        hasDetectionFeatures: !!detection.features,
+        detectionFeaturesShapeVector: detection.features?.shape_vector ? (Array.isArray(detection.features.shape_vector) ? `array[${detection.features.shape_vector.length}](${typeof detection.features.shape_vector[0]})` : typeof detection.features.shape_vector) : 'null',
+        detectionFeaturesClipEmbedding: detection.features?.clip_embedding ? (Array.isArray(detection.features.clip_embedding) ? `array[${detection.features.clip_embedding.length}](${typeof detection.features.clip_embedding[0]})` : typeof detection.features.clip_embedding) : 'null'
+      })
+      
       // 벡터 유사도 계산
       const similarity = calculateVectorSimilarity(detection.features, {
-        shape_vector: vectorData.feature_json?.shape_vector,
+        shape_vector: shapeVector, // 🔧 수정됨: 숫자 배열로 변환됨
         color_lab: vectorData.feature_json?.color_lab,
         size_stud: vectorData.feature_json?.size_stud,
-        clip_embedding: vectorData.clip_text_emb
+        clip_embedding: clipEmbedding // 🔧 수정됨: 숫자 배열로 변환됨
       })
+      
+      // 🔧 수정됨: 상세 유사도 로그
+      console.log(`🔧 원격 벡터 유사도 계산 결과: ${part.part_id} - 유사도: ${similarity.toFixed(4)}`)
       
       // 유사도가 0이면 기본 점수 부여
       if (similarity === 0) {
@@ -743,9 +880,14 @@ export function useHybridCache() {
           partFeatures.shape_vector
         )
         if (Number.isFinite(shapeSim)) {
+          console.log(`🔧 벡터 유사도 계산: Shape similarity = ${shapeSim.toFixed(4)} (weight: ${weights.shape})`)
           weightedSum += shapeSim * weights.shape
           weightTotal += weights.shape
+        } else {
+          console.warn(`🔧 벡터 유사도 계산: Shape similarity 계산 실패 (NaN 또는 Infinity)`)
         }
+      } else {
+        console.log(`🔧 벡터 유사도 계산: Shape 벡터 없음 (detected: ${!!detectedFeatures.shape_vector}, part: ${!!partFeatures.shape_vector})`)
       }
 
       // 2) Color (둘 다 존재하는 경우에만 적용)
@@ -798,18 +940,38 @@ export function useHybridCache() {
     }
   }
 
+  // 벡터를 숫자 배열로 변환 (문자열 배열 처리) // 🔧 수정됨
+  const normalizeVector = (vec) => {
+    if (!Array.isArray(vec)) return null
+    // 이미 숫자 배열이면 그대로 반환
+    if (vec.length > 0 && typeof vec[0] === 'number') return vec
+    // 문자열 배열이면 숫자로 변환
+    const normalized = vec.map(v => {
+      const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+      return Number.isFinite(num) ? num : 0
+    })
+    return normalized.length > 0 ? normalized : null
+  }
+
   // 코사인 유사도 계산
   const calculateCosineSimilarity = (vec1, vec2) => {
     if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0
+    
+    // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+    const normalizedVec1 = normalizeVector(vec1)
+    const normalizedVec2 = normalizeVector(vec2)
+    if (!normalizedVec1 || !normalizedVec2) return 0
     
     let dotProduct = 0
     let norm1 = 0
     let norm2 = 0
     
-    for (let i = 0; i < vec1.length; i++) {
-      dotProduct += vec1[i] * vec2[i]
-      norm1 += vec1[i] * vec1[i]
-      norm2 += vec2[i] * vec2[i]
+    for (let i = 0; i < normalizedVec1.length; i++) {
+      const v1 = normalizedVec1[i]
+      const v2 = normalizedVec2[i]
+      dotProduct += v1 * v2
+      norm1 += v1 * v1
+      norm2 += v2 * v2
     }
     
     const magnitude = Math.sqrt(norm1) * Math.sqrt(norm2)

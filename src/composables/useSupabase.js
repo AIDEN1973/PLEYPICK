@@ -19,7 +19,17 @@ const supabaseOptions = {
   }
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+// 싱글톤 패턴으로 Supabase 클라이언트 생성
+let supabaseInstance = null
+
+const getSupabaseClient = () => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+  }
+  return supabaseInstance
+}
+
+export const supabase = getSupabaseClient()
 
 export function useSupabase() {
   const user = ref(null)

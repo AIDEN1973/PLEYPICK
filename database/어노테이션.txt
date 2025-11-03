@@ -22,9 +22,9 @@ Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상�
 ├── images/train|val|test/{element_id}/{uuid}.webp
 ├── labels/{element_id}/{uuid}.txt
 ├── meta/{element_id}/{uuid}.json           # Full Meta (v1.6.1)
-├── meta-e/{element_id}/{uuid}.json         # Essential (v1.6.1-E2)
+├── meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용         # Essential (v1.6.1-E2)
 ├── masks_bin/{element_id}/{uuid}.png
-└── depth/{element_id}/{uuid}.bin           # Z-Depth (RLE + Zstd + Base64)
+└── depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)           # Z-Depth (RLE + Zstd + Base64)
 
 
 추가 요구: meta/{uuid}.json 내 보안/접근 레벨은 지표용만 기록. 실제 접근제어는 DB 정책 테이블에서 집행(§8).
@@ -557,3 +557,8 @@ DROP TRIGGER IF EXISTS trg_sd_autorequeue ON synthetic_dataset;
 CREATE TRIGGER trg_sd_autorequeue
 AFTER INSERT OR UPDATE ON synthetic_dataset
 FOR EACH ROW EXECUTE FUNCTION enqueue_failed_samples();
+
+# [AI Update] 2025-11-03 21:02:07 — meta-e/{element_id}/{uuid}\.json → meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용
+
+
+# [AI Update] 2025-11-03 21:02:10 — depth/{element_id}/{uuid}\.bin → depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)

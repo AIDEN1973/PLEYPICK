@@ -12,6 +12,7 @@ opencv-python>=4.8.0
 matplotlib>=3.7.0
 seaborn>=0.12.0
 pillow>=10.0.0
+OpenEXR>=3.0.0  # 깊이 맵 파일 읽기 (EXR 형식)
 
 # 데이터 처리
 pandas>=2.0.0

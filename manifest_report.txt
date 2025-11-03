@@ -1,0 +1,21 @@
+
+=== BrickBox 매니페스트 생성 보고서 ===
+데이터셋 경로: output\synthetic\6335317
+세트 ID: 6335317
+생성 시간: 2025-10-29T11:51:01.774406
+
+=== 생성된 파일 ===
+- renders.jsonl: 19개 레코드
+- ai_meta.jsonl: 19개 레코드
+
+=== 기술문서 준수 ===
+- renders.jsonl: 렌더링 메타데이터 (seed, pose, light, domain)
+- ai_meta.jsonl: 핵심 12필드 (기술문서 v2.1 기준)
+- 중복 제거: pHash 기반 1차 필터링 적용
+- Essential JSON: v1.6.1-E2 형식 준수
+
+=== 다음 단계 ===
+1. DB 업서트: parts_master_features 테이블 매핑
+2. FAISS 인덱스: 임베딩 벡터 생성 및 인덱싱
+3. 품질 검증: SLO 기준 충족 확인
+4. 운영 배포: Stage-1 → Stage-2 → Full 배포

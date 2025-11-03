@@ -1,0 +1,38 @@
+{
+  "include": [
+    "**/*.py"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.venv",
+    "**/venv",
+    "**/scripts/venv",
+    "**/.git",
+    "**/dist",
+    "**/build",
+    "**/output",
+    "**/temp",
+    "**/logs",
+    "**/*.ipynb",
+    "**/brickbox_yolo_automated_training_auto_original.ipynb"
+  ],
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": "information",
+  "reportUnusedClass": "information",
+  "reportUnusedFunction": "information",
+  "reportUnusedVariable": "information",
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Windows",
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "pythonVersion": "3.13",
+      "pythonPlatform": "Windows",
+      "extraPaths": []
+    }
+  ]
+}
+

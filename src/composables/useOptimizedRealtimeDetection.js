@@ -124,14 +124,51 @@ export function useOptimizedRealtimeDetection() {
     }
   }
 
-  // 실제 이미지 분석 기반 부품 검출
-  const detectPartsWithYOLO = async (imageData) => {
-    console.log('🔍 YOLO detection start...')
+  // 실제 이미지 분석 기반 부품 검출 (2단계 검출 지원) // 🔧 수정됨
+  const detectPartsWithYOLO = async (imageData, options = {}) => {
+    const isRealtime = options.realtime !== false // 기본값: true (실시간 모드)
+    console.log(`🔍 YOLO 2단계 검출 시작... (모드: ${isRealtime ? '실시간' : '하이브리드'})`)
     const { detect, init } = useYoloDetector()
+    
     try {
-      await init({ modelPath: '/models/yolo11n-seg.onnx', inputSize: 640 })
-      const dets = await detect(imageData, { confThreshold: 0.05 }) // 매우 낮은 임계값으로 "무조건 검출"
-      console.log(`YOLO detected ${dets.length} objects`)
+      // 1단계: Stage1 모델로 빠른 전체 스캔 (낮은 임계값)
+      console.log('📊 1단계 검출: Stage1 모델 (빠른 전체 스캔)')
+      await init({ modelPath: null, inputSize: 640, stage: 'stage1' })
+      const stage1Dets = await detect(imageData, { confThreshold: 0.15, stage: 'stage1', realtime: isRealtime }) // 🔧 수정됨: 옵션에 따라 실시간 모드 결정
+      console.log(`✅ 1단계 검출 완료: ${stage1Dets.length}개 객체`)
+      
+      // 의심 영역 식별 (신뢰도 낮거나 크기 이상한 객체)
+      const suspiciousRegions = stage1Dets.filter(d => 
+        d.confidence < 0.7 || (d.boundingBox && d.boundingBox.width * d.boundingBox.height < 0.01)
+      )
+      console.log(`🔍 의심 영역 식별: ${suspiciousRegions.length}개`)
+      
+      let finalDets = stage1Dets
+      
+      // 2단계: Stage2 모델로 정밀 검증 (의심 영역이 있을 때만)
+      if (suspiciousRegions.length > 0) {
+        try {
+          console.log('📊 2단계 검출: Stage2 모델 (정밀 검증)')
+          await init({ modelPath: null, inputSize: 640, stage: 'stage2' })
+          const stage2Dets = await detect(imageData, { confThreshold: 0.5, stage: 'stage2', realtime: isRealtime }) // 🔧 수정됨: 옵션에 따라 실시간 모드 결정
+          console.log(`✅ 2단계 검증 완료: ${stage2Dets.length}개 객체`)
+          
+          // 결과 통합: Stage1에서 확실한 것 + Stage2에서 새로 찾은 것
+          const confidentStage1 = stage1Dets.filter(d => d.confidence >= 0.7)
+          const mergedDets = [...confidentStage1, ...stage2Dets]
+          
+          // 중복 제거 (IoU 기반)
+          const uniqueDets = removeDuplicateDetections(mergedDets)
+          finalDets = uniqueDets
+          console.log(`🔄 결과 통합: ${mergedDets.length}개 → ${uniqueDets.length}개 (중복 제거)`)
+        } catch (stage2Error) {
+          console.warn('⚠️ 2단계 검출 실패, 1단계 결과만 사용:', stage2Error)
+          finalDets = stage1Dets
+        }
+      }
+      
+      const dets = finalDets
+      console.log(`✅ 최종 YOLO 검출: ${dets.length}개 객체`)
 
       // 정규화된 바운딩박스 생성: {boundingBox:{x,y,width,height}}
       const toBox = (d) => {
@@ -167,6 +204,45 @@ export function useOptimizedRealtimeDetection() {
       const detections = await analyzeImageForParts(imageData)
       return detections
     }
+  }
+  
+  // 중복 검출 제거 (IoU 기반) // 🔧 수정됨
+  const removeDuplicateDetections = (detections) => {
+    if (detections.length <= 1) return detections
+    
+    const iou = (box1, box2) => {
+      const x1 = Math.max(box1.x, box2.x)
+      const y1 = Math.max(box1.y, box2.y)
+      const x2 = Math.min(box1.x + box1.width, box2.x + box2.width)
+      const y2 = Math.min(box1.y + box1.height, box2.y + box2.height)
+      const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
+      const area1 = box1.width * box1.height
+      const area2 = box2.width * box2.height
+      return inter / (area1 + area2 - inter + 1e-6)
+    }
+    
+    const sorted = detections.sort((a, b) => b.confidence - a.confidence)
+    const keep = []
+    const used = new Set()
+    
+    for (let i = 0; i < sorted.length; i++) {
+      if (used.has(i)) continue
+      
+      const current = sorted[i]
+      keep.push(current)
+      
+      // IoU가 높은 중복 제거
+      for (let j = i + 1; j < sorted.length; j++) {
+        if (used.has(j)) continue
+        const box1 = current.boundingBox
+        const box2 = sorted[j].boundingBox
+        if (iou(box1, box2) > 0.5) {
+          used.add(j)
+        }
+      }
+    }
+    
+    return keep
   }
 
   // 실제 이미지에서 부품 분석

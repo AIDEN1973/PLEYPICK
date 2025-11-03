@@ -1,0 +1,328 @@
+
+=== BrickBox 합성 데이터 검증 보고서 ===
+데이터셋 경로: output\synthetic\6335317
+검증 시간: 101개 항목
+
+=== 요약 ===
+전체: 101
+통과: 69 (68.3%)
+경고: 31 (30.7%)
+실패: 1 (1.0%)
+
+=== 기술문서 기준 준수 ===
+- WebP 정책: SSIM ≥ 0.965
+- 마스크/bbox 면적 비율: 0.25-0.98
+- PnP 재투영 오차: ≤ 1.5px
+- 깊이 품질: ≥ 0.85
+- SNR: ≥ 30dB
+
+=== 상세 결과 ===
+
+--- FAIL (1개) ---
+[structure] output\synthetic\6335317
+  디렉토리별 파일 수 불일치: {'images': 19, 'labels': 19, 'meta': 38, 'meta-e': 19}
+
+
+--- WARN (31개) ---
+[quality_metrics] output\synthetic\6335317\meta\6335317_000.json
+  SSIM 임계값 미달: 0.9539591225081883 < 0.965
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_000.json
+  QA 플래그 활성화: True
+
+[webp_image] output\synthetic\6335317\images\6335317_000.webp
+  이미지 블러 가능성: Laplacian variance=26.98
+
+[webp_image] output\synthetic\6335317\images\6335317_001.webp
+  이미지 블러 가능성: Laplacian variance=41.00
+
+[webp_image] output\synthetic\6335317\images\6335317_002.webp
+  이미지 블러 가능성: Laplacian variance=23.68
+
+[webp_image] output\synthetic\6335317\images\6335317_003.webp
+  이미지 블러 가능성: Laplacian variance=30.91
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_004.json
+  SSIM 임계값 미달: 0.9611869372981591 < 0.965
+
+[webp_image] output\synthetic\6335317\images\6335317_004.webp
+  이미지 블러 가능성: Laplacian variance=26.82
+
+[webp_image] output\synthetic\6335317\images\6335317_005.webp
+  이미지 블러 가능성: Laplacian variance=23.83
+
+[webp_image] output\synthetic\6335317\images\6335317_006.webp
+  이미지 블러 가능성: Laplacian variance=27.59
+
+[webp_image] output\synthetic\6335317\images\6335317_007.webp
+  이미지 블러 가능성: Laplacian variance=25.32
+
+[webp_image] output\synthetic\6335317\images\6335317_008.webp
+  이미지 블러 가능성: Laplacian variance=33.09
+
+[webp_image] output\synthetic\6335317\images\6335317_009.webp
+  이미지 블러 가능성: Laplacian variance=31.66
+
+[webp_image] output\synthetic\6335317\images\6335317_010.webp
+  이미지 블러 가능성: Laplacian variance=30.75
+
+[webp_image] output\synthetic\6335317\images\6335317_011.webp
+  이미지 블러 가능성: Laplacian variance=39.34
+
+[webp_image] output\synthetic\6335317\images\6335317_012.webp
+  이미지 블러 가능성: Laplacian variance=28.46
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_013.json
+  SSIM 임계값 미달: 0.9545624716141248 < 0.965
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_013.json
+  QA 플래그 활성화: True
+
+[webp_image] output\synthetic\6335317\images\6335317_013.webp
+  이미지 블러 가능성: Laplacian variance=30.87
+
+[webp_image] output\synthetic\6335317\images\6335317_014.webp
+  이미지 블러 가능성: Laplacian variance=27.11
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_015.json
+  SSIM 임계값 미달: 0.9632090959215113 < 0.965
+
+[webp_image] output\synthetic\6335317\images\6335317_015.webp
+  이미지 블러 가능성: Laplacian variance=31.16
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_016.json
+  SSIM 임계값 미달: 0.953137259669228 < 0.965
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_016.json
+  QA 플래그 활성화: True
+
+[webp_image] output\synthetic\6335317\images\6335317_016.webp
+  이미지 블러 가능성: Laplacian variance=32.42
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_017.json
+  SSIM 임계값 미달: 0.9552963827896528 < 0.965
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_017.json
+  QA 플래그 활성화: True
+
+[webp_image] output\synthetic\6335317\images\6335317_017.webp
+  이미지 블러 가능성: Laplacian variance=34.88
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_018.json
+  SSIM 임계값 미달: 0.9541048769734111 < 0.965
+
+[quality_metrics] output\synthetic\6335317\meta\6335317_018.json
+  QA 플래그 활성화: True
+
+[webp_image] output\synthetic\6335317\images\6335317_018.webp
+  이미지 블러 가능성: Laplacian variance=25.13
+
+
+--- PASS (69개) ---
+[yolo_label] output\synthetic\6335317\labels\6335317_000.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_000.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=26.98
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_000.txt
+  마스크/bbox 면적 비율 정상: 0.708
+
+[yolo_label] output\synthetic\6335317\labels\6335317_001.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_001.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_001.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=41.00
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_001.txt
+  마스크/bbox 면적 비율 정상: 0.496
+
+[yolo_label] output\synthetic\6335317\labels\6335317_002.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_002.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_002.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=23.68
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_002.txt
+  마스크/bbox 면적 비율 정상: 0.687
+
+[yolo_label] output\synthetic\6335317\labels\6335317_003.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_003.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_003.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=30.91
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_003.txt
+  마스크/bbox 면적 비율 정상: 0.439
+
+[yolo_label] output\synthetic\6335317\labels\6335317_004.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_004.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=26.82
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_004.txt
+  마스크/bbox 면적 비율 정상: 0.691
+
+[yolo_label] output\synthetic\6335317\labels\6335317_005.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_005.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_005.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=23.83
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_005.txt
+  마스크/bbox 면적 비율 정상: 0.618
+
+[yolo_label] output\synthetic\6335317\labels\6335317_006.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_006.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_006.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=27.59
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_006.txt
+  마스크/bbox 면적 비율 정상: 0.579
+
+[yolo_label] output\synthetic\6335317\labels\6335317_007.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_007.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_007.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=25.32
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_007.txt
+  마스크/bbox 면적 비율 정상: 0.513
+
+[yolo_label] output\synthetic\6335317\labels\6335317_008.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_008.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_008.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=33.09
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_008.txt
+  마스크/bbox 면적 비율 정상: 0.415
+
+[yolo_label] output\synthetic\6335317\labels\6335317_009.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_009.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_009.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=31.66
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_009.txt
+  마스크/bbox 면적 비율 정상: 0.790
+
+[yolo_label] output\synthetic\6335317\labels\6335317_010.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_010.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_010.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=30.75
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_010.txt
+  마스크/bbox 면적 비율 정상: 0.481
+
+[yolo_label] output\synthetic\6335317\labels\6335317_011.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_011.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_011.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=39.34
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_011.txt
+  마스크/bbox 면적 비율 정상: 0.361
+
+[yolo_label] output\synthetic\6335317\labels\6335317_012.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_012.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_012.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=28.46
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_012.txt
+  마스크/bbox 면적 비율 정상: 0.471
+
+[yolo_label] output\synthetic\6335317\labels\6335317_013.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_013.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=30.87
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_013.txt
+  마스크/bbox 면적 비율 정상: 0.445
+
+[yolo_label] output\synthetic\6335317\labels\6335317_014.txt
+  YOLO 라벨 형식 정상
+
+[metadata_schema] output\synthetic\6335317\meta\6335317_014.json
+  메타데이터 스키마 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_014.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=27.11
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_014.txt
+  마스크/bbox 면적 비율 정상: 0.402
+
+[yolo_label] output\synthetic\6335317\labels\6335317_015.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_015.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=31.16
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_015.txt
+  마스크/bbox 면적 비율 정상: 0.365
+
+[yolo_label] output\synthetic\6335317\labels\6335317_016.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_016.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=32.42
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_016.txt
+  마스크/bbox 면적 비율 정상: 0.459
+
+[yolo_label] output\synthetic\6335317\labels\6335317_017.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_017.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=34.88
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_017.txt
+  마스크/bbox 면적 비율 정상: 0.398
+
+[yolo_label] output\synthetic\6335317\labels\6335317_018.txt
+  YOLO 라벨 형식 정상
+
+[webp_image] output\synthetic\6335317\images\6335317_018.webp
+  WebP 이미지 정상: 1024x1024, Laplacian=25.13
+
+[mask_bbox_ratio] output\synthetic\6335317\labels\6335317_018.txt
+  마스크/bbox 면적 비율 정상: 0.376
+

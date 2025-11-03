@@ -28,9 +28,9 @@ BrickBox AI 메타데이터 기술 문서 (운영형 · 상세판)
   images/{split}/{element_id}/{uuid}.webp
   labels/{element_id}/{uuid}.txt
   meta/{element_id}/{uuid}.json        # Full Meta (v1.6.1)
-  meta-e/{element_id}/{uuid}.json      # Essential (v1.6.1-E2)
+  meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용      # Essential (v1.6.1-E2)
   masks_bin/{element_id}/{uuid}.png
-  depth/{element_id}/{uuid}.bin
+  depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)
 
 
 Edge/운영 권장: Essential JSON(E2) 사용, Full은 오프라인 QA·분석용.
@@ -282,3 +282,8 @@ Stage-1/2/Full 배포 및 롤백 조건.
 핵심 12필드만 LLM/규칙으로 직접 생성하고, 점수/품질/패널티/임베딩은 후처리·외부화·단계형 업서트로 분리한다.
 
 기존 운영 설계(FAISS Two-Stage, 헝가리안+BOM, WebP p95, Pruning/A/B, RLS)를 그대로 준수하면 성능(×5~10), 안정성, 거버넌스를 동시에 달성한다.
+
+# [AI Update] 2025-11-03 21:02:07 — meta-e/{element_id}/{uuid}\.json → meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용
+
+
+# [AI Update] 2025-11-03 21:02:10 — depth/{element_id}/{uuid}\.bin → depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)

@@ -114,10 +114,23 @@
       
       <div class="config-grid">
         <div class="config-group">
-          <label>세트 번호</label>
+          <label>검색 타입</label>
+          <div class="radio-group">
+            <label>
+              <input type="radio" v-model="searchType" value="set" />
+              세트 번호
+            </label>
+            <label>
+              <input type="radio" v-model="searchType" value="element" />
+              엘리먼트 ID
+            </label>
+          </div>
+        </div>
+        <div class="config-group">
+          <label>{{ searchType === 'set' ? '세트 번호' : '엘리먼트 ID' }}</label>
           <input 
             v-model="setNumber" 
-            placeholder="세트 번호 입력"
+            :placeholder="searchType === 'set' ? '세트 번호 입력 (예: 76917)' : '엘리먼트 ID 입력 (예: 6187519)'"
             @keyup.enter="loadSetMetadata"
           />
           <button @click="loadSetMetadata" class="btn-secondary">메타데이터 로드</button>
@@ -261,7 +274,7 @@
           class="camera-video"
         ></video>
         <!-- 실시간 바운딩 박스 오버레이 -->
-        <canvas ref="bboxCanvas" class="bbox-overlay" v-if="realtimeDetections.length > 0"></canvas>
+        <canvas ref="bboxCanvas" class="bbox-overlay"></canvas>
         <div class="camera-status" v-if="cameraActive">
           <span class="status-indicator">●</span>
           하이브리드 모드 활성화
@@ -496,6 +509,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useHybridCache } from '../composables/useHybridCache'
 import { useSupabase } from '../composables/useSupabase'
+import { useFAISSTwoStageSearch } from '../composables/useFAISSTwoStageSearch'
 
 export default {
   name: 'HybridDetection',
@@ -514,10 +528,19 @@ export default {
       searchLocalCache,
       compareLocalVectors,
       compareRemoteVectors,
-      prefetchVectorsForParts
+      prefetchVectorsForParts,
+      getVectorFromLocal
     } = useHybridCache()
+    
+    // FAISS Two-Stage 검색 composable 추가 // 🔧 수정됨
+    const {
+      buildConfusionIndex,
+      performTwoStageSearch,
+      resetStats: resetFAISSStats
+    } = useFAISSTwoStageSearch()
 
     // 반응형 데이터
+    const searchType = ref('set') // 'set' 또는 'element'
     const setNumber = ref('')
     const detectionMode = ref('hybrid-bom') // 하이브리드 + BOM 기반으로 고정
     const cameraActive = ref(false)
@@ -608,6 +631,9 @@ export default {
       return cacheState.localVersion !== cacheState.remoteVersion
     })
 
+    // Supabase 클라이언트
+    const { supabase } = useSupabase()
+
     // 메서드
     const loadSetMetadata = async () => {
       if (!setNumber.value) return
@@ -616,31 +642,109 @@ export default {
         loading.value = true
         loadingText.value = '메타데이터 로드 중...'
         
-        console.log(`📊 세트 메타데이터 로드: ${setNumber.value}`)
+        const inputValue = setNumber.value.trim()
+        let targetParts = []
+        let legoSet = null
         
-        // 실제 메타데이터 로드 (Supabase에서)
-        const { useMasterPartsMatching } = await import('../composables/useMasterPartsMatching')
-        const { loadTargetSetParts } = useMasterPartsMatching()
+        // 엘리먼트 ID 검색 모드
+        if (searchType.value === 'element') {
+          console.log(`📊 엘리먼트 ID로 부품 정보 로드: ${inputValue}`)
+          
+          // set_parts에서 엘리먼트 ID로 조회 (관계 조회 단순화)
+          const { data: elementDataArray, error: elementError } = await supabase
+            .from('set_parts')
+            .select(`
+              element_id,
+              part_id,
+              color_id,
+              quantity,
+              set_id,
+              lego_parts(part_num, name),
+              lego_colors(name, rgb)
+            `)
+            .eq('element_id', inputValue)
+            .limit(1)
+          
+          if (elementError) {
+            console.error('set_parts 조회 에러:', elementError)
+            throw new Error(`엘리먼트 ID 조회 실패: ${elementError.message}`)
+          }
+          
+          if (!elementDataArray || elementDataArray.length === 0) {
+            throw new Error(`엘리먼트 ID ${inputValue}를 찾을 수 없습니다.`)
+          }
+          
+          const elementData = elementDataArray[0]
+          
+          // 세트 정보 별도 조회 (관계 조회가 실패할 수 있으므로)
+          let setInfo = null
+          if (elementData.set_id) {
+            try {
+              const { data: setData, error: setError } = await supabase
+                .from('lego_sets')
+                .select('set_num, name')
+                .eq('id', elementData.set_id)
+                .maybeSingle()
+              
+              if (!setError && setData) {
+                setInfo = setData
+              }
+            } catch (setErr) {
+              console.warn('세트 정보 조회 실패:', setErr)
+            }
+          }
+          
+          // 단일 부품을 배열로 변환 (BOM 형식 호환)
+          targetParts = [{
+            part_id: elementData.part_id,
+            color_id: elementData.color_id,
+            quantity: elementData.quantity || 1,
+            element_id: elementData.element_id,
+            lego_parts: elementData.lego_parts,
+            lego_colors: elementData.lego_colors
+          }]
+          
+          // 세트 정보 설정
+          legoSet = setInfo
+          
+          console.log(`✅ 엘리먼트 ID ${inputValue} → 부품 ID ${elementData.part_id} (색상: ${elementData.color_id})`)
+          if (setInfo) {
+            console.log(`📦 소속 세트: ${setInfo.set_num} - ${setInfo.name}`)
+          }
+          
+        } else {
+          // 세트 번호 검색 모드 (기존 로직)
+          console.log(`📊 세트 메타데이터 로드: ${inputValue}`)
+          
+          // 실제 메타데이터 로드 (Supabase에서)
+          const { useMasterPartsMatching } = await import('../composables/useMasterPartsMatching')
+          const { loadTargetSetParts } = useMasterPartsMatching()
+          
+          const result = await loadTargetSetParts(inputValue)
+          targetParts = result.targetParts
+          legoSet = result.legoSet
+        }
         
-        const result = await loadTargetSetParts(setNumber.value)
+        // 메타데이터 설정
         setMetadata.value = {
-          setInfo: result.legoSet,
-          partsMetadata: result.targetParts.map(part => ({
+          setInfo: legoSet,
+          partsMetadata: targetParts.map(part => ({
             part_id: part.part_id,
             color_id: part.color_id,
             quantity: part.quantity,
+            element_id: part.element_id,
             part_name: part.lego_parts?.name || 'Unknown',
             color_name: part.lego_colors?.name || 'Unknown'
           }))
         }
 
         // BOM 데이터 로드 (하이브리드 + BOM 기반)
-        await loadBOMData(result.targetParts)
+        await loadBOMData(targetParts)
 
         // BOM 파트 벡터를 사전 로드하여 원격 조회를 최소화
         try {
           loadingText.value = '벡터 사전 로드 중...'
-          const pre = await prefetchVectorsForParts(result.targetParts)
+          const pre = await prefetchVectorsForParts(targetParts)
           console.log(`📊 벡터 Prefetch: fetched=${pre.fetched}, saved=${pre.saved}`)
         } catch (e) {
           console.warn('벡터 Prefetch 경고:', e.message)
@@ -717,10 +821,14 @@ export default {
       }
     }
 
-    // 폐쇄 환경 하이브리드 검출 수행 (수량 고려)
+    // 폐쇄 환경 하이브리드 검출 수행 (수량 고려, FAISS Two-Stage 검색 통합) // 🔧 수정됨
     const performBOMBasedHybridDetection = async (detections, bomMetadata) => {
       try {
-        console.log('🎯 폐쇄 환경 하이브리드 검출 시작...')
+        console.log('🎯 폐쇄 환경 하이브리드 검출 시작 (FAISS Two-Stage 검색 통합)...')
+        
+        // 혼동군 인덱스 구축 // 🔧 수정됨
+        buildConfusionIndex(bomMetadata)
+        resetFAISSStats()
         
         const matches = []
         const missingSlots = []
@@ -733,6 +841,210 @@ export default {
         const availableDetections = detections.length
         console.log(`🔍 사용 가능한 검출 객체: ${availableDetections}개`)
         
+        // BOM 부품 벡터 사전 로드 (일괄 배치 로드) // 🔧 수정됨
+        console.log('📦 BOM 부품 벡터 사전 로드 시작...')
+        const bomEmbeddingsMap = new Map()
+        const preloadStartTime = Date.now()
+        
+        // 고유한 부품 조합 추출
+        const uniqueParts = Array.from(new Map(
+          bomMetadata.map(p => [`${p.part_id}/${p.color_id}`, p])
+        ).values())
+        
+        // 로컬 캐시 일괄 조회 (getVectorFromLocal 직접 사용) // 🔧 수정됨
+        const localCachePromises = uniqueParts.map(async (bomPart) => {
+          const partKey = `${bomPart.part_id}/${bomPart.color_id}`
+          try {
+            // getVectorFromLocal 직접 호출 (벡터 값 반환) // 🔧 수정됨
+            const vectorResult = await getVectorFromLocal(bomPart.part_id, bomPart.color_id)
+            if (vectorResult && vectorResult.found) {
+              const embedding = vectorResult.clip_embedding || vectorResult.shape_vector
+              if (embedding) {
+                bomEmbeddingsMap.set(partKey, {
+                  embedding,
+                  source: 'local'
+                })
+                return { partKey, source: 'local' }
+              }
+            }
+            return { partKey, source: null }
+          } catch (err) {
+            console.warn(`로컬 벡터 조회 실패: ${partKey}`, err)
+            return { partKey, source: null }
+          }
+        })
+        
+        await Promise.all(localCachePromises)
+        const localCacheCount = bomEmbeddingsMap.size
+        
+        // 원격 벡터 배치 로드 (로컬 캐시에 없는 부품들)
+        const partsNeedingRemote = uniqueParts.filter(p => 
+          !bomEmbeddingsMap.has(`${p.part_id}/${p.color_id}`)
+        )
+        
+        if (partsNeedingRemote.length > 0) {
+          console.log(`📦 원격 벡터 배치 로드: ${partsNeedingRemote.length}개 부품`)
+          
+          // Supabase IN 쿼리로 일괄 조회 (정확한 조합 필터링) // 🔧 수정됨
+          try {
+            // part_id와 color_id 조합을 정확히 매칭하기 위해 OR 조건 사용
+            const partColorPairs = partsNeedingRemote.map(p => ({
+              part_id: p.part_id,
+              color_id: p.color_id
+            }))
+            
+            // Supabase의 OR 조건으로 정확한 조합 조회
+            const orConditions = partColorPairs.map(pair => 
+              `and(part_id.eq.${pair.part_id},color_id.eq.${pair.color_id})`
+            ).join(',')
+            
+            // PostgREST 필터 사용 (더 정확한 조합 매칭)
+            let query = supabase
+              .from('parts_master_features')
+              .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+            
+            // 작은 배치(100개 이하)는 개별 조회, 큰 배치는 OR 조건 사용
+            if (partColorPairs.length <= 100) {
+              // 작은 배치: 정확한 조합으로 필터링
+              const promises = partColorPairs.map(pair =>
+                supabase
+                  .from('parts_master_features')
+                  .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                  .eq('part_id', pair.part_id)
+                  .eq('color_id', pair.color_id)
+                  .maybeSingle()
+                  .then(({ data, error }) => ({ data, error, pair }))
+              )
+              
+              const results = await Promise.all(promises)
+              const remoteVectors = results
+                .filter(r => !r.error && r.data)
+                .map(r => r.data)
+              
+              // 벡터 맵에 추가
+              remoteVectors.forEach(remoteVector => {
+                const partKey = `${remoteVector.part_id}/${remoteVector.color_id}`
+                if (!bomEmbeddingsMap.has(partKey)) {
+                  // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
+                  let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                  if (embedding) {
+                    // 문자열 배열을 숫자 배열로 변환
+                    if (Array.isArray(embedding)) {
+                      embedding = normalizeVector(embedding)
+                    }
+                    if (embedding) {
+                      bomEmbeddingsMap.set(partKey, {
+                        embedding,
+                        source: 'remote'
+                      })
+                    }
+                  }
+                }
+              })
+            } else {
+              // 큰 배치: IN 쿼리 사용 (부정확하지만 빠름, 이후 필터링)
+              const partIds = [...new Set(partsNeedingRemote.map(p => p.part_id))]
+              const colorIds = [...new Set(partsNeedingRemote.map(p => p.color_id))]
+              
+              const { data: remoteVectors, error: remoteError } = await supabase
+                .from('parts_master_features')
+                .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                .in('part_id', partIds)
+                .in('color_id', colorIds)
+            
+              if (!remoteError && remoteVectors) {
+                // 정확한 조합 필터링 (IN 쿼리는 부정확할 수 있음) // 🔧 수정됨
+                const validPairs = new Set(
+                  partsNeedingRemote.map(p => `${p.part_id}/${p.color_id}`)
+                )
+                
+                remoteVectors.forEach(remoteVector => {
+                  const partKey = `${remoteVector.part_id}/${remoteVector.color_id}`
+                  if (validPairs.has(partKey) && !bomEmbeddingsMap.has(partKey)) {
+                    // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
+                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                    if (embedding) {
+                      // 문자열 배열을 숫자 배열로 변환
+                      if (Array.isArray(embedding)) {
+                        embedding = normalizeVector(embedding)
+                      }
+                      if (embedding) {
+                        bomEmbeddingsMap.set(partKey, {
+                          embedding,
+                          source: 'remote'
+                        })
+                      }
+                    }
+                  }
+                })
+              } else if (remoteError) {
+                console.warn('원격 벡터 배치 로드 실패:', remoteError)
+              }
+            }
+          } catch (err) {
+            console.warn('원격 벡터 배치 로드 오류:', err)
+          }
+        }
+        
+        const preloadTime = Date.now() - preloadStartTime
+        console.log(`✅ BOM 부품 벡터 사전 로드 완료: ${bomEmbeddingsMap.size}/${uniqueParts.length}개 (로컬: ${localCacheCount}, 원격: ${bomEmbeddingsMap.size - localCacheCount}), ${preloadTime}ms`)
+        
+        // BOM 부품 배치 병렬 처리 // 🔧 수정됨
+        const batchSize = 20 // 배치 크기: 20개씩 처리
+        const batches = []
+        for (let i = 0; i < bomMetadata.length; i += batchSize) {
+          batches.push(bomMetadata.slice(i, i + batchSize))
+        }
+        
+        console.log(`🔄 BOM 부품 배치 병렬 처리 시작: ${batches.length}개 배치 (배치 크기: ${batchSize})`)
+        
+        // 각 배치 병렬 처리
+        for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+          const batch = batches[batchIdx]
+          console.log(`📦 배치 ${batchIdx + 1}/${batches.length} 처리 중... (${batch.length}개 부품)`)
+          
+          // 배치 내 부품 병렬 처리
+          const batchResults = await Promise.all(batch.map(async (bomPart) => {
+            return await processBomPart(
+              bomPart,
+              detections,
+              usedDetections,
+              processedParts,
+              vectorCache,
+              bomEmbeddingsMap,
+              availableDetections,
+              partKey => throttleLog(`part-${partKey}`, `🔍 BOM 부품 검색: ${partKey.split('/')[0]} - 필요 수량: ${bomPart.quantity || 1}개`, 1500),
+              partKey => throttleLog(`match-${partKey}`, `✅ 폐쇄 환경 매칭: ${partKey}`, 1000),
+              partKey => throttleLog(`miss-${partKey}`, `❌ 매칭 실패: ${partKey}`, 1000),
+              searchLocalCache,
+              compareLocalVectors,
+              compareRemoteVectors,
+              performTwoStageSearch,
+              calculateDirectSimilarity,
+              calculateBOMMatchScore,
+              supabase
+            )
+          }))
+          
+          // 배치 결과 통합
+          for (const result of batchResults) {
+            if (result.matches && result.matches.length > 0) {
+              matches.push(...result.matches)
+            }
+            if (result.missingSlots && result.missingSlots.length > 0) {
+              missingSlots.push(...result.missingSlots)
+            }
+            if (result.usedDetectionIndices) {
+              result.usedDetectionIndices.forEach(idx => usedDetections.add(idx))
+            }
+            progress.value.done += result.foundCount || 0
+          }
+          
+          console.log(`✅ 배치 ${batchIdx + 1}/${batches.length} 완료`)
+        }
+        
+        // 기존 순차 처리 코드 제거 (배치 병렬 처리로 대체됨)
+        /*
         // BOM의 각 부품에 대해 수량만큼 검출된 객체에서 찾기
         for (const bomPart of bomMetadata) {
           const requiredQuantity = bomPart.quantity || 1
@@ -755,51 +1067,167 @@ export default {
             let bestDetectionIndex = -1
             let bestSource = null
 
-            // 후보 스코어를 제한 병렬(6)로 계산
-            const candidates = detections.map((d, i) => ({ d, i })).filter(c => !usedDetections.has(c.i))
-            const scored = await runWithConcurrencyLimit(candidates, 6, async (cand) => {
+            // FAISS Two-Stage 검색 적용 (각 detection에 대해) // 🔧 수정됨
+            const availableCandidates = detections
+              .map((d, i) => ({ d, i }))
+              .filter(c => !usedDetections.has(c.i))
+            
+            // BOM 부품 후보 벡터 준비 (한 번만 로드)
+            const bomPartEmbedding = await (async () => {
+              try {
+                const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
+                if (localResult.found) {
+                  // 🔧 수정됨: 로컬 벡터도 문자열 배열일 수 있으므로 변환
+                  let embedding = localResult.clip_embedding || localResult.shape_vector
+                  if (embedding && Array.isArray(embedding)) {
+                    embedding = normalizeVector(embedding)
+                  }
+                  if (embedding) {
+                    return {
+                      embedding,
+                      source: 'local'
+                    }
+                  }
+                } else {
+                  const { data: remoteVector } = await supabase
+                    .from('parts_master_features')
+                    .select('clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                    .eq('part_id', bomPart.part_id)
+                    .eq('color_id', bomPart.color_id)
+                    .maybeSingle()
+                  
+                  if (remoteVector) {
+                    // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
+                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                    if (embedding && Array.isArray(embedding)) {
+                      embedding = normalizeVector(embedding)
+                    }
+                    if (embedding) {
+                      return {
+                        embedding,
+                        source: 'remote'
+                      }
+                    }
+                  }
+                }
+              } catch (err) {
+                console.warn('BOM 부품 벡터 로드 실패:', err)
+              }
+              return null
+            })()
+            
+            // 후보 스코어를 제한 병렬(6)로 계산 (FAISS Two-Stage 검색 포함) // 🔧 수정됨
+            const scored = await runWithConcurrencyLimit(availableCandidates, 6, async (cand) => {
               const i = cand.i
               const detection = cand.d
               const cacheKey = `${partKey}/${i}`
               let hybridScore = 0
               let source = null
+              
               if (vectorCache.has(cacheKey)) {
                 const cached = vectorCache.get(cacheKey)
                 hybridScore = cached.score
                 source = cached.source
               } else {
-                const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
-                if (localResult.found) {
-                  // 실제 로컬 벡터 비교 시도
-                  try {
-                    hybridScore = await compareLocalVectors(detection, bomPart)
-                    source = 'local'
-                  } catch (err) {
-                    console.warn('로컬 벡터 비교 실패, fallback 0 사용:', err)
-                    hybridScore = 0
-                    source = 'local'
-                  }
-                } else {
-                  // 실제 원격 벡터 비교 시도
-                  try {
-                    hybridScore = await compareRemoteVectors(detection, bomPart)
-                    source = 'remote'
-                  } catch (err) {
-                    console.warn('원격 벡터 비교 실패, fallback 0 사용:', err)
-                    hybridScore = 0
-                    source = 'remote'
+                // 검출 객체의 임베딩 벡터 추출
+                let queryEmbedding = detection.features?.clip_embedding || 
+                                     detection.features?.shape_vector || 
+                                     null
+                
+                // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+                if (queryEmbedding && Array.isArray(queryEmbedding)) {
+                  queryEmbedding = normalizeVector(queryEmbedding)
+                }
+                
+                // FAISS Two-Stage 검색 시도 (임베딩이 모두 있는 경우)
+                if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+                  // 🔧 수정됨: bomPartEmbedding.embedding도 숫자 배열로 변환
+                  const normalizedBomEmbedding = normalizeVector(bomPartEmbedding.embedding)
+                  if (!normalizedBomEmbedding) {
+                    console.warn('BOM 임베딩 변환 실패, 직접 비교로 폴백')
+                  } else {
+                    bomPartEmbedding.embedding = normalizedBomEmbedding
                   }
                 }
+                
+                if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+                  try {
+                    const bomCandidates = [{
+                      part_id: bomPart.part_id,
+                      color_id: bomPart.color_id,
+                      embedding: bomPartEmbedding.embedding,
+                      source: bomPartEmbedding.source,
+                      part: bomPart
+                    }]
+                    
+                    const searchResult = await performTwoStageSearch(
+                      queryEmbedding,
+                      bomCandidates,
+                      bomPart.part_id,
+                      {}
+                    )
+                    
+                    if (searchResult.results && searchResult.results.length > 0) {
+                      const bestMatch = searchResult.results[0]
+                      hybridScore = bestMatch.similarity || bestMatch.score || 0
+                      source = bestMatch.source || bomPartEmbedding.source || 'local'
+                    } else {
+                      // FAISS 검색 결과 없으면 직접 비교
+                      hybridScore = await calculateDirectSimilarity(queryEmbedding, bomPartEmbedding.embedding)
+                      source = bomPartEmbedding.source
+                    }
+                  } catch (faissError) {
+                    console.warn('FAISS Two-Stage 검색 실패, 직접 비교로 폴백:', faissError)
+                    if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+                      hybridScore = await calculateDirectSimilarity(queryEmbedding, bomPartEmbedding.embedding)
+                      source = bomPartEmbedding.source
+                    } else {
+                      // 기존 방식으로 폴백
+                      const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
+                      if (localResult.found) {
+                        hybridScore = await compareLocalVectors(detection, bomPart)
+                        source = 'local'
+                      } else {
+                        hybridScore = await compareRemoteVectors(detection, bomPart)
+                        source = 'remote'
+                      }
+                    }
+                  }
+                } else {
+                  // 임베딩이 없으면 기존 방식 사용
+                  const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
+                  if (localResult.found) {
+                    try {
+                      hybridScore = await compareLocalVectors(detection, bomPart)
+                      source = 'local'
+                    } catch (err) {
+                      console.warn('로컬 벡터 비교 실패, fallback 0 사용:', err)
+                      hybridScore = 0
+                      source = 'local'
+                    }
+                  } else {
+                    try {
+                      hybridScore = await compareRemoteVectors(detection, bomPart)
+                      source = 'remote'
+                    } catch (err) {
+                      console.warn('원격 벡터 비교 실패, fallback 0 사용:', err)
+                      hybridScore = 0
+                      source = 'remote'
+                    }
+                  }
+                }
+                
                 vectorCache.set(cacheKey, { score: hybridScore, source })
               }
+              
               const bomScore = await calculateBOMMatchScore(detection, bomPart)
               const combinedScore = (hybridScore * 0.6) + (bomScore * 0.4)
               return { i, detection, combinedScore, source, hybridScore, bomScore }
             })
 
-            // 최고 점수 선택(임계값 대폭 완화: 0.01)
+            // 최고 점수 선택(정밀 검출 모드: 0.85 이상만 허용)
             for (const s of scored) {
-              if (s && s.combinedScore > bestScore && s.combinedScore > 0.01) {
+              if (s && s.combinedScore > bestScore && s.combinedScore > 0.85) {
                 bestScore = s.combinedScore
                 bestMatch = {
                   ...bomPart,
@@ -826,7 +1254,7 @@ export default {
             // 매칭 실패 시 디버깅 정보 출력
             if (!bestMatch && scored.length > 0) {
               const maxScore = Math.max(...scored.map(s => s.combinedScore))
-              console.log(`🔍 매칭 실패 디버깅: ${bomPart.part_id} - 최고점수: ${maxScore.toFixed(4)}, 임계값: 0.01`)
+              console.log(`🔍 매칭 실패 디버깅: ${bomPart.part_id} - 최고점수: ${maxScore.toFixed(4)}, 임계값: 0.85 (정밀 모드)`)
               if (scored.length <= 3) {
                 console.log('🔍 상세 점수:', scored.map(s => ({
                   hybridScore: s.hybridScore?.toFixed(4),
@@ -889,6 +1317,7 @@ export default {
           // 진행률 업데이트
           progress.value.done += foundMatches.length
         }
+        */
         
         console.log(`🎯 폐쇄 환경 하이브리드 검출 완료: ${matches.length}개 매칭, ${missingSlots.length}개 누락`)
         
@@ -903,6 +1332,251 @@ export default {
         console.error('❌ 폐쇄 환경 하이브리드 검출 실패:', err)
         throw err
       }
+    }
+
+    // BOM 부품 개별 처리 함수 (배치 병렬 처리용) // 🔧 수정됨
+    const processBomPart = async (
+      bomPart,
+      detections,
+      usedDetections,
+      processedParts,
+      vectorCache,
+      bomEmbeddingsMap,
+      availableDetections,
+      throttleLogPart,
+      throttleLogMatch,
+      throttleLogMiss,
+      searchLocalCache,
+      compareLocalVectors,
+      compareRemoteVectors,
+      performTwoStageSearch,
+      calculateDirectSimilarity,
+      calculateBOMMatchScore,
+      supabase
+    ) => {
+      const requiredQuantity = bomPart.quantity || 1
+      const foundMatches = []
+      const partKey = `${bomPart.part_id}/${bomPart.color_id}`
+      const usedIndices = new Set()
+      
+      // 중복 로그 방지
+      if (!processedParts.has(partKey)) {
+        throttleLogPart(partKey)
+        processedParts.add(partKey)
+      }
+      
+      // 정밀 검출 모드: 수량 제한을 더 엄격하게 (최대 2개까지만 시도)
+      const maxAttempts = Math.min(requiredQuantity, Math.min(availableDetections, 2))
+      
+      // 필요한 수량만큼 반복하여 매칭 시도
+      for (let q = 0; q < maxAttempts; q++) {
+        let bestMatch = null
+        let bestScore = 0
+        let bestDetectionIndex = -1
+        let bestSource = null
+        
+        // FAISS Two-Stage 검색 적용
+        const availableCandidates = detections
+          .map((d, i) => ({ d, i }))
+          .filter(c => !usedDetections.has(c.i) && !usedIndices.has(c.i))
+        
+        // 사전 로드된 벡터 사용
+        const bomPartEmbedding = bomEmbeddingsMap.get(partKey)
+        
+        // 후보 스코어를 제한 병렬(6)로 계산
+        const scored = await runWithConcurrencyLimit(availableCandidates, 6, async (cand) => {
+          const i = cand.i
+          const detection = cand.d
+          const cacheKey = `${partKey}/${i}`
+          let hybridScore = 0
+          let source = null
+          
+          if (vectorCache.has(cacheKey)) {
+            const cached = vectorCache.get(cacheKey)
+            hybridScore = cached.score
+            source = cached.source
+          } else {
+            // 검출 객체의 임베딩 벡터 추출
+            let queryEmbedding = detection.features?.clip_embedding || 
+                                 detection.features?.shape_vector || 
+                                 null
+            
+            // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+            if (queryEmbedding && Array.isArray(queryEmbedding)) {
+              queryEmbedding = normalizeVector(queryEmbedding)
+            }
+            
+            // FAISS Two-Stage 검색 시도 (임베딩이 모두 있는 경우)
+            if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+              // 🔧 수정됨: bomPartEmbedding.embedding도 숫자 배열로 변환
+              const normalizedBomEmbedding = normalizeVector(bomPartEmbedding.embedding)
+              if (!normalizedBomEmbedding) {
+                console.warn('BOM 임베딩 변환 실패, 직접 비교로 폴백')
+              } else {
+                bomPartEmbedding.embedding = normalizedBomEmbedding
+              }
+            }
+            
+            if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+              try {
+                const bomCandidates = [{
+                  part_id: bomPart.part_id,
+                  color_id: bomPart.color_id,
+                  embedding: bomPartEmbedding.embedding,
+                  source: bomPartEmbedding.source,
+                  part: bomPart
+                }]
+                
+                const searchResult = await performTwoStageSearch(
+                  queryEmbedding,
+                  bomCandidates,
+                  bomPart.part_id,
+                  {}
+                )
+                
+                if (searchResult.results && searchResult.results.length > 0) {
+                  const bestMatch = searchResult.results[0]
+                  hybridScore = bestMatch.similarity || bestMatch.score || 0
+                  source = bestMatch.source || bomPartEmbedding.source || 'local'
+                } else {
+                  hybridScore = await calculateDirectSimilarity(queryEmbedding, bomPartEmbedding.embedding)
+                  source = bomPartEmbedding.source
+                }
+              } catch (faissError) {
+                console.warn('FAISS Two-Stage 검색 실패, 직접 비교로 폴백:', faissError)
+                if (queryEmbedding && bomPartEmbedding && bomPartEmbedding.embedding) {
+                  hybridScore = await calculateDirectSimilarity(queryEmbedding, bomPartEmbedding.embedding)
+                  source = bomPartEmbedding.source
+                } else {
+                  // 사전 로드 실패 시 폴백: 기존 방식 사용
+                  hybridScore = await compareRemoteVectors(detection, bomPart)
+                  source = 'remote'
+                }
+              }
+            } else {
+              // 임베딩이 없으면 사전 로드된 벡터 또는 기존 방식 사용
+              if (bomPartEmbedding && bomPartEmbedding.embedding) {
+                // 사전 로드된 벡터가 있으면 직접 비교
+                try {
+                  let queryEmbedding = detection.features?.clip_embedding || 
+                                       detection.features?.shape_vector
+                  
+                  // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+                  if (queryEmbedding && Array.isArray(queryEmbedding)) {
+                    queryEmbedding = normalizeVector(queryEmbedding)
+                  }
+                  
+                  // 🔧 수정됨: bomPartEmbedding.embedding도 숫자 배열로 변환
+                  let bomEmbedding = bomPartEmbedding.embedding
+                  if (bomEmbedding && Array.isArray(bomEmbedding)) {
+                    bomEmbedding = normalizeVector(bomEmbedding)
+                  }
+                  
+                  if (queryEmbedding && bomEmbedding) {
+                    hybridScore = await calculateDirectSimilarity(queryEmbedding, bomEmbedding)
+                    source = bomPartEmbedding.source
+                  } else {
+                    hybridScore = await compareRemoteVectors(detection, bomPart)
+                    source = bomPartEmbedding.source || 'remote'
+                  }
+                } catch (err) {
+                  console.warn('직접 비교 실패, 기존 방식으로 폴백:', err)
+                  hybridScore = await compareRemoteVectors(detection, bomPart)
+                  source = 'remote'
+                }
+              } else {
+                // 사전 로드에도 없으면 기존 방식 사용
+                try {
+                  hybridScore = await compareRemoteVectors(detection, bomPart)
+                  source = 'remote'
+                } catch (err) {
+                  console.warn('원격 벡터 비교 실패, fallback 0 사용:', err)
+                  hybridScore = 0
+                  source = 'remote'
+                }
+              }
+            }
+            
+            vectorCache.set(cacheKey, { score: hybridScore, source })
+          }
+          
+          const bomScore = await calculateBOMMatchScore(detection, bomPart)
+          const combinedScore = (hybridScore * 0.6) + (bomScore * 0.4)
+          return { i, detection, combinedScore, source, hybridScore, bomScore }
+        })
+        
+        // 최고 점수 선택 (정밀 검출 모드: 0.85 이상만 허용)
+        for (const s of scored) {
+          if (s && s.combinedScore > bestScore && s.combinedScore > 0.85) {
+            bestScore = s.combinedScore
+            bestMatch = {
+              ...bomPart,
+              detection: s.detection,
+              score: s.combinedScore,
+              source: s.source,
+              hybridScore: s.hybridScore,
+              bomScore: s.bomScore,
+              instanceNumber: q + 1,
+              totalRequired: requiredQuantity
+            }
+            bestDetectionIndex = s.i
+            bestSource = s.source
+          }
+        }
+        
+        // 중복 매칭 방지
+        if (bestMatch && (usedDetections.has(bestDetectionIndex) || usedIndices.has(bestDetectionIndex))) {
+          bestMatch = null
+          bestDetectionIndex = -1
+        }
+        
+        if (bestMatch) {
+          foundMatches.push(bestMatch)
+          usedIndices.add(bestDetectionIndex)
+          throttleLogMatch(partKey)
+        } else {
+          throttleLogMiss(partKey)
+          break
+        }
+      }
+      
+      // 매칭 결과 처리
+      const result = {
+        matches: [],
+        missingSlots: [],
+        usedDetectionIndices: Array.from(usedIndices),
+        foundCount: foundMatches.length
+      }
+      
+      if (foundMatches.length === requiredQuantity) {
+        result.matches = foundMatches
+      } else if (foundMatches.length > 0) {
+        result.matches = foundMatches
+        const missingCount = requiredQuantity - foundMatches.length
+        result.missingSlots = [{
+          part_id: bomPart.part_id,
+          color_id: bomPart.color_id,
+          part_name: bomPart.part_name,
+          color_name: bomPart.color_name,
+          quantity: missingCount,
+          reason: 'partial_match',
+          found: foundMatches.length,
+          required: requiredQuantity
+        }]
+      } else {
+        result.missingSlots = [{
+          part_id: bomPart.part_id,
+          color_id: bomPart.color_id,
+          part_name: bomPart.part_name,
+          color_name: bomPart.color_name,
+          quantity: requiredQuantity,
+          reason: 'not_detected_in_bom',
+          found: 0,
+          required: requiredQuantity
+        }]
+      }
+      
+      return result
     }
 
     // BOM 기반 검출 수행 (기존 함수 유지)
@@ -961,12 +1635,19 @@ export default {
       }
     }
 
-    // BOM 매칭 점수 계산 (관대한 fallback 포함)
+    // BOM 매칭 점수 계산 (엄격한 검증)
     const calculateBOMMatchScore = async (detection, bomPart) => {
       try {
         let score = 0
         
-        // 벡터 유사도: useHybridCache의 비교 로직을 그대로 사용
+        // 1. YOLO 검출 신뢰도 확인 (정밀 검출 모드: 최소 0.85 이상)
+        const yoloConfidence = detection.confidence || 0
+        if (yoloConfidence < 0.85) {
+          console.log(`🔧 BOM 매칭 실패: YOLO 신뢰도 부족 (${yoloConfidence.toFixed(3)} < 0.85, 정밀 모드)`)
+          return 0
+        }
+        
+        // 2. 벡터 유사도: useHybridCache의 비교 로직을 그대로 사용
         const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
         let hybridScore = 0
         if (localResult.found) {
@@ -975,40 +1656,83 @@ export default {
           hybridScore = await compareRemoteVectors(detection, bomPart)
         }
         
-        // 벡터 비교가 실패한 경우 기본 점수 부여
-        if (hybridScore === 0) {
-          // 검출된 객체가 있으면 기본 점수 부여 (0.3)
-          score = 0.3
-          console.log(`🔧 BOM 매칭 fallback: ${bomPart.part_id} - 기본점수 0.3 부여`)
-        } else {
-          score = hybridScore
+        // 3. 벡터 유사도 검증 (정밀 검출 모드: 최소 0.85 이상 필요)
+        if (hybridScore < 0.85) {
+          console.log(`🔧 BOM 매칭 실패: 벡터 유사도 부족 (${hybridScore.toFixed(3)} < 0.85, 정밀 모드)`)
+          return 0
+        }
+        
+        // 4. 최종 점수: YOLO 신뢰도와 벡터 유사도의 가중 평균
+        score = (yoloConfidence * 0.3) + (hybridScore * 0.7)
+        
+        // 5. 최종 점수 검증 (정밀 검출 모드: 최소 0.80 이상 필요)
+        if (score < 0.80) {
+          console.log(`🔧 BOM 매칭 실패: 최종 점수 부족 (${score.toFixed(3)} < 0.80, 정밀 모드)`)
+          return 0
+        }
+        
+        // 6. 추가 검증: YOLO 신뢰도와 벡터 유사도 모두 0.85 이상이어야 함
+        if (yoloConfidence < 0.85 || hybridScore < 0.85) {
+          console.log(`🔧 BOM 매칭 실패: 개별 검증 실패 (YOLO: ${yoloConfidence.toFixed(3)}, 벡터: ${hybridScore.toFixed(3)})`)
+          return 0
         }
         
         // 안전 클램프
-        if (!Number.isFinite(score)) score = 0.3
-        return Math.max(0.1, Math.min(1, score)) // 최소 0.1 보장
+        if (!Number.isFinite(score)) return 0
+        return Math.max(0, Math.min(1, score))
         
       } catch (err) {
         console.error('❌ BOM 매칭 점수 계산 실패:', err)
-        return 0.3 // 에러 시에도 기본 점수 부여
+        return 0 // 에러 시 0 반환 (매칭 안 됨)
       }
+    }
+
+    // 벡터를 숫자 배열로 변환 (문자열 배열 처리) // 🔧 수정됨
+    const normalizeVector = (vec) => {
+      if (!Array.isArray(vec)) return null
+      // 이미 숫자 배열이면 그대로 반환
+      if (vec.length > 0 && typeof vec[0] === 'number') return vec
+      // 문자열 배열이면 숫자로 변환
+      const normalized = vec.map(v => {
+        const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+        return Number.isFinite(num) ? num : 0
+      })
+      return normalized.length > 0 ? normalized : null
     }
 
     // 코사인 유사도 계산
     const calculateCosineSimilarity = (vec1, vec2) => {
       if (!vec1 || !vec2 || vec1.length !== vec2.length) return 0
       
+      // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
+      const normalizedVec1 = normalizeVector(vec1)
+      const normalizedVec2 = normalizeVector(vec2)
+      if (!normalizedVec1 || !normalizedVec2) return 0
+      
       let dotProduct = 0
       let norm1 = 0
       let norm2 = 0
       
-      for (let i = 0; i < vec1.length; i++) {
-        dotProduct += vec1[i] * vec2[i]
-        norm1 += vec1[i] * vec1[i]
-        norm2 += vec2[i] * vec2[i]
+      for (let i = 0; i < normalizedVec1.length; i++) {
+        const v1 = normalizedVec1[i]
+        const v2 = normalizedVec2[i]
+        dotProduct += v1 * v2
+        norm1 += v1 * v1
+        norm2 += v2 * v2
       }
       
-      return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2))
+      const denominator = Math.sqrt(norm1) * Math.sqrt(norm2)
+      if (denominator === 0) return 0
+      
+      return dotProduct / denominator
+    }
+    
+    // 직접 유사도 계산 (FAISS 폴백용) // 🔧 수정됨
+    const calculateDirectSimilarity = async (vec1, vec2) => {
+      if (!vec1 || !vec2 || !Array.isArray(vec1) || !Array.isArray(vec2)) return 0
+      if (vec1.length !== vec2.length) return 0
+      
+      return calculateCosineSimilarity(vec1, vec2)
     }
 
     // 색상 유사도 계산 (Lab 색상 공간)
@@ -1241,7 +1965,7 @@ export default {
         let detectionMethod = 'unknown'
         
         try {
-          detections = await detectPartsWithYOLO(imageData)
+          detections = await detectPartsWithYOLO(imageData, { realtime: false }) // 🔧 수정됨: 하이브리드 검출은 realtime: false (이미지 크롭 필요)
           detectionMethod = 'YOLO'
           console.log('✅ YOLO 검출 성공:', {
             detectionCount: detections.length,
@@ -1271,10 +1995,10 @@ export default {
         
         console.log(`📊 검출 방법: ${detectionMethod}, 검출된 객체: ${detections.length}개`)
         
-        // YOLO 검출 결과 필터링 (신뢰도가 높은 상위 5개만 사용)
+        // YOLO 검출 결과 필터링 (신뢰도가 높은 상위 5개만 사용, 정밀 검출 모드)
         if (detectionMethod === 'YOLO' && detections.length > 5) {
           const filteredDetections = detections
-            .filter(d => d.confidence > 0.8) // 신뢰도 0.8 이상만
+            .filter(d => d.confidence > 0.85) // 정밀 검출: 신뢰도 0.85 이상만
             .slice(0, 5) // 최대 5개만
             .map(d => ({
               ...d,
@@ -1284,20 +2008,30 @@ export default {
               height: d.boundingBox.height * srcH
             }))
           
-          console.log(`🔍 YOLO 필터링: ${detections.length}개 → ${filteredDetections.length}개 (신뢰도 > 0.8)`)
+          console.log(`🔍 YOLO 필터링: ${detections.length}개 → ${filteredDetections.length}개 (신뢰도 > 0.85, 정밀 모드)`)
           detections = filteredDetections
         }
         
-        // 검출 결과가 없으면 전체 이미지를 하나의 객체로 처리
+        // 검출 결과가 없으면 매칭 단계 건너뜀 (False Positive 방지)
         if (detections.length === 0) {
-          console.log('⚠️ 검출 결과 없음, 전체 이미지를 객체로 처리')
-          detections = [{
-            id: crypto.randomUUID(),
-            boundingBox: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
-            confidence: 0.5,
-            image: imageData,
-            timestamp: new Date().toISOString()
-          }]
+          console.log('⚠️ 검출 결과 없음, 매칭 단계 건너뜀')
+          const closedWorldMetadata = applyClosedWorldFilters(setMetadata.value.partsMetadata)
+          const missingSlots = closedWorldMetadata.map(part => ({
+            part_id: part.part_id,
+            color_id: part.color_id,
+            part_name: part.part_name,
+            color_name: part.color_name,
+            quantity: part.quantity || 1,
+            reason: 'no_detections',
+            found: 0,
+            required: part.quantity || 1
+          }))
+          return {
+            matches: [],
+            missingSlots,
+            detectionMethod,
+            totalDetections: 0
+          }
         }
         
         // AI 메타데이터를 활용한 검출 결과 향상 (최적화: 상위 5개만 처리)
@@ -1324,17 +2058,23 @@ export default {
               hasFeatures: !!aiMetadata?.feature_json
             })
             
+            // 🔧 수정됨: clip_text_emb를 숫자 배열로 변환하여 features에 저장
+            let clipEmbedding = null
+            if (aiMetadata?.clip_text_emb) {
+              clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
+            }
+            
             return {
               ...detection,
-              // 목업 제거: 메타데이터가 없으면 features는 비워 두고 점수는 0 처리
+              // 🔧 수정됨: 변환된 clip_embedding 사용
               features: aiMetadata ? {
-                shape_vector: aiMetadata.clip_text_emb || null,
+                shape_vector: clipEmbedding || null, // semantic_vector 대신 clip_text_emb 사용 (일단)
                 color_lab: aiMetadata.feature_json?.color || null,
                 size_stud: aiMetadata.feature_json?.size || null,
-                clip_embedding: aiMetadata.clip_text_emb || null
+                clip_embedding: clipEmbedding // 🔧 수정됨: 숫자 배열로 변환된 값 사용
               } : null,
               ai_metadata: aiMetadata,
-              confidence_boost: aiMetadata?.detection_priority || 1.0
+              confidence_boost: aiMetadata?.detection_priority || aiMetadata?.similarity || 1.0
             }
           } catch (err) {
             console.warn(`🤖 검출 ${index + 1} AI 메타데이터 조회 실패:`, err.message)
@@ -1699,8 +2439,17 @@ export default {
       console.log(`🎨 바운딩 박스 캔버스: ${bboxCanvas.value ? '준비됨' : '없음'}`)
       
       // 실시간 검출 루프 (10fps로 낮춤 - 안정성 향상)
+      let isDetecting = false // 검출 진행 중 플래그
       realtimeInterval = setInterval(async () => {
         if (!realtimeActive.value || !cameraVideo.value) return
+        
+        // 이미 검출 중이면 스킵 (중복 실행 방지)
+        if (isDetecting) {
+          console.log('⏳ 검출 진행 중, 이번 프레임 스킵')
+          return
+        }
+        
+        isDetecting = true // 검출 시작
         
         try {
           // 프레임 캡처
@@ -1722,57 +2471,168 @@ export default {
           
           const imageData = canvas.toDataURL('image/webp', 0.8)
           
-          // 간단한 객체 검출 (YOLO 대신 휴리스틱 방식)
-          const detections = await detectObjectsSimple(imageData, srcW, srcH)
+          // YOLO 검출 사용 (실시간 검출에도 YOLO 적용)
+          let detections = []
+          try {
+            const { useOptimizedRealtimeDetection } = await import('../composables/useOptimizedRealtimeDetection')
+            const { detectPartsWithYOLO } = useOptimizedRealtimeDetection()
+            console.log('🔍 실시간 YOLO 검출 시작...')
+            detections = await detectPartsWithYOLO(imageData)
+            console.log(`✅ 실시간 YOLO 검출 완료: ${detections.length}개 객체`)
+          } catch (yoloError) {
+            console.warn('⚠️ 실시간 YOLO 검출 실패, 휴리스틱 검출로 전환:', yoloError)
+            // YOLO 실패 시 휴리스틱 검출로 폴백
+            detections = await detectObjectsSimple(imageData, srcW, srcH)
+          }
           
-          console.log(`🔍 실시간 검출된 객체: ${detections.length}개`)
-          if (detections.length > 0) {
+          // YOLO 검출 결과를 바운딩박스 형식으로 변환
+          const normalizedDetections = detections.map(detection => {
+            // YOLO 검출 결과: boundingBox 형식 { x, y, width, height } (정규화된 좌표 0-1)
+            const bbox = detection.boundingBox || detection.box || detection.bbox
+            let x, y, width, height
+            
+            if (bbox && typeof bbox.x === 'number') {
+              // YOLO 형식: 정규화된 좌표를 픽셀 좌표로 변환
+              x = bbox.x * srcW
+              y = bbox.y * srcH
+              width = bbox.width * srcW
+              height = bbox.height * srcH
+            } else if (detection.x !== undefined) {
+              // 휴리스틱 검출 형식: 이미 픽셀 좌표
+              x = detection.x
+              y = detection.y
+              width = detection.width
+              height = detection.height
+            } else {
+              // 폴백
+              x = srcW * 0.1
+              y = srcH * 0.1
+              width = srcW * 0.3
+              height = srcH * 0.3
+            }
+            
+            return {
+              ...detection,
+              id: detection.id || crypto.randomUUID(),
+              x,
+              y,
+              width,
+              height,
+              confidence: detection.confidence || 0.5,
+              boundingBox: { x: bbox?.x || x / srcW, y: bbox?.y || y / srcH, width: bbox?.width || width / srcW, height: bbox?.height || height / srcH }
+            }
+          })
+          
+          console.log(`🔍 실시간 검출된 객체: ${normalizedDetections.length}개`)
+          
+          // 레고 부품 필터링: 신뢰도 임계값 적용 (높은 신뢰도만 표시)
+          const LEGO_CONFIDENCE_THRESHOLD = 0.7 // 레고 부품 필터링 임계값
+          const filteredDetections = normalizedDetections.filter(detection => {
+            return detection.confidence >= LEGO_CONFIDENCE_THRESHOLD
+          })
+          
+          console.log(`🔍 레고 부품 필터링: ${normalizedDetections.length}개 → ${filteredDetections.length}개 (신뢰도 >= ${LEGO_CONFIDENCE_THRESHOLD})`)
+          
+          if (filteredDetections.length > 0) {
             console.log('✅ 레고 부품 검출 성공!')
-            console.log('🔍 실시간 검출 결과:', detections.map(d => ({
-              id: d.id,
-              x: d.x,
-              y: d.y,
-              width: d.width,
-              height: d.height,
-              confidence: d.confidence,
-              legoScore: d.legoCharacteristics?.legoScore || 'N/A'
-            })))
+            if (filteredDetections.length <= 10) {
+              console.log('🔍 실시간 검출 결과:', filteredDetections.map(d => ({
+                id: d.id,
+                x: d.x.toFixed(1),
+                y: d.y.toFixed(1),
+                width: d.width.toFixed(1),
+                height: d.height.toFixed(1),
+                confidence: d.confidence.toFixed(3)
+              })))
+            } else {
+              console.log('🔍 실시간 검출 결과 샘플 (처음 5개):', filteredDetections.slice(0, 5).map(d => ({
+                confidence: d.confidence.toFixed(3),
+                size: `${d.width.toFixed(1)}x${d.height.toFixed(1)}`
+              })))
+            }
           } else {
             console.log('❌ 실시간 검출 결과 없음 - 레고 부품이 감지되지 않았습니다')
             console.log('💡 해결 방법:')
             console.log('   1. 레고 부품을 카메라에 더 가까이 가져가세요')
             console.log('   2. 조명을 더 밝게 해주세요')
             console.log('   3. 레고 부품이 화면 중앙에 오도록 조정하세요')
+            console.log(`   4. 현재 필터 임계값: ${LEGO_CONFIDENCE_THRESHOLD} (낮추면 더 많은 객체 표시)`)
           }
           
-          // 렌더링된 JSON 파일의 polygon_uv 활용
-          let enhancedDetections = detections
+          // 실시간 검출 AI 메타데이터 매칭 강화: BOM 부품과 벡터 유사도 비교 // 🔧 수정됨
+          let enhancedDetections = []
           
           try {
-            // AI 메타데이터와 매칭하여 실제 렌더링된 polygon_uv 사용
-            enhancedDetections = await enhanceDetectionWithRenderedPolygonUV(detections)
-            console.log(`🎨 렌더링 JSON 활용: ${enhancedDetections.length}개`)
-          } catch (err) {
-            console.warn('렌더링 JSON 활용 실패, 기본 윤곽선 사용:', err)
+            const bomList = setMetadata.value?.partsMetadata || []
+            console.log(`🤖 실시간 AI 메타데이터 매칭 시작: ${filteredDetections.length}개 검출, ${bomList.length}개 BOM 부품`)
             
-            // 폴백: 기본 사각형 윤곽선 생성
-            enhancedDetections = detections.map(detection => {
-              const centerX = detection.x + detection.width / 2
-              const centerY = detection.y + detection.height / 2
-              const halfW = detection.width / 2
-              const halfH = detection.height / 2
-              
-              const polygon_uv = [
-                [centerX - halfW, centerY - halfH],
-                [centerX + halfW, centerY - halfH],
-                [centerX + halfW, centerY + halfH],
-                [centerX - halfW, centerY + halfH]
-              ]
-              
-              return { ...detection, polygon_uv: polygon_uv }
-            })
+            // 각 검출 결과에 대해 BOM 부품과 벡터 유사도 비교
+            for (const detection of filteredDetections.slice(0, 10)) { // 상위 10개만 처리 (성능)
+              try {
+                const aiMetadata = await getAIMetadataForDetection(detection, bomList)
+                
+                if (aiMetadata && aiMetadata.part_id) {
+                  // BOM 부품과 매칭된 경우만 추가
+                  const matchedBOM = bomList.find(p => String(p.part_id) === String(aiMetadata.part_id))
+                  if (matchedBOM) {
+                    console.log(`✅ 실시간 매칭 성공: 검출 confidence=${detection.confidence.toFixed(3)}, part_id=${aiMetadata.part_id}, similarity=${aiMetadata.confidence?.toFixed(3) || 'N/A'}`)
+                    enhancedDetections.push({
+                      ...detection,
+                      ai_metadata: aiMetadata,
+                      polygon_uv: detection.polygon_uv || (() => {
+                        const centerX = detection.x / srcW
+                        const centerY = detection.y / srcH
+                        const halfW = detection.width / srcW / 2
+                        const halfH = detection.height / srcH / 2
+                        return [
+                          [centerX - halfW, centerY - halfH],
+                          [centerX + halfW, centerY - halfH],
+                          [centerX + halfW, centerY + halfH],
+                          [centerX - halfW, centerY + halfH]
+                        ]
+                      })()
+                    })
+                  }
+                }
+              } catch (err) {
+                console.warn(`⚠️ 실시간 AI 메타데이터 매칭 실패 (검출 1개):`, err.message)
+              }
+            }
+            
+            console.log(`🤖 실시간 AI 메타데이터 매칭 완료: ${enhancedDetections.length}개 매칭 성공`)
+          } catch (err) {
+            console.warn('⚠️ 실시간 AI 메타데이터 매칭 전체 실패:', err)
+            enhancedDetections = []
           }
           
+          // 폴백: AI 메타데이터 매칭 실패 시, 고신뢰도 상위 K개만 표시 (BOM 매칭 없이) // 🔧 수정됨
+          if (enhancedDetections.length === 0 && filteredDetections.length > 0) {
+            const FALLBACK_CONF_THRESHOLD = 0.95 // 더 엄격하게
+            const bomList = setMetadata.value?.partsMetadata || []
+            const K = Math.max(1, Math.min(3, bomList.length || 1))
+            const before = filteredDetections.length
+            enhancedDetections = filteredDetections
+              .filter(d => d.confidence >= FALLBACK_CONF_THRESHOLD)
+              .sort((a, b) => b.confidence - a.confidence)
+              .slice(0, K)
+              .map(detection => ({
+                ...detection,
+                polygon_uv: detection.polygon_uv || (() => {
+                  const centerX = detection.x / srcW
+                  const centerY = detection.y / srcH
+                  const halfW = detection.width / srcW / 2
+                  const halfH = detection.height / srcH / 2
+                  return [
+                    [centerX - halfW, centerY - halfH],
+                    [centerX + halfW, centerY - halfH],
+                    [centerX + halfW, centerY + halfH],
+                    [centerX - halfW, centerY + halfH]
+                  ]
+                })()
+              }))
+            console.log(`⚠️ AI 매칭 결과 0개 → 폴백 적용: ${before} → ${enhancedDetections.length}개 (conf>=${FALLBACK_CONF_THRESHOLD}, top-${K}, BOM 매칭 없음)`)
+          }
+
           realtimeDetections.value = enhancedDetections
           
           // 바운딩 박스 그리기
@@ -1790,6 +2650,8 @@ export default {
         } catch (err) {
           console.warn('실시간 검출 오류:', err)
           // 에러가 발생해도 실시간 검출을 계속 진행
+        } finally {
+          isDetecting = false // 검출 완료
         }
       }, 100) // 10fps로 낮춤
     }
@@ -2784,6 +3646,7 @@ export default {
             part_name,
             feature_json,
             clip_text_emb,
+            semantic_vector,
             recognition_hints,
             confidence,
             usage_frequency
@@ -2799,14 +3662,89 @@ export default {
         
         console.log(`🤖 AI 메타데이터 조회 결과: ${data?.length || 0}개`)
         
-        // 검출된 객체와 가장 유사한 부품 찾기 (간단한 휴리스틱)
+        // 검출된 객체와 가장 유사한 부품 찾기 (벡터 비교 기반)
         if (data && data.length > 0) {
-          const bestMatch = data[0] // 우선순위가 높은 부품
-          console.log(`🤖 선택된 AI 메타데이터: ${bestMatch.part_id} (confidence: ${bestMatch.confidence})`)
+          // 검출 객체에 features가 없으면 폴백 모드로 전환
+          if (!detection.features || !detection.features.clip_embedding) {
+            console.log(`🤖 검출 객체에 features 없음 - YOLO confidence 기반 폴백 매칭 시도`)
+            
+            // 폴백: BOM 부품이 1개이고 YOLO confidence가 높으면 매칭
+            if (data.length === 1 && detection.confidence >= 0.85) {
+              const candidate = data[0]
+              console.log(`🤖 폴백 매칭 성공: ${candidate.part_id} (YOLO confidence: ${detection.confidence.toFixed(3)})`)
+              
+              // 🔧 수정됨: 폴백 매칭에서도 features 설정 (벡터 비교를 위해)
+              let clipEmbedding = null
+              if (candidate.clip_text_emb) {
+                clipEmbedding = normalizeVector(candidate.clip_text_emb)
+              }
+              
+              return {
+                ...candidate,
+                color_characteristics: candidate.feature_json?.color || null,
+                size_characteristics: candidate.feature_json?.size || null,
+                similarity: 0.8, // 폴백 매칭은 중간 유사도 부여
+                confidence: detection.confidence,
+                clip_text_emb: candidate.clip_text_emb || null, // 🔧 수정됨: 폴백 매칭에도 clip_text_emb 포함
+                // 🔧 수정됨: 폴백 매칭 결과에도 features 포함 (벡터 비교를 위해)
+                features: clipEmbedding ? {
+                  shape_vector: clipEmbedding,
+                  clip_embedding: clipEmbedding,
+                  color_lab: candidate.feature_json?.color || null,
+                  size_stud: candidate.feature_json?.size || null
+                } : null
+              }
+            }
+            
+            console.log(`🤖 폴백 매칭 실패: BOM 부품 ${data.length}개, YOLO confidence ${detection.confidence?.toFixed(3) || 'N/A'}`)
+            return null
+          }
+          
+          const queryEmbedding = detection.features.clip_embedding
+          let bestMatch = null
+          let bestSimilarity = 0
+          
+          // 🔧 수정됨: queryEmbedding도 숫자 배열로 변환
+          const normalizedQueryEmbedding = normalizeVector(queryEmbedding)
+          if (!normalizedQueryEmbedding) {
+            console.log(`🤖 검출 객체의 clip_embedding 변환 실패`)
+            return null
+          }
+          
+          // 각 BOM 부품과 벡터 유사도 계산
+          for (const candidate of data) {
+            const candidateEmbedding = candidate.clip_text_emb
+            if (!candidateEmbedding) continue
+            
+            // 🔧 수정됨: candidateEmbedding도 숫자 배열로 변환
+            const normalizedCandidateEmbedding = normalizeVector(candidateEmbedding)
+            if (!normalizedCandidateEmbedding) {
+              console.log(`🤖 후보 ${candidate.part_id}의 clip_text_emb 변환 실패`)
+              continue
+            }
+            
+            // 코사인 유사도 계산
+            const similarity = calculateCosineSimilarity(normalizedQueryEmbedding, normalizedCandidateEmbedding)
+            
+            if (similarity > bestSimilarity) {
+              bestSimilarity = similarity
+              bestMatch = candidate
+            }
+          }
+          
+          // 정밀 검출 모드: 유사도 임계값 (디버깅용 완화 옵션)
+          const SIMILARITY_THRESHOLD = 0.75 // 🔧 수정됨: 0.85 → 0.75 (임계값 완화)
+          if (!bestMatch || bestSimilarity < SIMILARITY_THRESHOLD) {
+            console.log(`🤖 AI 메타데이터 매칭 실패: 최고 유사도 ${bestSimilarity.toFixed(3)} < ${SIMILARITY_THRESHOLD} (정밀 모드)`)
+            return null
+          }
+          
+          console.log(`🤖 선택된 AI 메타데이터: ${bestMatch.part_id} (유사도: ${bestSimilarity.toFixed(3)})`)
           return {
             ...bestMatch,
             color_characteristics: bestMatch.feature_json?.color || null,
-            size_characteristics: bestMatch.feature_json?.size || null
+            size_characteristics: bestMatch.feature_json?.size || null,
+            similarity: bestSimilarity
           }
         }
         
@@ -3016,10 +3954,11 @@ export default {
       const videoWidth = video.videoWidth || 1280
       const videoHeight = video.videoHeight || 720
       
+      // 내부 픽셀 버퍼는 원본 비디오 해상도, 화면 크기는 컨테이너(비디오) 100%에 맞춤 // 🔧 수정됨
       canvas.width = videoWidth
       canvas.height = videoHeight
-      canvas.style.width = videoWidth + 'px'
-      canvas.style.height = videoHeight + 'px'
+      canvas.style.width = '100%'
+      canvas.style.height = '100%'
       
       // 캔버스 초기화
       ctx.clearRect(0, 0, canvas.width, canvas.height)
@@ -3027,15 +3966,49 @@ export default {
       console.log(`🎨 polygon_uv 윤곽선 그리기: ${realtimeDetections.value.length}개 객체`)
       
       // polygon_uv 윤곽선 그리기
+      let drawnCount = 0
       realtimeDetections.value.forEach((detection, index) => {
-        const { x, y, width, height, confidence, ai_metadata, polygon_uv } = detection
+        // 바운딩박스 좌표 추출 (다양한 형식 지원)
+        let x, y, width, height
+        const bbox = detection.boundingBox || detection.box
         
-        console.log(`🎨 객체 ${index + 1}:`, { x, y, width, height, confidence, polygon_uv: polygon_uv?.length || 0 })
+        if (bbox && typeof bbox.x === 'number') {
+          // 정규화된 좌표(0-1)를 픽셀 좌표로 변환
+          x = bbox.x * videoWidth
+          y = bbox.y * videoHeight
+          width = bbox.width * videoWidth
+          height = bbox.height * videoHeight
+        } else if (detection.x !== undefined) {
+          // 이미 픽셀 좌표
+          x = detection.x
+          y = detection.y
+          width = detection.width
+          height = detection.height
+        } else {
+          console.warn(`❌ 바운딩박스 좌표를 찾을 수 없음 (객체 ${index + 1}):`, detection)
+          return
+        }
+        
+        const { confidence, ai_metadata, polygon_uv } = detection
         
         // 좌표가 유효한지 확인
         if (isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height)) {
-          console.warn('❌ 유효하지 않은 좌표:', detection)
+          console.warn(`❌ 유효하지 않은 좌표 (객체 ${index + 1}):`, { x, y, width, height })
           return
+        }
+        
+        // 좌표 범위 확인 (화면 밖 체크)
+        if (x < 0 || y < 0 || x + width > videoWidth || y + height > videoHeight) {
+          console.warn(`⚠️ 좌표 범위 초과 (객체 ${index + 1}):`, { x, y, width, height, videoWidth, videoHeight })
+          // 좌표를 화면 내로 제한
+          x = Math.max(0, Math.min(x, videoWidth - 1))
+          y = Math.max(0, Math.min(y, videoHeight - 1))
+          width = Math.max(1, Math.min(width, videoWidth - x))
+          height = Math.max(1, Math.min(height, videoHeight - y))
+        }
+        
+        if (index < 3) { // 처음 3개만 상세 로그
+          console.log(`🎨 객체 ${index + 1}:`, { x: x.toFixed(1), y: y.toFixed(1), width: width.toFixed(1), height: height.toFixed(1), confidence: confidence?.toFixed(3), polygon_uv: polygon_uv?.length || 0 })
         }
         
         // AI 메타데이터가 있으면 색상 변경
@@ -3045,7 +4018,9 @@ export default {
         
         // polygon_uv 윤곽선 그리기
         if (polygon_uv && polygon_uv.length >= 3) {
-          console.log(`🎨 윤곽선 그리기: ${polygon_uv.length}개 점 ${isRenderedPolygon ? '(렌더링)' : '(실시간)'}`)
+          if (index < 3) { // 처음 3개만 상세 로그
+            console.log(`🎨 윤곽선 그리기 (객체 ${index + 1}): ${polygon_uv.length}개 점 ${isRenderedPolygon ? '(렌더링)' : '(실시간)'}`)
+          }
           
           // 렌더링된 polygon_uv는 파란색, 실시간은 노란색
           let strokeColor, fillColor
@@ -3096,7 +4071,9 @@ export default {
           ctx.arc(centerX, centerY, 4, 0, 2 * Math.PI)
           ctx.fill()
         } else {
-          console.log(`🎨 기본 바운딩 박스 그리기 (polygon_uv 없음)`)
+          if (index < 3) { // 처음 3개만 상세 로그
+            console.log(`🎨 기본 바운딩 박스 그리기 (객체 ${index + 1}, polygon_uv 없음):`, { x: x.toFixed(1), y: y.toFixed(1), width: width.toFixed(1), height: height.toFixed(1) })
+          }
           // polygon_uv가 없으면 기본 바운딩 박스 그리기
           ctx.strokeStyle = `rgba(${hasAIMetadata ? '0, 255, 0' : '255, 255, 0'}, ${alpha})`
           ctx.lineWidth = hasAIMetadata ? 3 : 2
@@ -3116,6 +4093,8 @@ export default {
           ctx.closePath()
           ctx.stroke()
         }
+        
+        drawnCount++
         
         // 라벨 배경
         const legoInfo = detection.legoCharacteristics
@@ -3138,6 +4117,8 @@ export default {
         ctx.fillStyle = 'white'
         ctx.fillText(labelText, x + 4, y - 6)
       })
+      
+      console.log(`✅ 바운딩박스 렌더링 완료: ${drawnCount}/${realtimeDetections.value.length}개 객체 그려짐`)
     }
 
     // 생명주기
@@ -3172,6 +4153,7 @@ export default {
     return {
       loading,
       error,
+      searchType,
       setNumber,
       detectionMode,
       cameraActive,

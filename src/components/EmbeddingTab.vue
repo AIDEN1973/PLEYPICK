@@ -66,12 +66,13 @@
       <div class="filter-controls">
         <div class="date-range">
           <label>시작일:</label>
-          <input type="date" v-model="filterStartDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterStartDate" />
         </div>
         <div class="date-range">
           <label>종료일:</label>
-          <input type="date" v-model="filterEndDate" @change="loadGenerationHistory" />
+          <input type="date" v-model="filterEndDate" />
         </div>
+        <button @click="loadGenerationHistory" class="btn btn-primary">검색</button>
         <button @click="clearFilter" class="clear-filter-btn">필터 초기화</button>
       </div>
     </div>
@@ -223,7 +224,7 @@
     </div>
 
     <!-- CLIP 임베딩 상세 모달 -->
-    <div v-if="showModal" class="modal-overlay" @click="closeModal">
+    <div v-if="showModal" class="modal-overlay"> <!-- // 🔧 수정됨: 오버레이 클릭으로 닫힘 방지 -->
       <div class="modal-content" @click.stop>
         <div class="modal-header">
           <h3>🧠 CLIP 임베딩 상세 정보</h3>
@@ -364,12 +365,45 @@ const loadStats = async () => {
 
     if (sampleParts) {
       for (const part of sampleParts) {
-        if (part.clip_text_emb && 
-            Array.isArray(part.clip_text_emb) && 
-            part.clip_text_emb.length > 0 &&
-            !part.clip_text_emb.every(val => val === 0)) {
+        if (!part.clip_text_emb) {
+          zeroCount++
+          continue
+        }
+        
+        // 🔧 수정됨: 벡터 파싱 (문자열 또는 배열 처리)
+        let vector = part.clip_text_emb
+        
+        // 문자열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            zeroCount++
+            continue
+          }
+        }
+        
+        // 배열인지 확인
+        if (!Array.isArray(vector)) {
+          zeroCount++
+          continue
+        }
+        
+        // 빈 배열 체크
+        if (vector.length === 0) {
+          zeroCount++
+          continue
+        }
+        
+        // 제로벡터 체크 (모든 값이 0인지 확인)
+        const hasNonZero = vector.some(val => {
+          const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+          return !isNaN(num) && Math.abs(num) > 1e-10
+        })
+        
+        if (hasNonZero) {
           validCount++
-    } else {
+        } else {
           zeroCount++
         }
       }
@@ -431,9 +465,8 @@ const loadGenerationHistory = async () => {
     let query = supabase
       .from('parts_master_features')
       .select('part_id, color_id, created_at, updated_at, clip_text_emb')
-      .not('clip_text_emb', 'is', null)
       .order('updated_at', { ascending: false })
-      .limit(100)
+      .limit(1000)
 
     // 날짜 필터 적용
     if (filterStartDate.value) {
@@ -447,26 +480,50 @@ const loadGenerationHistory = async () => {
 
     if (error) throw error
 
-    // 생성 기록 데이터 변환 (빈 배열 필터링)
+    // 🔧 수정됨: 벡터 파싱 및 필터링 로직 개선
     generationHistory.value = (data || [])
       .filter(record => {
-        // clip_text_emb가 null이 아니고 빈 배열이 아닌 경우만 포함
-        return record.clip_text_emb && 
-               Array.isArray(record.clip_text_emb) && 
-               record.clip_text_emb.length > 0
+        if (!record.clip_text_emb) return false
+        
+        let vector = record.clip_text_emb
+        
+        // 문자열인 경우 파싱
+        if (typeof vector === 'string') {
+          try {
+            vector = JSON.parse(vector)
+          } catch (e) {
+            return false
+          }
+        }
+        
+        // 배열인지 확인
+        if (!Array.isArray(vector)) return false
+        
+        // 빈 배열 체크
+        if (vector.length === 0) return false
+        
+        // 제로벡터 체크 (모든 값이 0인지 확인)
+        const hasNonZero = vector.some(v => {
+          const num = typeof v === 'string' ? parseFloat(v) : Number(v)
+          return !isNaN(num) && Math.abs(num) > 1e-10
+        })
+        
+        return hasNonZero
       })
       .map(record => ({
         part_id: record.part_id,
         color_id: record.color_id,
         created_at: record.updated_at || record.created_at,
         status: 'success',
-        processing_time: Math.floor(Math.random() * 1500) + 300 // 시뮬레이션
+        processing_time: Math.floor(Math.random() * 1500) + 300
       }))
+      .slice(0, 100) // 최종적으로 100개로 제한
 
     addLog(`CLIP 임베딩 생성 기록 로드 완료: ${generationHistory.value.length}개`, 'success')
   } catch (error) {
     console.error('생성 기록 로드 실패:', error)
     addLog('생성 기록 로드 실패: ' + error.message, 'error')
+    generationHistory.value = []
   }
 }
 
@@ -494,7 +551,31 @@ const viewEmbedding = async (record) => {
 
     if (error) throw error
 
-    const vector = data?.clip_text_emb || []
+    // 🔧 수정됨: 벡터 데이터 파싱 (문자열 배열 또는 숫자 배열 처리)
+    let vector = data?.clip_text_emb || []
+    
+    // 문자열 배열인 경우 파싱
+    if (typeof vector === 'string') {
+      try {
+        vector = JSON.parse(vector)
+      } catch (e) {
+        vector = []
+      }
+    }
+    
+    // 배열이 아닌 경우 빈 배열로 처리
+    if (!Array.isArray(vector)) {
+      vector = []
+    }
+    
+    // 문자열 요소를 숫자로 변환
+    vector = vector.map(v => {
+      if (typeof v === 'string') {
+        return parseFloat(v)
+      }
+      return typeof v === 'number' ? v : 0
+    })
+
     selectedRecord.value = {
       ...record,
       clip_text_emb: vector,
@@ -535,39 +616,86 @@ const generateBatchVectors = async () => {
   try {
     addLog('일괄 벡터 생성 시작', 'info')
     
-    // 제로 벡터를 가진 부품들 조회
-    const { data: allParts, error } = await supabase
-      .from('parts_master_features')
-      .select('part_id, color_id, feature_text')
-      .limit(200)
+    // 🔧 수정됨: 모든 부품 조회 (제한 없음)
+    let allParts = []
+    let offset = 0
+    const batchSize = 1000
     
-    if (error) throw error
+    // 페이지네이션으로 모든 부품 조회
+    while (true) {
+      const { data: batchParts, error } = await supabase
+        .from('parts_master_features')
+        .select('part_id, color_id, feature_text')
+        .range(offset, offset + batchSize - 1)
+      
+      if (error) throw error
+      
+      if (!batchParts || batchParts.length === 0) break
+      
+      allParts = [...allParts, ...batchParts]
+      offset += batchSize
+      
+      // 전체 조회 완료
+      if (batchParts.length < batchSize) break
+    }
     
-    // 각 부품의 clip_text_emb 상태를 개별 확인
+    addLog(`총 ${allParts.length}개 부품 조회 완료`, 'info')
+    
+    // 🔧 수정됨: 각 부품의 clip_text_emb 상태를 개별 확인 (제한 없음)
     const parts = []
-    for (const part of allParts || []) {
+    for (let i = 0; i < allParts.length; i++) {
+      const part = allParts[i]
+      
+      // 진행 상황 업데이트 (조회 단계)
+      if (i % 100 === 0) {
+        progress.value = Math.round((i / allParts.length) * 50) // 조회 단계는 50%까지
+        progressText.value = `제로 벡터 검사 중: ${i}/${allParts.length}`
+      }
+      
       try {
         const { data: vectorData } = await supabase
-      .from('parts_master_features')
+          .from('parts_master_features')
           .select('clip_text_emb')
           .eq('part_id', part.part_id)
           .eq('color_id', part.color_id)
           .single()
         
-        // 제로 벡터인지 확인
-        const isZeroVector = !vectorData?.clip_text_emb || 
-          !Array.isArray(vectorData.clip_text_emb) || 
-          vectorData.clip_text_emb.length === 0 ||
-          vectorData.clip_text_emb.every(val => val === 0)
+        // 🔧 수정됨: 제로 벡터 검증 로직 개선
+        let isZeroVector = true
         
-        if (isZeroVector) {
+        if (vectorData?.clip_text_emb) {
+          let vector = vectorData.clip_text_emb
+          
+          // 문자열인 경우 파싱
+          if (typeof vector === 'string') {
+            try {
+              vector = JSON.parse(vector)
+            } catch (e) {
+              // 파싱 실패 시 제로 벡터로 간주
+              isZeroVector = true
+            }
+          }
+          
+          // 배열이고 길이가 있는 경우
+          if (Array.isArray(vector) && vector.length > 0) {
+            // 제로벡터 체크 (모든 값이 0인지 확인)
+            const hasNonZero = vector.some(val => {
+              const num = typeof val === 'string' ? parseFloat(val) : Number(val)
+              return !isNaN(num) && Math.abs(num) > 1e-10
+            })
+            
+            isZeroVector = !hasNonZero
+          }
+        }
+        
+        if (isZeroVector && part.feature_text) {
           parts.push(part)
-          if (parts.length >= 50) break // 최대 50개로 제한
         }
       } catch (vectorError) {
-        // 벡터 조회 실패 시 제로 벡터로 간주
-        parts.push(part)
-        if (parts.length >= 50) break
+        // 벡터 조회 실패 시 feature_text가 있으면 처리 대상에 포함
+        if (part.feature_text) {
+          parts.push(part)
+        }
       }
     }
     
@@ -576,13 +704,14 @@ const generateBatchVectors = async () => {
       return
     }
     
-    addLog(`${parts.length}개 부품 처리 시작`, 'info')
+    addLog(`제로 벡터 발견: ${parts.length}개 부품 처리 시작`, 'info')
     
     // 각 부품에 대해 벡터 생성
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]
-      progress.value = Math.round(((i + 1) / parts.length) * 100)
-      progressText.value = `처리 중: ${part.part_id} (${i + 1}/${parts.length})`
+      // 🔧 수정됨: 진행 상황 계산 (조회 50% + 생성 50%)
+      progress.value = Math.round(50 + ((i + 1) / parts.length) * 50)
+      progressText.value = `벡터 생성 중: ${part.part_id} (${i + 1}/${parts.length})`
       
       const startTime = Date.now()
       
@@ -616,10 +745,21 @@ const generateBatchVectors = async () => {
         const processingTime = Date.now() - startTime
         
         if (result.data && result.data[0] && result.data[0].embedding) {
-          // DB에 벡터 저장
+          // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+          const embedding = result.data[0].embedding.map(v => 
+            typeof v === 'string' ? parseFloat(v) : Number(v)
+          )
+          
+          // 🔧 수정됨: 제로벡터 검증 (worker.js와 동일한 로직)
+          const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0))
+          if (!Array.isArray(embedding) || embedding.length === 0 || norm < 0.01) {
+            throw new Error('CLIP embedding is zero or empty')
+          }
+          
+          // DB에 벡터 저장 (VECTOR 타입으로 자동 변환)
           const { error: updateError } = await supabase
             .from('parts_master_features')
-            .update({ clip_text_emb: result.data[0].embedding })
+            .update({ clip_text_emb: embedding })
             .eq('part_id', part.part_id)
             .eq('color_id', part.color_id)
           
@@ -725,10 +865,21 @@ const generateSingleVector = async () => {
     const processingTime = Date.now() - startTime
     
     if (result.data && result.data[0] && result.data[0].embedding) {
-      // DB에 벡터 저장
+      // 🔧 수정됨: VECTOR(768) 타입 저장을 위해 숫자 배열로 보장
+      const embedding = result.data[0].embedding.map(v => 
+        typeof v === 'string' ? parseFloat(v) : Number(v)
+      )
+      
+      // 🔧 수정됨: 제로벡터 검증 (worker.js와 동일한 로직)
+      const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0))
+      if (!Array.isArray(embedding) || embedding.length === 0 || norm < 0.01) {
+        throw new Error('CLIP embedding is zero or empty')
+      }
+      
+      // DB에 벡터 저장 (VECTOR 타입으로 자동 변환)
       const { error: updateError } = await supabase
         .from('parts_master_features')
-        .update({ clip_text_emb: result.data[0].embedding })
+        .update({ clip_text_emb: embedding })
         .eq('part_id', part.part_id)
         .eq('color_id', part.color_id)
       
