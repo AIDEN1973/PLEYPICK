@@ -139,6 +139,7 @@ api/upload/
 
 # 설정 파일
 config/
+config.json
 
 # 임시 파일들
 temp/
