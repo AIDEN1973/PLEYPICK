@@ -97,7 +97,7 @@ async def startup_event():
     """서비스 시작 시 모델 로드"""
     success = await load_clip_model()
     if not success:
-        print("❌ Failed to load CLIP model, service may not work properly")
+        print("[ERROR] Failed to load CLIP model, service may not work properly")
 
 @app.get("/health")
 async def health_check():
@@ -121,7 +121,7 @@ async def create_embeddings(request: EmbeddingRequest):
         
         # 차원 검증 (CLIP ViT-L/14는 768차원 고정)
         if request.dimensions != 768:
-            print(f"⚠️ Requested {request.dimensions} dimensions, using 768 (CLIP ViT-L/14)")
+            print(f"[WARNING] Requested {request.dimensions} dimensions, using 768 (CLIP ViT-L/14)")
         
         # 임베딩 생성
         embedding = await generate_clip_embedding(request.input.strip())

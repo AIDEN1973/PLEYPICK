@@ -50,7 +50,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import numpy as np
 from pathlib import Path
 import argparse
-# 🔧 수정됨: queue import 제거됨 (업로드 큐 제거로 불필요)
+# [FIX] queue import 제거됨 (업로드 큐 제거로 불필요)
 # import queue  # 제거됨: 업로드 큐 사용 안 함
 import threading  # ThreadPoolExecutor에서 사용하므로 유지
 from datetime import datetime
@@ -674,7 +674,7 @@ class LDrawRenderer:
         self._setup_gpu_optimization()
         self._setup_memory_optimization()
         
-        # 🔧 수정됨: 업로드 큐 제거 (로컬 저장만 사용)
+        # [FIX] 업로드 큐 제거 (로컬 저장만 사용)
         # 업로드 관련 초기화 제거됨
         
         # 적응형 샘플링 시스템 초기화
@@ -774,7 +774,7 @@ class LDrawRenderer:
                     # 4. 연결 테스트 (DB 연결만 확인, Storage 버킷 체크 제거)
                     try:
                         print("Testing Supabase connection...")
-                        # 🔧 수정됨: Storage 버킷 체크 제거됨 (업로드 불필요)
+                        # [FIX] Storage 버킷 체크 제거됨 (업로드 불필요)
                         # DB 연결만 확인 (메타데이터 저장용)
                         test_query = self.supabase.table('parts_master').select('part_id').limit(1).execute()
                         if hasattr(test_query, 'error') and test_query.error:
@@ -832,7 +832,7 @@ class LDrawRenderer:
         # Persistent Data 활성화 (셰이더/BVH 캐시 재사용으로 20-40% 성능 향상)
         bpy.context.scene.cycles.use_persistent_data = True
         
-        # 🔧 수정됨: 깊이 맵 렌더링 활성화 (Compositor)
+        # [FIX] 깊이 맵 렌더링 활성화 (Compositor)
         self._setup_depth_map_rendering()
         
         # 장치 설정 (안전한 CPU 폴백)
@@ -977,7 +977,7 @@ class LDrawRenderer:
         try:
             scene = bpy.context.scene
             
-            # 🔧 추가: View Layer의 Depth Pass 활성화 (필수)
+            # [FIX] View Layer의 Depth Pass 활성화 (필수)
             view_layer = scene.view_layers[0]
             if not view_layer.use_pass_z:
                 view_layer.use_pass_z = True
@@ -1020,7 +1020,7 @@ class LDrawRenderer:
                 if not composite.inputs['Image'].is_linked:
                     tree.links.new(render_layers.outputs['Image'], composite.inputs['Image'])
             
-            # 🔧 수정됨: 깊이 맵 출력 파일 노드 추가
+            # [FIX] 깊이 맵 출력 파일 노드 추가
             depth_output = tree.nodes.new('CompositorNodeOutputFile')
             depth_output.name = 'DepthOutput'
             depth_output.location = (400, -300)
@@ -1030,12 +1030,12 @@ class LDrawRenderer:
             depth_output.file_slots[0].use_node_format = False  # 노드 형식 사용 안 함
             depth_output.file_slots[0].save_as_render = True  # 렌더링 시 저장
             
-            # 🔧 수정됨: 깊이 출력을 EXR 형식으로 강제 설정 (렌더링 전 설정)
+            # [FIX] 깊이 출력을 EXR 형식으로 강제 설정 (렌더링 전 설정)
             depth_output.format.file_format = 'OPEN_EXR'
             depth_output.format.color_mode = 'RGB'
             depth_output.format.color_depth = '32'
             depth_output.format.exr_codec = 'ZIP'  # 압축 형식
-            # 🔧 추가: 파일 슬롯별 형식 강제 설정
+            # [FIX] 파일 슬롯별 형식 강제 설정
             depth_output.file_slots[0].format.file_format = 'OPEN_EXR'
             depth_output.file_slots[0].format.color_mode = 'RGB'
             depth_output.file_slots[0].format.color_depth = '32'
@@ -1088,7 +1088,7 @@ class LDrawRenderer:
                     break
             
             if depth_output:
-                # 🔧 수정됨: 절대 경로로 명시적으로 설정 (Windows 경로 정규화)
+                # [FIX] 절대 경로로 명시적으로 설정 (Windows 경로 정규화)
                 base_path = os.path.abspath(os.path.dirname(depth_path))
                 file_name = os.path.basename(depth_path)
                 
@@ -1100,20 +1100,20 @@ class LDrawRenderer:
                 base_path_normalized = base_path.replace('\\', '/')
                 
                 depth_output.base_path = base_path_normalized
-                # 🔧 수정됨: Blender의 자동 인덱싱(_0001) 방지를 위해 전체 파일명 지정 (확장자 제외)
+                # [FIX] Blender의 자동 인덱싱(_0001) 방지를 위해 전체 파일명 지정 (확장자 제외)
                 # Blender OutputFile 노드는 path에 파일명을 지정하면 자동으로 프레임 번호를 추가하지 않음
                 depth_output.file_slots[0].path = file_prefix  # 전체 파일명 (확장자 제외): "6335317_007"
                 depth_output.file_slots[0].use_node_format = False
                 depth_output.file_slots[0].save_as_render = True
-                # 🔧 추가: 파일 슬롯의 file_format 확장자 설정 (EXR 형식 명시)
+                # [FIX] 파일 슬롯의 file_format 확장자 설정 (EXR 형식 명시)
                 depth_output.file_slots[0].format.file_format = 'OPEN_EXR'
                 
-                # 🔧 추가: base_path 설정 확인 및 재설정 (Blender가 경로를 무시할 수 있음)
+                # [FIX] base_path 설정 확인 및 재설정 (Blender가 경로를 무시할 수 있음)
                 if not depth_output.base_path or depth_output.base_path == '' or depth_output.base_path == '//':
                     print(f"[WARN] base_path가 비어있음. 재설정 시도...")
                     depth_output.base_path = base_path_normalized
                 
-                # 🔧 추가: 형식 강제 설정 (렌더링 직전 재확인)
+                # [FIX] 형식 강제 설정 (렌더링 직전 재확인)
                 depth_output.format.file_format = 'OPEN_EXR'
                 depth_output.format.color_mode = 'RGB'
                 depth_output.format.color_depth = '32'
@@ -1123,7 +1123,7 @@ class LDrawRenderer:
                 depth_output.file_slots[0].format.color_depth = '32'
                 depth_output.file_slots[0].format.exr_codec = 'ZIP'
                 
-                # 🔧 추가: 형식 설정 검증
+                # [FIX] 형식 설정 검증
                 actual_format = depth_output.file_slots[0].format.file_format
                 if actual_format != 'OPEN_EXR':
                     print(f"[WARN] 깊이 맵 형식 불일치: {actual_format} (기대: OPEN_EXR), 재설정 시도")
@@ -1132,7 +1132,7 @@ class LDrawRenderer:
                 else:
                     print(f"[INFO] 깊이 맵 출력 경로 설정: base_path={base_path_normalized}, path={file_prefix}_, format={actual_format}")
                 
-                # 🔧 추가: 최종 경로 검증
+                # [FIX] 최종 경로 검증
                 final_path = os.path.join(base_path, f"{file_prefix}.exr")
                 print(f"[INFO] 예상 깊이 맵 파일 경로: {final_path}")
                 
@@ -1157,7 +1157,7 @@ class LDrawRenderer:
             print(f"[WARN] 깊이 맵 출력 경로 설정 실패: {e}")
     
     def _extract_camera_parameters(self):
-        """🔧 수정됨: 카메라 파라미터 추출 (K, R, t, distortion)"""
+        """[FIX] 카메라 파라미터 추출 (K, R, t, distortion)"""
         try:
             camera = bpy.context.scene.camera
             if not camera:
@@ -1260,7 +1260,7 @@ class LDrawRenderer:
             # 가능한 파일명 패턴들 (Blender OutputFile 노드가 생성하는 파일명 패턴)
             file_prefix = os.path.basename(expected_path).replace('.exr', '')  # 예: "6335317_007"
             possible_names = [
-                f"{file_prefix}.exr",  # 🔧 수정됨: 정확한 파일명 (자동 인덱싱 없음)
+                f"{file_prefix}.exr",  # [FIX] 정확한 파일명 (자동 인덱싱 없음)
                 f"{file_prefix}_0001.exr",  # 이전 패턴 (하위 호환)
                 f"{file_prefix}_0002.exr",
                 f"{file_prefix}_0003.exr",
@@ -1573,14 +1573,14 @@ class LDrawRenderer:
                                     {'attempt': attempt + 1, 'max_retries': max_retries, 'image_path': image_path}
                                 )
                                 try:
-                                    self._ensure_webp_metadata(image_path)  # 🔧 수정됨: 기술문서 메타 주입
+                                    self._ensure_webp_metadata(image_path)  # [FIX] 기술문서 메타 주입
                                 except Exception as _e:
                                     print(f"WARN: WebP 메타데이터 보정 실패(무시): {_e}")
                                 return result  # 품질 검증 실패해도 렌더링 성공시 반환
                         else:
                             print(f"INFO: WebP 품질 검증 통과: {webp_msg}")
                             try:
-                                self._ensure_webp_metadata(image_path)  # 🔧 수정됨: 기술문서 메타 보장(ICC/EXIF)
+                                self._ensure_webp_metadata(image_path)  # [FIX] 기술문서 메타 보장(ICC/EXIF)
                             except Exception as _e:
                                 print(f"WARN: WebP 메타데이터 보정 실패(무시): {_e}")
                             return result

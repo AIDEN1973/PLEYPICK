@@ -615,7 +615,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
     if job_id:
         try:
             supabase = setup_supabase()
-            print(f"📡 데이터베이스 연결됨 (작업 ID: {job_id})")
+        print(f"[NETWORK] 데이터베이스 연결됨 (작업 ID: {job_id})")
         except Exception as e:
             print(f"[WARN] Supabase 연결 실패: {e}")
     
@@ -624,7 +624,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
     try:
         # 1단계 학습 (YOLO11n-seg)
         print("\n" + "="*60)
-        print("🎯 1단계 학습 시작: YOLO11n-seg (빠른 스캔)")
+        print("[TARGET] 1단계 학습 시작: YOLO11n-seg (빠른 스캔)")
         print("="*60)
         
         stage1_config = config.copy()
@@ -632,11 +632,11 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
         stage1_results, stage1_model = train_yolo_model(dataset_yaml, stage1_config, job_id)
         results['stage1'] = stage1_results
         
-        print(f"\n✅ 1단계 학습 완료: {stage1_results}")
+        print(f"\n[OK] 1단계 학습 완료: {stage1_results}")
         
         # 2단계 학습 (YOLO11s-seg)
         print("\n" + "="*60)
-        print("🎯 2단계 학습 시작: YOLO11s-seg (정밀 검증)")
+        print("[TARGET] 2단계 학습 시작: YOLO11s-seg (정밀 검증)")
         print("="*60)
         
         stage2_config = config.copy()
@@ -644,7 +644,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
         stage2_results, stage2_model = train_yolo_model(dataset_yaml, stage2_config, job_id)
         results['stage2'] = stage2_results
         
-        print(f"\n✅ 2단계 학습 완료: {stage2_results}")
+        print(f"\n[OK] 2단계 학습 완료: {stage2_results}")
         
         # 하이브리드 학습 완료 상태 업데이트
         if supabase and job_id:
@@ -668,7 +668,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
         
         # 하이브리드 모델 저장 및 업로드
         print("\n" + "="*60)
-        print("💾 하이브리드 모델 저장 및 업로드 중...")
+        print("[SAVE] 하이브리드 모델 저장 및 업로드 중...")
         print("="*60)
         
         # Stage 1 모델 저장 및 업로드

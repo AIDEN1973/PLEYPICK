@@ -72,7 +72,7 @@ class SLOPerformanceChecker:
             logger.info(f"Stage-2 진입률: {stage2_rate:.1f}%")
             
         except Exception as e:
-            logger.error(f"❌ Stage-2 진입률 체크 실패: {e}")
+            logger.error(f"[ERROR] Stage-2 진입률 체크 실패: {e}")
             self.check_results['stage2_entry_rate'] = {
                 'status': 'ERROR',
                 'error': str(e)
@@ -95,7 +95,7 @@ class SLOPerformanceChecker:
             logger.info(f"24시간 가중치 조정: {adjustments_24h}회")
             
         except Exception as e:
-            logger.error(f"❌ 가중치 조정 체크 실패: {e}")
+            logger.error(f"[ERROR] 가중치 조정 체크 실패: {e}")
             self.check_results['adaptive_weight_adjustments'] = {
                 'status': 'ERROR',
                 'error': str(e)
@@ -119,7 +119,7 @@ class SLOPerformanceChecker:
             logger.info(f"BOM 음수: {bom_negative_count}건, 큐 오버플로: {queue_overflow_count}건")
             
         except Exception as e:
-            logger.error(f"❌ BOM/큐 체크 실패: {e}")
+            logger.error(f"[ERROR] BOM/큐 체크 실패: {e}")
             self.check_results['bom_negative_queue_overflow'] = {
                 'status': 'ERROR',
                 'error': str(e)
@@ -146,7 +146,7 @@ class SLOPerformanceChecker:
             logger.info(f"인덱스 크기: {index_size_mb}MB, 마지막 프루닝: {last_pruning_days}일 전")
             
         except Exception as e:
-            logger.error(f"❌ 인덱스 프루닝 체크 실패: {e}")
+            logger.error(f"[ERROR] 인덱스 프루닝 체크 실패: {e}")
             self.check_results['index_pruning'] = {
                 'status': 'ERROR',
                 'error': str(e)
@@ -175,7 +175,7 @@ class SLOPerformanceChecker:
             logger.info(f"하드 템플릿 비율: {hard_template_ratio:.1f}%, 파이프라인 활성: {selection_pipeline_active}")
             
         except Exception as e:
-            logger.error(f"❌ 하드 템플릿 체크 실패: {e}")
+            logger.error(f"[ERROR] 하드 템플릿 체크 실패: {e}")
             self.check_results['hard_template_selection'] = {
                 'status': 'ERROR',
                 'error': str(e)
@@ -209,7 +209,7 @@ class SLOPerformanceChecker:
             logger.info("성능 메트릭 수집 완료")
             
         except Exception as e:
-            logger.error(f"❌ 성능 메트릭 수집 실패: {e}")
+            logger.error(f"[ERROR] 성능 메트릭 수집 실패: {e}")
             self.performance_metrics = {'error': str(e)}
     
     def _calculate_overall_status(self) -> str:
@@ -233,7 +233,7 @@ class SLOPerformanceChecker:
                 return 'PASS'
                 
         except Exception as e:
-            logger.error(f"❌ 전체 상태 계산 실패: {e}")
+            logger.error(f"[ERROR] 전체 상태 계산 실패: {e}")
             return 'ERROR'
     
     def generate_report(self) -> str:
@@ -251,11 +251,11 @@ class SLOPerformanceChecker:
             report.append("체크리스트 결과:")
             for check_name, result in self.check_results.items():
                 status_emoji = {
-                    'PASS': '✅',
-                    'FAIL': '❌',
-                    'WARNING': '⚠️',
-                    'ERROR': '🔥'
-                }.get(result.get('status', 'UNKNOWN'), '❓')
+                    'PASS': '[OK]',
+                    'FAIL': '[ERROR]',
+                    'WARNING': '[WARNING]',
+                    'ERROR': '[ERROR]'
+                }.get(result.get('status', 'UNKNOWN'), '[UNKNOWN]')
                 
                 report.append(f"  {status_emoji} {check_name}: {result.get('description', 'N/A')}")
             
@@ -279,7 +279,7 @@ class SLOPerformanceChecker:
             return "\n".join(report)
             
         except Exception as e:
-            logger.error(f"❌ 보고서 생성 실패: {e}")
+            logger.error(f"[ERROR] 보고서 생성 실패: {e}")
             return f"보고서 생성 실패: {e}"
 
 def main():
@@ -301,7 +301,7 @@ def main():
         return results
         
     except Exception as e:
-        logger.error(f"❌ SLO 체크리스트 실행 실패: {e}")
+        logger.error(f"[ERROR] SLO 체크리스트 실행 실패: {e}")
         return None
 
 if __name__ == "__main__":
