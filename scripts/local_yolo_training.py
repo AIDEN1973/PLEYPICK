@@ -398,7 +398,7 @@ def create_filtered_dataset(original_yaml, target_parts):
         val_path = Path(dataset_config.get('val', ''))
         test_path = Path(dataset_config.get('test', ''))
         
-        print(f"📁 데이터셋 경로:")
+        print(f"[DIR] 데이터셋 경로:")
         print(f"  - Train: {train_path}")
         print(f"  - Val: {val_path}")
         print(f"  - Test: {test_path}")
@@ -481,7 +481,7 @@ def create_filtered_dataset(original_yaml, target_parts):
             yaml.dump(filtered_config, f, default_flow_style=False)
         
         print(f"[OK] 필터링된 데이터셋 생성 완료: {total_images}개 이미지")
-        print(f"📁 저장 위치: {temp_yaml}")
+        print(f"[DIR] 저장 위치: {temp_yaml}")
         return str(temp_yaml)
         
     except Exception as e:
@@ -582,7 +582,7 @@ def update_part_training_status(set_num, part_id, metrics):
         # 각 부품의 학습 상태를 'completed'로 업데이트 (upsert 사용)
         for part_id in trained_parts:
             try:
-                # 🔧 수정됨: upsert 사용 (map50_95, f1_score 제거 - 컬럼 없음)
+                # [FIX] 수정됨: upsert 사용 (map50_95, f1_score 제거 - 컬럼 없음)
                 result = supabase.table('part_training_status').upsert({
                     'part_id': str(part_id),
                     'status': 'completed',
@@ -678,7 +678,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
             stage1_model.save(stage1_path)
             print(f"[OK] Stage 1 모델 저장 완료: {stage1_path}")
             
-            # Stage 1 ONNX 변환 // 🔧 수정됨
+            # Stage 1 ONNX 변환 // [FIX] 수정됨
             stage1_onnx_path = None
             try:
                 stage1_onnx_path = Path("public/models/lego_yolo_stage1_latest.onnx")
@@ -708,7 +708,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
             stage2_model.save(stage2_path)
             print(f"[OK] Stage 2 모델 저장 완료: {stage2_path}")
             
-            # Stage 2 ONNX 변환 // 🔧 수정됨
+            # Stage 2 ONNX 변환 // [FIX] 수정됨
             stage2_onnx_path = None
             try:
                 stage2_onnx_path = Path("public/models/lego_yolo_stage2_latest.onnx")
@@ -744,7 +744,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
                 print(f"[WARN] Stage 2 모델 업로드 실패: {e}")
         
         print("\n" + "="*60)
-        print("🎉 하이브리드 학습 완료!")
+        print("[SUCCESS] 하이브리드 학습 완료!")
         print("="*60)
         print(f"1단계 (YOLO11n-seg): {stage1_results}")
         print(f"2단계 (YOLO11s-seg): {stage2_results}")
@@ -776,7 +776,7 @@ def train_yolo_model(dataset_yaml, config, job_id=None):
     if job_id:
         try:
             supabase = setup_supabase()
-            print(f"📡 데이터베이스 연결됨 (작업 ID: {job_id})")
+            print(f"[NETWORK] 데이터베이스 연결됨 (작업 ID: {job_id})")
         except Exception as e:
             print(f"[WARN] 데이터베이스 연결 실패: {e}")
     
@@ -985,7 +985,7 @@ def save_model(model, config):
         model.save(model_path)
         print(f"[OK] PyTorch 모델 저장 완료: {model_path}")
         
-        # ONNX 변환 시도 (필수) // 🔧 수정됨
+        # ONNX 변환 시도 (필수) // [FIX] 수정됨
         onnx_path = None
         try:
             onnx_path = model_dir / f"lego_yolo_set_{config.get('set_num', 'latest')}.onnx"
@@ -1022,7 +1022,7 @@ def save_model(model, config):
         print(f"[ERROR] 모델 저장 실패: {e}")
 
 def upload_and_register_model(model_path, onnx_path, config):
-    """학습된 모델을 Supabase 스토리지에 업로드하고 model_registry에 등록 // 🔧 수정됨"""
+    """학습된 모델을 Supabase 스토리지에 업로드하고 model_registry에 등록 // [FIX] 수정됨"""
     try:
         from supabase import create_client
         import os
@@ -1047,7 +1047,7 @@ def upload_and_register_model(model_path, onnx_path, config):
         with open(model_path, 'rb') as f:
             model_data = f.read()
         
-        # 파일명 생성 (타임스탬프 + 스테이지 포함) // 🔧 수정됨
+        # 파일명 생성 (타임스탬프 + 스테이지 포함) // [FIX] 수정됨
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         stage_label = config.get('model_stage', 'single')
         if stage_label not in ('stage1', 'stage2'):
@@ -1071,7 +1071,7 @@ def upload_and_register_model(model_path, onnx_path, config):
             pt_public_url = f"{supabase_url}/storage/v1/object/public/models/{pt_bucket_path}"
             print(f"[OK] PyTorch 모델 업로드 성공, 공개 URL: {pt_public_url}")
         
-        # ONNX 모델 업로드 (있는 경우) // 🔧 수정됨
+        # ONNX 모델 업로드 (있는 경우) // [FIX] 수정됨
         onnx_bucket_path = None
         onnx_public_url = None
         # onnx_path를 Path 객체로 정규화
@@ -1099,7 +1099,7 @@ def upload_and_register_model(model_path, onnx_path, config):
         print(f"[REGISTER] 모델 등록 중: {model_name}")
         model_size_mb = len(model_data) / (1024 * 1024)
         
-        # 동일 stage의 활성 모델만 비활성화 (stage1과 stage2는 별도 관리) // 🔧 수정됨
+        # 동일 stage의 활성 모델만 비활성화 (stage1과 stage2는 별도 관리) // [FIX] 수정됨
         current_stage = config.get('model_stage', 'single')
         if current_stage in ('stage1', 'stage2'):
             # 하이브리드 모드: 동일 stage만 비활성화
@@ -1115,7 +1115,7 @@ def upload_and_register_model(model_path, onnx_path, config):
                 'status': 'inactive'
             }).eq('is_active', True).execute()
         
-        # 새 모델 등록 (ONNX URL 우선 사용, 항상 active로 설정) // 🔧 수정됨
+        # 새 모델 등록 (ONNX URL 우선 사용, 항상 active로 설정) // [FIX] 수정됨
         from datetime import datetime as _dt
         version = f"1.0.{_dt.now().strftime('%Y%m%d%H%M%S')}"
         

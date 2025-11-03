@@ -1587,14 +1587,14 @@ class LDrawRenderer:
                     except Exception as validation_error:
                         print(f"WARN: WebP 품질 검증 오류 (렌더링은 성공): {validation_error}")
                         try:
-                            self._ensure_webp_metadata(image_path)  # 🔧 수정됨
+                            self._ensure_webp_metadata(image_path)  # [FIX] 수정됨
                         except Exception as _e:
                             print(f"WARN: WebP 메타데이터 보정 실패(무시): {_e}")
                         return result  # 검증 오류시에도 렌더링 성공시 반환
                 elif result:
                     # 기존 반환값 (문자열)인 경우
                     try:
-                        self._ensure_webp_metadata(image_path)  # 🔧 수정됨
+                        self._ensure_webp_metadata(image_path)  # [FIX] 수정됨
                     except Exception as _e:
                         print(f"WARN: WebP 메타데이터 보정 실패(무시): {_e}")
                     return result
@@ -1643,7 +1643,7 @@ class LDrawRenderer:
         - 선명도/SNR 기술문서 기준 달성 (Laplacian var ≥50, SNR ≥30dB)
         """
         try:
-            # Fast-path: white 배경 + 고샘플(≥512)에서는 강화 필터를 생략하고 메타만 주입 (성능 최적화, 기능 동일) // 🔧 수정됨
+            # Fast-path: white 배경 + 고샘플(≥512)에서는 강화 필터를 생략하고 메타만 주입 (성능 최적화, 기능 동일) // [FIX] 수정됨
             try:
                 bg_is_white = str(self.background).lower() == 'white'
                 high_samples = int(getattr(self, 'current_samples', 512)) >= 512
@@ -1911,7 +1911,7 @@ class LDrawRenderer:
         except:
             return 1024  # 기본값
     
-    # 🔧 수정됨: 업로드 관련 함수 모두 제거됨 (로컬 저장만 사용)
+    # [FIX] 수정됨: 업로드 관련 함수 모두 제거됨 (로컬 저장만 사용)
     # - _setup_async_io()
     # - _upload_worker()
     # - _process_upload_task()
@@ -2139,13 +2139,13 @@ class LDrawRenderer:
             # 2. SNR 계산 (기준: ≥30)
             snr_score = self._calculate_snr(img)
             
-            # 3. 🔧 수정됨: PnP 재투영 RMS 계산 (기준: ≤1.5px)
+            # 3. [FIX] 수정됨: PnP 재투영 RMS 계산 (기준: ≤1.5px)
             rms_score = self._calculate_rms(img, camera_params=camera_params, part_object=part_object)
             
-            # 4. 🔧 수정됨: 깊이 맵 검증 기반 Depth Score (기준: ≥0.85)
+            # 4. [FIX] 수정됨: 깊이 맵 검증 기반 Depth Score (기준: ≥0.85)
             depth_score = self._calculate_depth_score(img, depth_path=depth_path)
             
-            # 🔧 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319 기준)
+            # [FIX] 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319 기준)
             quality_passed = (
                 ssim_score >= 0.96 and
                 snr_score >= 30.0 and
@@ -2247,7 +2247,7 @@ class LDrawRenderer:
             return 30.0  # 기본값
     
     def _calculate_rms(self, img, camera_params=None, part_object=None):
-        """🔧 수정됨: PnP 재투영 RMS 계산 (기술문서 어노테이션.txt:260-269 기준)"""
+        """[FIX] 수정됨: PnP 재투영 RMS 계산 (기술문서 어노테이션.txt:260-269 기준)"""
         try:
             import cv2
             import numpy as np
@@ -2286,7 +2286,7 @@ class LDrawRenderer:
                 dist_coeffs = np.array(dist_dict if isinstance(dist_dict, (list, tuple)) else [0, 0, 0, 0, 0])
             
             # 3D 모델의 특징점 추출 (객체의 버텍스 또는 코너 사용)
-            # 🔧 수정됨: 3D-2D 점을 동기화하여 수집 (카메라 뒤 버텍스 제외)
+            # [FIX] 수정됨: 3D-2D 점을 동기화하여 수집 (카메라 뒤 버텍스 제외)
             obj_points_3d = []
             img_points_2d = []
             
@@ -2356,7 +2356,7 @@ class LDrawRenderer:
             return 1.5  # 기본값 (기준값)
     
     def _calculate_depth_score(self, img, depth_path=None):
-        """🔧 수정됨: 깊이 맵 검증 기반 Depth Score (기술문서 어노테이션.txt:287-303 기준)"""
+        """[FIX] 수정됨: 깊이 맵 검증 기반 Depth Score (기술문서 어노테이션.txt:287-303 기준)"""
         try:
             import cv2
             import numpy as np
@@ -2468,7 +2468,7 @@ class LDrawRenderer:
             return depth_score
     
     def _validate_depth_map_exr(self, depth_map, zmin, zmax):
-        """🔧 수정됨: 실제 깊이 맵 검증 (기술문서 어노테이션.txt:287-303 기준)"""
+        """[FIX] 수정됨: 실제 깊이 맵 검증 (기술문서 어노테이션.txt:287-303 기준)"""
         try:
             import cv2
             import numpy as np
@@ -2542,7 +2542,7 @@ class LDrawRenderer:
             return 0.5  # 기본값
     
     def _calculate_quality_metrics(self, image_path, depth_path=None, camera_params=None, part_object=None):
-        """🔧 수정됨: 품질 메트릭 계산 (v1.6.1/E2 스펙 준수, PnP RMS 및 깊이 맵 검증)"""
+        """[FIX] 수정됨: 품질 메트릭 계산 (v1.6.1/E2 스펙 준수, PnP RMS 및 깊이 맵 검증)"""
         try:
             
             img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
@@ -2559,12 +2559,12 @@ class LDrawRenderer:
             # 품질 메트릭 계산
             ssim = self._calculate_ssim_single(img)
             snr = self._calculate_snr(img)
-            # 🔧 수정됨: PnP 재투영 RMS 사용
+            # [FIX] 수정됨: PnP 재투영 RMS 사용
             rms = self._calculate_rms(img, camera_params=camera_params, part_object=part_object)
-            # 🔧 수정됨: 깊이 맵 검증 사용
+            # [FIX] 수정됨: 깊이 맵 검증 사용
             depth_score = self._calculate_depth_score(img, depth_path=depth_path)
             
-            # 🔧 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
+            # [FIX] 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
             qa_flag = (
                 ssim >= 0.96 and
                 snr >= 30.0 and
@@ -2602,12 +2602,12 @@ class LDrawRenderer:
             print(f"[CHECK] E2 메타데이터 생성: part_id={part_id}, element_id={element_id}")
             
             # 기술문서 요구사항에 따른 E2 스키마 (경량화된 필수 메타데이터만)
-            # QA 이중 정책(Strict/Runtime) 동시 기록 // 🔧 수정됨
+            # QA 이중 정책(Strict/Runtime) 동시 기록 // [FIX] 수정됨
             ssim = float(quality_metrics.get('ssim', 0.0))
             snr = float(quality_metrics.get('snr', 0.0))
             depth = float(quality_metrics.get('depth_score', 0.0))
             rms = float(quality_metrics.get('reprojection_rms_px', quality_metrics.get('rms', 9.99)))
-            # 🔧 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
+            # [FIX] 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
             # PnP 재투영 RMS 및 깊이 맵 검증 기준 사용
             qa_flag_runtime = 'PASS' if (ssim >= 0.96 and snr >= 30.0 and rms <= 1.5 and depth >= 0.85) else 'FAIL_QUALITY'
             qa_flag_strict = 'PASS' if (ssim >= 0.96 and snr >= 30.0 and rms <= 1.5 and depth >= 0.85) else 'FAIL_QUALITY'
@@ -2717,7 +2717,7 @@ class LDrawRenderer:
             sharpness = quality_metrics.get('sharpness', 0.5)
             reprojection_rms = quality_metrics.get('reprojection_rms_px', 1.25)
             
-            # 🔧 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319 - PnP 재투영 RMS 기준)
+            # [FIX] 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319 - PnP 재투영 RMS 기준)
             if ssim >= 0.96 and snr >= 30.0 and sharpness >= 0.5 and reprojection_rms <= 1.5:
                 qa_flag = "PASS"
             else:
@@ -2764,7 +2764,7 @@ class LDrawRenderer:
             snr = quality_metrics.get('snr', 30.0)
             rms = quality_metrics.get('reprojection_rms_px', 1.25)
             
-            # 🔧 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
+            # [FIX] 수정됨: 품질 기준 복원 (기술문서 어노테이션.txt:319)
             if snr < 30 or rms > 1.5:
                 print(f"[QA Auto-Requeue] 부품 {part_id} 품질 미달 → 재렌더링 큐 삽입")
                 print(f"  - SNR: {snr:.1f}dB (기준: ≥30dB)")
@@ -3144,7 +3144,7 @@ class LDrawRenderer:
         
         # Element ID로부터 색상 조회
         force_color_hex = None
-        force_color_rgba = None  # 🔧 수정됨: 서버 전달 RGBA 지원
+        force_color_rgba = None  # [FIX] 수정됨: 서버 전달 RGBA 지원
         try:
             import sys
             if '--' in sys.argv:
@@ -3170,12 +3170,12 @@ class LDrawRenderer:
                 ridx = arg_list.index('--color-rgba')
                 if ridx + 1 < len(arg_list):
                     force_color_rgba = arg_list[ridx + 1]
-                    print(f"[워커] 서버 전달 RGBA 적용: {force_color_rgba}")  # 🔧 수정됨
+                    print(f"[워커] 서버 전달 RGBA 적용: {force_color_rgba}")  # [FIX] 수정됨
         except Exception as e:
             print(f"[워커] 색상 조회 실패: {e}")
         
         # 재질 적용
-        material_data = self.apply_random_material(part_object, force_color_id=force_color_id, force_color_hex=force_color_hex, force_color_rgba=force_color_rgba)  # 🔧 수정됨
+        material_data = self.apply_random_material(part_object, force_color_id=force_color_id, force_color_hex=force_color_hex, force_color_rgba=force_color_rgba)  # [FIX] 수정됨
         
         # 카메라 위치 조정
         self.position_camera_to_object(part_object)
@@ -3372,7 +3372,7 @@ class LDrawRenderer:
         
         # 기존 노드 모두 삭제
         world.node_tree.nodes.clear()
-        # 누락 텍스처 마젠타 방지: 환경/월드 노드에서 이미지 텍스처가 깨지면 RGB로 대체 // 🔧 수정됨
+        # 누락 텍스처 마젠타 방지: 환경/월드 노드에서 이미지 텍스처가 깨지면 RGB로 대체 // [FIX] 수정됨
         self._mute_missing_textures(target="world")
         
         # white 모드에서는 텍스처/HDRI를 사용하지 않고 순백만 사용 (강제)
@@ -3392,7 +3392,7 @@ class LDrawRenderer:
         - world: 월드 노드 트리만 처리
         - materials: 재질 노드 트리만 처리
         - all: 둘 다 처리
-        """  # // 🔧 수정됨
+        """  # // [FIX] 수정됨
         try:
             def replace_missing_in_node_tree(node_tree):
                 if not node_tree:
@@ -4286,7 +4286,7 @@ class LDrawRenderer:
             except Exception:
                 pass
 
-            # 누락 텍스처 마젠타 방지: 재질 노드의 깨진 이미지 텍스처 무음 처리 // 🔧 수정됨
+            # 누락 텍스처 마젠타 방지: 재질 노드의 깨진 이미지 텍스처 무음 처리 // [FIX] 수정됨
             self._mute_missing_textures(target="materials")
 
             # 카메라가 삭제되었는지 확인하고 복구
@@ -4436,7 +4436,7 @@ class LDrawRenderer:
             try:
                 rgba_values = [float(x.strip()) for x in force_color_rgba.split(',')]
                 if len(rgba_values) >= 3:
-                    # 🔧 수정됨: sRGB → Linear 변환 적용 (데이터베이스 RGB는 sRGB 공간)
+                    # [FIX] 수정됨: sRGB → Linear 변환 적용 (데이터베이스 RGB는 sRGB 공간)
                     def srgb_to_linear(c):
                         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
                     
@@ -4855,13 +4855,13 @@ class LDrawRenderer:
             bpy.context.scene.render.filepath = output_path
 
             # RGB 모드에서 배경이 렌더되도록 보장
-            # 🔧 수정됨: Compositor 노드는 깊이 맵 생성을 위해 활성화 유지
+            # [FIX] 수정됨: Compositor 노드는 깊이 맵 생성을 위해 활성화 유지
             try:
                 if hasattr(bpy.context.scene.render, 'film_transparent'):
                     bpy.context.scene.render.film_transparent = False  # 배경 렌더링 활성화
                 # use_nodes는 깊이 맵 생성을 위해 True로 유지 (OutputFile 노드 사용)
                 if hasattr(bpy.context.scene, 'use_nodes'):
-                    bpy.context.scene.use_nodes = True  # 🔧 수정됨: Compositor 활성화
+                    bpy.context.scene.use_nodes = True  # [FIX] 수정됨: Compositor 활성화
                 if hasattr(bpy.context.scene.render, 'use_sequencer'):
                     bpy.context.scene.render.use_sequencer = False  # 시퀀서 비활성화
             except Exception:
@@ -4869,9 +4869,9 @@ class LDrawRenderer:
 
             # 매 렌더마다 배경/누락 텍스처 재설정(마젠타 근본 차단)
             try:
-                self.setup_background()  # 🔧 수정됨
+                self.setup_background()  # [FIX] 수정됨
                 try:
-                    self._mute_missing_textures(target="all")  # 🔧 수정됨
+                    self._mute_missing_textures(target="all")  # [FIX] 수정됨
                 except Exception:
                     pass
             except Exception:
@@ -4911,7 +4911,7 @@ class LDrawRenderer:
             import time
             render_start = time.time()
             
-            # 🔧 추가: Compositor 노드가 활성화되어 있는지 확인
+            # [FIX] 추가: Compositor 노드가 활성화되어 있는지 확인
             if bpy.context.scene.use_nodes:
                 tree = bpy.context.scene.node_tree
                 if tree:
@@ -4920,7 +4920,7 @@ class LDrawRenderer:
                         if node.type == 'OUTPUT_FILE':
                             node.file_slots[0].save_as_render = True
                             node.mute = False
-                            # 🔧 추가: 깊이 맵 노드 형식 강제 확인 (렌더링 직전)
+                            # [FIX] 추가: 깊이 맵 노드 형식 강제 확인 (렌더링 직전)
                             if node.name == 'DepthOutput':
                                 node.format.file_format = 'OPEN_EXR'
                                 node.file_slots[0].format.file_format = 'OPEN_EXR'
@@ -4929,14 +4929,14 @@ class LDrawRenderer:
                                 node.file_slots[0].format.exr_codec = 'ZIP'
                                 print(f"[INFO] 깊이 맵 노드 형식 재확인: {node.file_slots[0].format.file_format}")
             
-            # 🔧 수정됨: write_still=True는 OutputFile 노드를 실행하지 않음
+            # [FIX] 수정됨: write_still=True는 OutputFile 노드를 실행하지 않음
             # 따라서 두 단계로 나눠서 처리:
             # 1. write_still=True로 렌더링하여 메인 이미지 저장
             # 2. write_still=False로 Compositor 실행하여 depth 저장
             
             bpy.ops.render.render(write_still=True)
             
-            # 🔧 추가: Compositor 실행하여 OutputFile 노드 저장 (depth 맵 포함)
+            # [FIX] 추가: Compositor 실행하여 OutputFile 노드 저장 (depth 맵 포함)
             if bpy.context.scene.use_nodes:
                 try:
                     tree = bpy.context.scene.node_tree
@@ -4954,7 +4954,7 @@ class LDrawRenderer:
                                     depth_node = None
                                     break
                                 
-                                # 🔧 추가: 렌더링 후 형식 검증
+                                # [FIX] 추가: 렌더링 후 형식 검증
                                 actual_format = node.file_slots[0].format.file_format
                                 if actual_format != 'OPEN_EXR':
                                     print(f"[ERROR] 렌더링 후 형식 불일치: {actual_format} (기대: OPEN_EXR)")
@@ -4962,11 +4962,11 @@ class LDrawRenderer:
                                 else:
                                     print(f"[INFO] 렌더링 후 형식 확인: {actual_format} [OK]")
                         
-                        # 🔧 추가: DepthOutput 노드가 있으면 Compositor 실행 (write_still=False)
+                        # [FIX] 추가: DepthOutput 노드가 있으면 Compositor 실행 (write_still=False)
                         if depth_node:
                             print("[INFO] Compositor 실행하여 depth 파일 저장...")
                             
-                            # 🔧 수정됨: base_path가 올바르게 설정되었는지 재확인 및 강제 설정
+                            # [FIX] 수정됨: base_path가 올바르게 설정되었는지 재확인 및 강제 설정
                             # write_still=False 호출 전에 base_path를 반드시 설정해야 함
                             try:
                                 # render_image 함수에서 image_path를 통해 depth_path 재구성
@@ -5169,10 +5169,10 @@ class LDrawRenderer:
             print(f"로컬 E2 JSON 생성 실패: {e}")
             return None
     
-    # 🔧 수정됨: upload_to_supabase_direct_http() 함수 제거됨 (로컬 저장만 사용)
+    # [FIX] 수정됨: upload_to_supabase_direct_http() 함수 제거됨 (로컬 저장만 사용)
 
     def upload_to_supabase(self, image_path, annotation_path, part_id, metadata, depth_path=None):
-        """🔧 수정됨: Supabase Storage 업로드 제거됨 (로컬 저장만 사용)
+        """[FIX] 수정됨: Supabase Storage 업로드 제거됨 (로컬 저장만 사용)
         
         이전 용도: Supabase Storage에 이미지/라벨/메타데이터 업로드
         현재 상태: 모든 파일은 로컬에만 저장됨
@@ -5203,11 +5203,11 @@ class LDrawRenderer:
             self._ensure_part_in_master(part_id, metadata)
             
             # 1. synthetic_dataset 테이블에 저장
-            # 🔧 수정됨: image_url, annotation_url은 None (로컬 저장만 사용)
+            # [FIX] 수정됨: image_url, annotation_url은 None (로컬 저장만 사용)
             metadata_record = {
                 'part_id': part_id,
-                'image_url': None,  # 🔧 수정됨: Storage 업로드 제거
-                'annotation_url': None,  # 🔧 수정됨: Storage 업로드 제거
+                'image_url': None,  # [FIX] 수정됨: Storage 업로드 제거
+                'annotation_url': None,  # [FIX] 수정됨: Storage 업로드 제거
                 'metadata': json.dumps(metadata),
                 'created_at': datetime.now().isoformat()
             }
@@ -5231,7 +5231,7 @@ class LDrawRenderer:
     def _upsert_parts_master_features(self, part_id, metadata, urls):
         """parts_master_features 테이블에 핵심 12필드 자동 매핑
         
-        🔧 수정됨: urls 파라미터는 사용하지 않음 (호환성을 위해 유지)
+        [FIX] 수정됨: urls 파라미터는 사용하지 않음 (호환성을 위해 유지)
         """
         try:
             # 핵심 12필드 추출
@@ -5738,7 +5738,7 @@ class LDrawRenderer:
         json_filename = f"{uid}.json"
         e2_json_filename = f"{uid}_e2.json"
         
-        # 🔧 수정됨: 전달받은 output_dir 매개변수를 우선 사용 (main()에서 설정한 dataset_synthetic/images/train/{element_id}/ 구조 유지)
+        # [FIX] 수정됨: 전달받은 output_dir 매개변수를 우선 사용 (main()에서 설정한 dataset_synthetic/images/train/{element_id}/ 구조 유지)
         output_dir_abs = os.path.abspath(output_dir) if output_dir else None
         
         # main()에서 전달한 경로가 있는지 확인 (dataset_synthetic 구조인지 체크)
@@ -5754,9 +5754,9 @@ class LDrawRenderer:
             element_folder = os.path.basename(output_dir_abs)  # {element_id}
             labels_dir = os.path.join(output_base, 'labels', element_folder)
             meta_dir = os.path.join(output_base, 'meta', element_folder)
-            # 🔧 수정됨: meta-e 폴더는 main()에서 생성되므로 항상 사용 (존재 여부 체크 제거)
+            # [FIX] 수정됨: meta-e 폴더는 main()에서 생성되므로 항상 사용 (존재 여부 체크 제거)
             meta_e_dir = os.path.join(output_base, 'meta-e', element_folder)
-            # 🔧 수정됨: synthetic_dir는 dataset_synthetic 기준 경로로 설정 (depth 폴더용)
+            # [FIX] 수정됨: synthetic_dir는 dataset_synthetic 기준 경로로 설정 (depth 폴더용)
             # depth 폴더는 images/train/{element_id}와 같은 레벨에 생성되어야 함
             # 하지만 실제 저장은 dataset_synthetic/{element_id}/depth/ 에 저장
             synthetic_dir = os.path.join(output_base, element_folder)
@@ -5787,7 +5787,7 @@ class LDrawRenderer:
         image_path = os.path.join(images_dir, image_filename)
         annotation_path = os.path.join(labels_dir, annotation_filename)
         
-        # 🔧 수정됨: dataset_synthetic 구조일 때는 정확한 경로 출력
+        # [FIX] 수정됨: dataset_synthetic 구조일 때는 정확한 경로 출력
         if output_dir_abs and 'dataset_' in output_dir_abs:
             print(f"[FOLDER] dataset_synthetic 구조 사용:")
             print(f"  - images/: {images_dir}")
@@ -5816,7 +5816,7 @@ class LDrawRenderer:
         except Exception:
             pass
 
-        # 🔧 수정됨: 깊이 맵 출력 경로 설정
+        # [FIX] 수정됨: 깊이 맵 출력 경로 설정
         # 문서 규격: /dataset_{SET_ID}/depth/{element_id}/{uuid}.bin
         if output_dir_abs and 'dataset_' in output_dir_abs:
             # dataset_synthetic 구조: dataset_synthetic/depth/{element_id}/
@@ -5829,7 +5829,7 @@ class LDrawRenderer:
             depth_dir = os.path.join(synthetic_dir, 'depth')
             print(f"[DEBUG] 기존 구조 사용: synthetic_dir={synthetic_dir}")
         
-        # 🔧 수정됨: depth 폴더 생성 (절대 경로로 확실히 생성)
+        # [FIX] 수정됨: depth 폴더 생성 (절대 경로로 확실히 생성)
         depth_dir_abs = os.path.abspath(depth_dir)
         try:
             os.makedirs(depth_dir_abs, exist_ok=True)
@@ -5844,12 +5844,12 @@ class LDrawRenderer:
         
         print(f"[INFO] 깊이 맵 저장 경로: {depth_dir_abs}")
         depth_filename = f"{uid}.exr"
-        depth_path = os.path.join(depth_dir_abs, depth_filename)  # 🔧 수정됨: 절대 경로 사용
+        depth_path = os.path.join(depth_dir_abs, depth_filename)  # [FIX] 수정됨: 절대 경로 사용
         
         # 깊이 맵 출력 노드 경로 설정
         self._configure_depth_output_path(depth_path)
         
-        # 🔧 수정됨: 카메라 파라미터 저장
+        # [FIX] 수정됨: 카메라 파라미터 저장
         camera_params = self._extract_camera_parameters()
         
         # 14. 렌더링 (WebP 포맷으로 저장) - 자동 재시도 메커니즘
@@ -5864,7 +5864,7 @@ class LDrawRenderer:
         else:
             render_time_sec = 0.0  # 기본값
         
-        # 🔧 추가: 깊이 맵 파일 저장 대기 및 강제 업데이트
+        # [FIX] 추가: 깊이 맵 파일 저장 대기 및 강제 업데이트
         import time
         time.sleep(0.2)  # OutputFile 노드가 파일을 저장할 시간 확보
         
@@ -5883,10 +5883,10 @@ class LDrawRenderer:
         except Exception as e:
             print(f"[WARN] Compositor 노드 업데이트 실패: {e}")
         
-        # 🔧 수정됨: 깊이 맵 파일 확인 및 이동 (Blender는 임시 경로에 저장)
+        # [FIX] 수정됨: 깊이 맵 파일 확인 및 이동 (Blender는 임시 경로에 저장)
         actual_depth_path = self._locate_rendered_depth_map(depth_path, uid)
         if actual_depth_path and os.path.exists(actual_depth_path):
-            # 🔧 추가: 파일 형식 검증
+            # [FIX] 추가: 파일 형식 검증
             file_ext = os.path.splitext(actual_depth_path)[1].lower()
             if file_ext == '.png':
                 print(f"[ERROR] 깊이 맵이 PNG 형식으로 저장됨: {actual_depth_path}")
@@ -5899,7 +5899,7 @@ class LDrawRenderer:
             # 파일을 올바른 위치로 이동
             os.makedirs(os.path.dirname(depth_path), exist_ok=True)
             if actual_depth_path != depth_path:
-                # 🔧 추가: 파일명 확장자 확인 및 수정
+                # [FIX] 추가: 파일명 확장자 확인 및 수정
                 if file_ext == '.png' and depth_path.endswith('.exr'):
                     # PNG를 EXR로 변환 시도하지 않고 경고만 출력
                     print(f"[WARN] PNG 파일을 EXR 경로로 이동 시도: {actual_depth_path} -> {depth_path}")
@@ -5928,7 +5928,7 @@ class LDrawRenderer:
         self.save_yolo_annotation(bbox_data, annotation_path, class_id=0, polygon_uv=polygon_uv)
         
         # 15. 메타데이터 생성 (품질 정보 포함)
-        # 🔧 수정됨: 깊이 맵 경로 전달
+        # [FIX] 수정됨: 깊이 맵 경로 전달
         quality_metrics = self._calculate_quality_metrics(image_path, depth_path=depth_path, camera_params=camera_params, part_object=part_object)
         
         # 메타데이터 구성 (JSON 직렬화 안전 변환 적용)
@@ -5950,7 +5950,7 @@ class LDrawRenderer:
                 'denoise': getattr(bpy.context.scene.cycles, 'use_denoising', False) if hasattr(bpy.context.scene, 'cycles') else False
             },
             'render_time_sec': round(render_time_sec, 3),
-            'camera': make_json_safe(camera_params),  # 🔧 수정됨: 전체 카메라 파라미터 저장
+            'camera': make_json_safe(camera_params),  # [FIX] 수정됨: 전체 카메라 파라미터 저장
             'background': str(self.background),
             'color_management': str(self.color_management),
             'quality_metrics': make_json_safe(quality_metrics)  # 품질 메트릭 추가
@@ -5992,7 +5992,7 @@ class LDrawRenderer:
         except Exception as e:
             print(f"E2 메타데이터 JSON 저장 실패: {e}")
         
-        # 17. 🔧 수정됨: Supabase Storage 업로드 제거됨 (로컬 저장만 사용)
+        # 17. [FIX] 수정됨: Supabase Storage 업로드 제거됨 (로컬 저장만 사용)
         urls = self.upload_to_supabase(image_path, annotation_path, part_id, metadata, depth_path=depth_path)
         
         # 18. 메타데이터 저장 (urls는 None이어도 처리됨)
@@ -6002,7 +6002,7 @@ class LDrawRenderer:
         render_time = time.time() - start_time
         
         print(f"[OK] {part_id} 렌더링 완료 → {image_filename} (시간: {render_time:.2f}초, 샘플: {self.current_samples})")
-        # 🔧 수정됨: Storage URL 출력 제거 (로컬 저장만 사용)
+        # [FIX] 수정됨: Storage URL 출력 제거 (로컬 저장만 사용)
         print(f"[INFO] 로컬 저장 완료 (Storage 업로드 비활성화)")
         
         # QA 로그에 렌더링 시간 추가
@@ -6238,11 +6238,11 @@ def main():
     images_root = os.path.join(dataset_root, 'images', split, element_or_part)
     labels_root = os.path.join(dataset_root, 'labels', element_or_part)
     meta_root   = os.path.join(dataset_root, 'meta',   element_or_part)
-    meta_e_root = os.path.join(dataset_root, 'meta-e', element_or_part)  # 🔧 수정됨: meta-e 폴더 추가
+    meta_e_root = os.path.join(dataset_root, 'meta-e', element_or_part)  # [FIX] 수정됨: meta-e 폴더 추가
     os.makedirs(images_root, exist_ok=True)
     os.makedirs(labels_root, exist_ok=True)
     os.makedirs(meta_root,   exist_ok=True)
-    os.makedirs(meta_e_root, exist_ok=True)  # 🔧 수정됨: meta-e 폴더 생성
+    os.makedirs(meta_e_root, exist_ok=True)  # [FIX] 수정됨: meta-e 폴더 생성
     # part_output_dir는 이미지가 저장될 디렉토리로 설정(images)
     part_output_dir = images_root
     os.makedirs(part_output_dir, exist_ok=True)
@@ -6307,7 +6307,7 @@ def main():
         traceback.print_exc()
         return
     
-    # 🔧 수정됨: dataset_synthetic 구조 사용 시 중복 폴더 생성 제거
+    # [FIX] 수정됨: dataset_synthetic 구조 사용 시 중복 폴더 생성 제거
     # part_output_dir이 이미 올바른 경로(dataset_synthetic/images/train/{element_id}/)로 설정되어 있으므로
     # 추가 폴더 생성 불필요 (render_single_part()에서 필요한 폴더 자동 생성)
     
@@ -6400,7 +6400,7 @@ def main():
     results = []
     existing_remote = set()  # 기존 파일 목록 초기화
     
-    # 🔧 수정됨: dataset_synthetic 구조 기반 중복 체크 (로컬 우선, 원격 보조)
+    # [FIX] 수정됨: dataset_synthetic 구조 기반 중복 체크 (로컬 우선, 원격 보조)
     element_id = getattr(args, 'element_id', None)
     # 기술문서: 부품당 200장. 스킵 임계는 요청된 목표 개수로 설정 (기본 200)
     MIN_FILES_FOR_COMPLETE = int(getattr(args, 'count', 200))
@@ -6551,7 +6551,7 @@ def main():
     
     print(f"\nOK: 렌더링 완료: {len(results)}/{args.count} 성공")
     
-    # 🔧 수정됨: 부품별 자동 분할 비활성화
+    # [FIX] 수정됨: 부품별 자동 분할 비활성화
     # 세트 렌더링 완료 시 전체 데이터셋을 한 번에 분할하는 것이 더 적절함
     # 단일 부품 렌더링도 전체 데이터셋 분할이 필요하므로 여기서는 비활성화
     # 분할은 server/synthetic-api.js에서 세트 렌더링 완료 시 실행됨
