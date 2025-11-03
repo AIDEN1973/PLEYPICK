@@ -251,7 +251,7 @@ def main():
             
         elif args.action == 'list':
             versions = manager.list_versions()
-            print("📋 Supabase 데이터셋 버전 목록:")
+            print("[REPORT] Supabase 데이터셋 버전 목록:")
             for v in versions:
                 status = " (현재)" if v.get('is_current') else ""
                 print(f"  v{v['version']}{status}: {v['description']} "

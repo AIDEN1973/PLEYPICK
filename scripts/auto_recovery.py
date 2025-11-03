@@ -20,7 +20,7 @@ class AutoRecovery:
     def start_monitoring(self):
         """모니터링 시작"""
         try:
-            print("🚀 자동 복구 시스템 시작")
+            print("[START] 자동 복구 시스템 시작")
             
             # 서버 모니터 시작
             monitor_script = os.path.join(os.path.dirname(__file__), 'server_monitor.py')
@@ -31,13 +31,13 @@ class AutoRecovery:
                     stderr=subprocess.PIPE,
                     text=True
                 )
-                print("✅ 서버 모니터링 시작됨")
+                print("[OK] 서버 모니터링 시작됨")
             
             # 렌더링 상태 확인 및 복구
             self.check_and_resume_rendering()
             
             self.is_running = True
-            print("🔄 자동 복구 시스템 활성화됨")
+            print("[RETRY] 자동 복구 시스템 활성화됨")
             
         except Exception as e:
             print(f"[ERROR] 자동 복구 시스템 시작 실패: {e}")
@@ -57,15 +57,15 @@ class AutoRecovery:
                     completed_count = state.get('completed_count', 0)
                     
                     if completed_count < total_count:
-                        print(f"📂 미완료 렌더링 발견: {completed_count}/{total_count}")
-                        print("🔄 렌더링 자동 재시작 시도...")
+                        print(f"[DIR] 미완료 렌더링 발견: {completed_count}/{total_count}")
+                        print("[RETRY] 렌더링 자동 재시작 시도...")
                         
                         # 렌더링 재시작
                         self.resume_rendering(state)
                     else:
-                        print("✅ 모든 렌더링이 완료됨")
+                        print("[OK] 모든 렌더링이 완료됨")
             else:
-                print("📂 렌더링 상태 파일 없음")
+                print("[DIR] 렌더링 상태 파일 없음")
                 
         except Exception as e:
             print(f"[WARNING] 렌더링 상태 확인 실패: {e}")
@@ -80,10 +80,10 @@ class AutoRecovery:
             start_index = completed_count
             
             if remaining_count <= 0:
-                print("✅ 재시작할 렌더링이 없습니다")
+                print("[OK] 재시작할 렌더링이 없습니다")
                 return
             
-            print(f"🔄 렌더링 재시작: {remaining_count}개 남음 (시작 인덱스: {start_index})")
+            print(f"[RETRY] 렌더링 재시작: {remaining_count}개 남음 (시작 인덱스: {start_index})")
             
             # 렌더링 명령어 구성
             cmd = [
@@ -115,7 +115,7 @@ class AutoRecovery:
                 text=True
             )
             
-            print(f"✅ 렌더링 재시작됨 (PID: {self.render_process.pid})")
+            print(f"[OK] 렌더링 재시작됨 (PID: {self.render_process.pid})")
             
             # 렌더링 모니터링 스레드 시작
             monitor_thread = threading.Thread(target=self.monitor_render_process, daemon=True)
@@ -132,7 +132,7 @@ class AutoRecovery:
                 stdout, stderr = self.render_process.communicate()
                 
                 if self.render_process.returncode == 0:
-                    print("✅ 렌더링 완료")
+                    print("[OK] 렌더링 완료")
                 else:
                     print(f"[ERROR] 렌더링 실패 (코드: {self.render_process.returncode})")
                     if stderr:
@@ -148,11 +148,11 @@ class AutoRecovery:
             
             if self.monitor_process:
                 self.monitor_process.terminate()
-                print("🛑 서버 모니터링 중단됨")
+                print("[STOP] 서버 모니터링 중단됨")
             
             if self.render_process:
                 self.render_process.terminate()
-                print("🛑 렌더링 프로세스 중단됨")
+                print("[STOP] 렌더링 프로세스 중단됨")
                 
         except Exception as e:
             print(f"[WARNING] 중단 실패: {e}")
@@ -163,7 +163,7 @@ def main():
     
     # 시그널 핸들러 등록
     def signal_handler(signum, frame):
-        print(f"\n🛑 시그널 {signum} 수신 - 자동 복구 시스템 중단")
+        print(f"\n[STOP] 시그널 {signum} 수신 - 자동 복구 시스템 중단")
         recovery.stop()
         sys.exit(0)
     

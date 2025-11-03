@@ -94,7 +94,7 @@ def main():
         'f1_score': 2 * (0.3548387096774194 * 0.275) / (0.3548387096774194 + 0.275) if (0.3548387096774194 + 0.275) > 0 else 0
     }
     
-    print(f"\n📦 업데이트 대상:")
+    print(f"\n[PACKAGE] 업데이트 대상:")
     print(f"  부품 ID: {part_id}")
     print(f"  엘리먼트 ID: 6179330")
     print(f"  부품명: Plate Special 1 x 2 with Door Rail")
@@ -116,7 +116,7 @@ def main():
     
     if success:
         print("\n" + "="*60)
-        print("✅ 업데이트 완료!")
+        print("[OK] 업데이트 완료!")
         print("="*60)
         print("\n다음 확인사항:")
         print("1. Supabase 대시보드에서 part_training_status 테이블 확인")

@@ -66,7 +66,7 @@ def validate_depth_files():
     print(f"  - PNG 파일: {depth_stats['png_files']}개")
     
     if depth_file_locations:
-        print(f"\n✅ Depth 파일 발견:")
+        print(f"\n[OK] Depth 파일 발견:")
         for folder, file, fmt in depth_file_locations[:10]:
             print(f"  {folder}/{file} ({fmt})")
         if len(depth_file_locations) > 10:
@@ -75,7 +75,7 @@ def validate_depth_files():
         print(f"\n[ERROR] Depth 파일이 하나도 없습니다!")
     
     # 문제 진단
-    print(f"\n🔍 문제 진단:")
+    print(f"\n[SEARCH] 문제 진단:")
     if depth_stats['has_depth_folder'] > 0 and depth_stats['has_depth_files'] == 0:
         print("  [WARNING]  depth 폴더는 생성되었지만 파일이 없음")
         print("  → Blender OutputFile 노드가 파일을 저장하지 못함")

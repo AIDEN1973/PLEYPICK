@@ -19,7 +19,7 @@ class AutoSystem:
     def start_all_services(self):
         """모든 서비스 시작"""
         try:
-            print("🚀 자동 시스템 시작")
+            print("[START] 자동 시스템 시작")
             print("=" * 50)
             
             # 1. 서버 모니터링 시작
@@ -34,7 +34,7 @@ class AutoSystem:
             self.check_system_status()
             
             self.is_running = True
-            print("✅ 자동 시스템 시작 완료")
+            print("[OK] 자동 시스템 시작 완료")
             print("=" * 50)
             
         except Exception as e:
@@ -51,7 +51,7 @@ class AutoSystem:
                     stderr=subprocess.PIPE,
                     text=True
                 )
-                print("✅ 서버 모니터링 시작됨")
+                print("[OK] 서버 모니터링 시작됨")
             else:
                 print("[ERROR] 서버 모니터 스크립트를 찾을 수 없습니다")
         except Exception as e:
@@ -68,7 +68,7 @@ class AutoSystem:
                     stderr=subprocess.PIPE,
                     text=True
                 )
-                print("✅ 자동 복구 시스템 시작됨")
+                print("[OK] 자동 복구 시스템 시작됨")
             else:
                 print("[ERROR] 자동 복구 스크립트를 찾을 수 없습니다")
         except Exception as e:
@@ -84,7 +84,7 @@ class AutoSystem:
             try:
                 response = requests.get('http://localhost:3002/api/synthetic/status', timeout=5)
                 if response.status_code == 200:
-                    print("✅ API 서버: 정상")
+                    print("[OK] API 서버: 정상")
                 else:
                     print("[WARNING] API 서버: 응답 이상")
             except:
@@ -93,9 +93,9 @@ class AutoSystem:
             # 렌더링 상태 확인
             state_file = os.path.join(os.path.dirname(__file__), '..', 'output', 'synthetic', 'rendering_state.json')
             if os.path.exists(state_file):
-                print("📂 렌더링 상태: 저장됨")
+                print("[DIR] 렌더링 상태: 저장됨")
             else:
-                print("📂 렌더링 상태: 없음")
+                print("[DIR] 렌더링 상태: 없음")
                 
         except Exception as e:
             print(f"[WARNING] 상태 확인 실패: {e}")
@@ -123,16 +123,16 @@ class AutoSystem:
     def stop_all_services(self):
         """모든 서비스 중단"""
         try:
-            print("\n🛑 자동 시스템 중단 중...")
+            print("\n[STOP] 자동 시스템 중단 중...")
             
             self.is_running = False
             
             for name, process in self.processes.items():
                 if process and process.poll() is None:
                     process.terminate()
-                    print(f"🛑 {name} 프로세스 중단됨")
+                    print(f"[STOP] {name} 프로세스 중단됨")
             
-            print("✅ 자동 시스템 중단 완료")
+            print("[OK] 자동 시스템 중단 완료")
             
         except Exception as e:
             print(f"[WARNING] 중단 실패: {e}")
@@ -143,7 +143,7 @@ def main():
     
     # 시그널 핸들러 등록
     def signal_handler(signum, frame):
-        print(f"\n🛑 시그널 {signum} 수신 - 자동 시스템 중단")
+        print(f"\n[STOP] 시그널 {signum} 수신 - 자동 시스템 중단")
         auto_system.stop_all_services()
         sys.exit(0)
     

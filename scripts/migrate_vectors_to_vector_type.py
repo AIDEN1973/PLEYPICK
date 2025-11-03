@@ -48,7 +48,7 @@ def convert_array_to_vector(array_data) -> Optional[List[float]]:
 
 def migrate_vectors():
     """ARRAY 타입 데이터를 VECTOR(768)로 마이그레이션"""
-    print("🚀 VECTOR 타입 마이그레이션 시작...")
+    print("[START] VECTOR 타입 마이그레이션 시작...")
     
     # 1. 기존 데이터 조회
     print("📊 기존 데이터 조회 중...")
@@ -63,7 +63,7 @@ def migrate_vectors():
     print(f"📊 총 {total}개 레코드 발견")
     
     if total == 0:
-        print("✅ 마이그레이션할 데이터 없음")
+        print("[OK] 마이그레이션할 데이터 없음")
         return
     
     # 2. 변환 및 업데이트
@@ -108,7 +108,7 @@ def migrate_vectors():
                 error_count += 1
                 print(f"[ERROR] 업데이트 실패 ({part_id}/{color_id}): {e}")
     
-    print(f"\n✅ 마이그레이션 완료:")
+    print(f"\n[OK] 마이그레이션 완료:")
     print(f"   - 성공: {success_count}개")
     print(f"   - 실패: {error_count}개")
     print(f"   - 총계: {total}개")

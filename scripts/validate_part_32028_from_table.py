@@ -54,26 +54,26 @@ def main():
     print("  part_id: 32028")
     print("  color_id: 1")
     print("  part_name: 32028")
-    print("  confidence: 0.95 ✅")
+    print("  confidence: 0.95 [OK]")
     print("  usage_frequency: 0")
     
     # 2. feature_json
     print("\n[2/5] feature_json 검증")
-    print("  ✅ shape_tag: plate")
-    print("  ✅ stud_count_top: 2")
-    print("  ✅ tube_count_bottom: 0")
-    print("  ✅ confusions: ['3001', '3004']")
-    print("  ✅ recognition_hints: 존재")
-    print("  ✅ feature_text: LLM 생성 메타데이터 포함")
+    print("  [OK] shape_tag: plate")
+    print("  [OK] stud_count_top: 2")
+    print("  [OK] tube_count_bottom: 0")
+    print("  [OK] confusions: ['3001', '3004']")
+    print("  [OK] recognition_hints: 존재")
+    print("  [OK] feature_text: LLM 생성 메타데이터 포함")
     
     # 3. clip_text_emb 분석
     print("\n[3/5] clip_text_emb 벡터 분석")
     # 전체 벡터 길이 확인 (테이블에서 보면 768차원으로 보임)
     clip_analysis = analyze_vector_pattern(clip_sample_start + [0] * (768 - len(clip_sample_start)), "clip_text_emb", " (추정)")
     print(f"  [WARNING]  전체 벡터 데이터 없음 (샘플만 확인)")
-    print(f"  📋 예상: 768차원")
-    print(f"  📋 테이블에서 확인: 값 범위 -0.xx ~ 0.xx (정상)")
-    print(f"  💡 추정: 정상 CLIP 임베딩 (제로 벡터 아님)")
+    print(f"  [REPORT] 예상: 768차원")
+    print(f"  [REPORT] 테이블에서 확인: 값 범위 -0.xx ~ 0.xx (정상)")
+    print(f"  [INFO] 추정: 정상 CLIP 임베딩 (제로 벡터 아님)")
     
     # 4. semantic_vector 분석
     print("\n[4/5] semantic_vector 벡터 분석")
@@ -98,15 +98,15 @@ def main():
     if mid_analysis.get('abs_mean', 0) < 0.001:
         print(f"    [WARNING]  경고: 중반부 평균 절댓값이 매우 작음 (제로 패딩 의심)")
     else:
-        print(f"    ✅ 중반부 값 범위 정상")
+        print(f"    [OK] 중반부 값 범위 정상")
     
     # 5. 종합 판단
     print("\n[5/5] 종합 판단")
-    print("  ✅ feature_json: 정상 (LLM 생성 메타데이터 포함)")
-    print("  ✅ recognition_hints: 정상")
-    print("  ✅ clip_text_emb: 추정 정상 (제로 벡터 아님)")
+    print("  [OK] feature_json: 정상 (LLM 생성 메타데이터 포함)")
+    print("  [OK] recognition_hints: 정상")
+    print("  [OK] clip_text_emb: 추정 정상 (제로 벡터 아님)")
     print("  [WARNING]  semantic_vector: 후반부 제로 패딩 가능성 (추가 확인 필요)")
-    print("\n  📋 권장 조치:")
+    print("\n  [REPORT] 권장 조치:")
     print("    1. semantic_vector 전체 768차원 데이터 확인")
     print("    2. 후반부 256차원 (512~768) norm 계산")
     print("    3. 제로 패딩 발견 시 fixZeroPaddingVectors() 실행")

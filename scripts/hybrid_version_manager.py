@@ -211,7 +211,7 @@ def main():
             
         elif args.action == 'list':
             versions = manager.list_versions()
-            print("📋 하이브리드 데이터셋 버전 목록:")
+            print("[REPORT] 하이브리드 데이터셋 버전 목록:")
             
             print("\n🏠 로컬 버전:")
             for v in versions["local"]:
@@ -223,9 +223,9 @@ def main():
                 status = " (현재)" if v.get('is_current') else ""
                 print(f"  v{v['version']}{status}: {v['file_counts']['total']}개 파일")
             
-            print("\n🔄 동기화 상태:")
+            print("\n[RETRY] 동기화 상태:")
             for v in versions["hybrid"]:
-                sync_status = "✅" if v['synced'] else "[ERROR]"
+                sync_status = "[OK]" if v['synced'] else "[ERROR]"
                 print(f"  v{v['version']} ({v['source']}): {sync_status} {v['status']}")
             
             # JSON 출력 (API용)

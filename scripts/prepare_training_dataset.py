@@ -60,9 +60,9 @@ def prepare_dataset(
     if force_rebuild and target_path.exists():
         print("🗑️ 강제 재생성 모드: 기존 데이터셋 폴더 삭제 중...")
         shutil.rmtree(target_path)
-        print("✅ 기존 데이터셋 폴더 삭제 완료")
+        print("[OK] 기존 데이터셋 폴더 삭제 완료")
     elif target_path.exists():
-        print("🔄 증분 업데이트 모드: 기존 데이터셋 유지하고 새 파일만 추가")
+        print("[RETRY] 증분 업데이트 모드: 기존 데이터셋 유지하고 새 파일만 추가")
     
     # 디렉토리 생성
     (target_path / "images" / "train").mkdir(parents=True, exist_ok=True)
@@ -186,7 +186,7 @@ def prepare_dataset(
             if file_key not in existing_files:
                 new_image_files.append(file_dict)
         
-        print(f"🔄 증분 업데이트: 새 파일 {len(new_image_files)}개, 기존 파일 {len(existing_files)}개")
+        print(f"[RETRY] 증분 업데이트: 새 파일 {len(new_image_files)}개, 기존 파일 {len(existing_files)}개")
         image_files = new_image_files
     
     if len(image_files) == 0:
@@ -374,7 +374,7 @@ val_images: {len(val_files)}
     yaml_path = target_path / "data.yaml"
     yaml_path.write_text(data_yaml_content, encoding='utf-8')
     
-    print("✅ 데이터셋 준비 완료!")
+    print("[OK] 데이터셋 준비 완료!")
     print(f"📊 준비된 파일: 이미지 {copied_images}개, 라벨 {copied_labels}개, 메타데이터 {copied_metadata}개")
     print(f"[DIR] 저장 위치: {target_path.absolute()}")
     
@@ -385,7 +385,7 @@ val_images: {len(val_files)}
             str(target_path), 
             description=f"자동 생성 - {len(image_files)}개 이미지"
         )
-        print(f"📋 데이터셋 버전 {version} 생성됨")
+        print(f"[REPORT] 데이터셋 버전 {version} 생성됨")
     except Exception as e:
         print(f"[WARNING] 버전 관리 실패: {e}")
         # 버전 관리는 선택사항이므로 계속 진행
@@ -414,7 +414,7 @@ if __name__ == "__main__":
             train_split=args.train_split,
             force_rebuild=args.force_rebuild
         )
-        print(f"✅ 성공: {result}")
+        print(f"[OK] 성공: {result}")
     except Exception as e:
         print(f"[ERROR] 오류: {e}")
         sys.exit(1)

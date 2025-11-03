@@ -97,7 +97,7 @@ def process_single_task(renderer, task):
 
 def main():
     """메인 함수"""
-    print("🔄 실패한 렌더링 작업 재처리 시작")
+    print("[RETRY] 실패한 렌더링 작업 재처리 시작")
     print("=" * 50)
     
     # 환경변수 로드
@@ -108,7 +108,7 @@ def main():
     # Supabase 클라이언트 생성
     try:
         supabase = create_client(supabase_url, supabase_key)
-        print("✅ Supabase 연결 성공")
+        print("[OK] Supabase 연결 성공")
     except Exception as e:
         print(f"[ERROR] Supabase 연결 실패: {e}")
         sys.exit(1)
@@ -116,7 +116,7 @@ def main():
     # 렌더러 초기화
     try:
         renderer = LDrawRenderer(supabase_url, supabase_key)
-        print("✅ 렌더러 초기화 성공")
+        print("[OK] 렌더러 초기화 성공")
     except Exception as e:
         print(f"[ERROR] 렌더러 초기화 실패: {e}")
         sys.exit(1)
@@ -125,10 +125,10 @@ def main():
     failed_tasks = get_failed_tasks(supabase, limit=5)
     
     if not failed_tasks:
-        print("✅ 처리할 실패한 작업이 없습니다.")
+        print("[OK] 처리할 실패한 작업이 없습니다.")
         return
     
-    print(f"📋 {len(failed_tasks)}개의 실패한 작업을 발견했습니다.")
+    print(f"[REPORT] {len(failed_tasks)}개의 실패한 작업을 발견했습니다.")
     
     # 각 작업 재처리
     success_count = 0
@@ -152,7 +152,7 @@ def main():
     print(f"  - 성공률: {success_count/len(failed_tasks)*100:.1f}%")
     
     if success_count > 0:
-        print("✅ 재처리가 완료되었습니다.")
+        print("[OK] 재처리가 완료되었습니다.")
     else:
         print("[WARNING] 모든 작업이 실패했습니다.")
 

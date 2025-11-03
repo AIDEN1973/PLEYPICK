@@ -407,7 +407,7 @@ def main():
             
         elif args.action == 'list':
             versions = manager.list_versions()
-            print("📋 데이터셋 버전 목록:")
+            print("[REPORT] 데이터셋 버전 목록:")
             for v in versions:
                 status = " (현재)" if v["is_current"] else ""
                 print(f"  v{v['version']}{status}: {v['file_counts']['total']}개 파일 - {v['created_at']}")

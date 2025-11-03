@@ -98,7 +98,7 @@ def get_active_model(supabase, version=None):
             return None
         
         model_info = response.data[0]
-        print(f"✅ 모델 발견:")
+        print(f"[OK] 모델 발견:")
         print(f"   버전: {model_info.get('version')}")
         print(f"   이름: {model_info.get('model_name')}")
         print(f"   URL: {model_info.get('model_url')}")
@@ -136,7 +136,7 @@ def download_model(model_url, output_path):
                         percent = (downloaded / total_size) * 100
                         print(f"\r   진행률: {percent:.1f}%", end='', flush=True)
         
-        print(f"\n✅ 모델 다운로드 완료: {output_path}")
+        print(f"\n[OK] 모델 다운로드 완료: {output_path}")
         print(f"   크기: {downloaded / 1024 / 1024:.1f} MB")
         
         return True
@@ -178,7 +178,7 @@ def prepare_test_dataset(test_set_path=None):
             image_files = list(val_images.glob("*.webp")) + list(val_images.glob("*.jpg")) + list(val_images.glob("*.png"))
             if len(image_files) > 0:
                 dataset_path = path
-                print(f"✅ 데이터셋 발견: {path}", flush=True)
+                print(f"[OK] 데이터셋 발견: {path}", flush=True)
                 print(f"   검증 이미지 수: {len(image_files)}개", flush=True)
                 break
     
@@ -189,7 +189,7 @@ def prepare_test_dataset(test_set_path=None):
             exists = path.exists()
             val_exists = (path / "images" / "val").exists() if exists else False
             print(f"     - {path}: {'존재' if exists else '없음'} (val: {'있음' if val_exists else '없음'})", flush=True)
-        print(f"\n💡 해결 방법:", flush=True)
+        print(f"\n[INFO] 해결 방법:", flush=True)
         print(f"   1. 데이터셋 생성: python scripts/prepare_yolo_dataset.py", flush=True)
         print(f"   2. 또는 --test-set 옵션으로 데이터셋 경로 지정", flush=True)
         return None
@@ -227,7 +227,7 @@ names: {class_names}
 """
         try:
             data_yaml.write_text(data_yaml_content, encoding='utf-8')
-            print(f"✅ data.yaml 생성 완료 (클래스 수: {num_classes})", flush=True)
+            print(f"[OK] data.yaml 생성 완료 (클래스 수: {num_classes})", flush=True)
         except PermissionError as e:
             print(f"[ERROR] data.yaml 파일 쓰기 권한 오류: {e}", flush=True)
             print(f"   경로: {data_yaml}", flush=True)
@@ -244,7 +244,7 @@ names: {class_names}
     image_count = len(list(val_images.glob("*.webp"))) + len(list(val_images.glob("*.jpg"))) + len(list(val_images.glob("*.png")))
     label_count = len(list(val_labels.glob("*.txt")))
     
-    print(f"✅ 검증 데이터셋 준비 완료:", flush=True)
+    print(f"[OK] 검증 데이터셋 준비 완료:", flush=True)
     print(f"   경로: {dataset_path}", flush=True)
     print(f"   검증 이미지: {image_count}개", flush=True)
     print(f"   검증 라벨: {label_count}개", flush=True)
@@ -461,7 +461,7 @@ def evaluate_model(model_path, dataset_path, device='cuda'):
         else:
             metrics['f1_score'] = 0.0
         
-        print(f"\n✅ 평가 완료:")
+        print(f"\n[OK] 평가 완료:")
         print(f"   mAP50: {metrics['mAP50']:.4f}")
         print(f"   mAP50-95: {metrics['mAP50_95']:.4f}")
         print(f"   Precision: {metrics['precision']:.4f}")
@@ -510,7 +510,7 @@ def update_model_metrics(supabase, model_id, metrics):
             'metrics': updated_metrics
         }).eq('id', model_id).execute()
         
-        print(f"✅ 모델 메트릭 업데이트 완료")
+        print(f"[OK] 모델 메트릭 업데이트 완료")
         print(f"   모델 ID: {model_id}")
         print(f"   검증 mAP50: {metrics['mAP50']:.4f}")
         print(f"   검증 mAP50-95: {metrics['mAP50_95']:.4f}")
@@ -554,7 +554,7 @@ def validate_model_accuracy(model_info, test_set_path=None, device='cuda'):
                 print(f"[ERROR] 모델 파일 다운로드 실패", flush=True)
                 return False
         
-        print(f"✅ 모델 파일 준비 완료: {model_path}", flush=True)
+        print(f"[OK] 모델 파일 준비 완료: {model_path}", flush=True)
         
         print(f"\n[STEP 2/5] 테스트 데이터셋 준비...", flush=True)
         # 2. 테스트 데이터셋 준비
@@ -612,23 +612,23 @@ def validate_model_accuracy(model_info, test_set_path=None, device='cuda'):
         
         all_passed = True
         for check_name, check_data in checks.items():
-            status = "✅" if check_data['passed'] else "[ERROR]"
+            status = "[OK]" if check_data['passed'] else "[ERROR]"
             print(f"   {status} {check_name}: {check_data['current']:.4f} (목표: {check_data['target']:.2f}, 달성률: {check_data['percentage']:.1f}%)", flush=True)
             if not check_data['passed']:
                 all_passed = False
         
         # 상세 피드백 제공
-        print(f"\n📋 검증 결과 분석:", flush=True)
+        print(f"\n[REPORT] 검증 결과 분석:", flush=True)
         
         if all_passed:
-            print(f"✅ 모든 SLO 기준 통과! 모델이 프로덕션 환경에 배포 가능합니다.", flush=True)
+            print(f"[OK] 모든 SLO 기준 통과! 모델이 프로덕션 환경에 배포 가능합니다.", flush=True)
         else:
             print(f"[ERROR] SLO 기준 미달 - 모델 개선 필요", flush=True)
             
             # Recall 분석
             if metrics['recall'] < slo_recall:
                 recall_gap = slo_recall - metrics['recall']
-                print(f"\n🔍 Recall 분석 (현재: {metrics['recall']:.1%}, 목표: {slo_recall:.0%}):", flush=True)
+                print(f"\n[SEARCH] Recall 분석 (현재: {metrics['recall']:.1%}, 목표: {slo_recall:.0%}):", flush=True)
                 print(f"   - 문제: 모델이 {recall_gap:.1%}만큼 객체를 놓치고 있습니다.", flush=True)
                 print(f"   - 영향: 약 {100 - metrics['recall']*100:.1f}%의 객체를 탐지하지 못합니다.", flush=True)
                 print(f"   - 해결 방안:", flush=True)
@@ -640,7 +640,7 @@ def validate_model_accuracy(model_info, test_set_path=None, device='cuda'):
             # mAP50 분석
             if metrics['mAP50'] < slo_map50:
                 map50_gap = slo_map50 - metrics['mAP50']
-                print(f"\n🔍 mAP50 분석 (현재: {metrics['mAP50']:.1%}, 목표: {slo_map50:.0%}):", flush=True)
+                print(f"\n[SEARCH] mAP50 분석 (현재: {metrics['mAP50']:.1%}, 목표: {slo_map50:.0%}):", flush=True)
                 print(f"   - 문제: 평균 정밀도가 {map50_gap:.1%}만큼 부족합니다.", flush=True)
                 print(f"   - 영향: 탐지 정확도가 목표보다 낮습니다.", flush=True)
                 print(f"   - 해결 방안:", flush=True)
@@ -652,7 +652,7 @@ def validate_model_accuracy(model_info, test_set_path=None, device='cuda'):
             # mAP50-95 분석
             if metrics['mAP50_95'] < slo_map50_95:
                 map50_95_gap = slo_map50_95 - metrics['mAP50_95']
-                print(f"\n🔍 mAP50-95 분석 (현재: {metrics['mAP50_95']:.1%}, 목표: {slo_map50_95:.0%}):", flush=True)
+                print(f"\n[SEARCH] mAP50-95 분석 (현재: {metrics['mAP50_95']:.1%}, 목표: {slo_map50_95:.0%}):", flush=True)
                 print(f"   - 문제: IoU 임계값 범위에서 정밀도가 {map50_95_gap:.1%}만큼 부족합니다.", flush=True)
                 print(f"   - 영향: 바운딩 박스 위치 정확도가 낮습니다.", flush=True)
                 print(f"   - 해결 방안:", flush=True)
@@ -661,7 +661,7 @@ def validate_model_accuracy(model_info, test_set_path=None, device='cuda'):
                 print(f"     3. 데이터 증강 시 위치 보존 강화", flush=True)
             
             # 종합 권장사항
-            print(f"\n💡 우선순위별 개선 권장사항:", flush=True)
+            print(f"\n[INFO] 우선순위별 개선 권장사항:", flush=True)
             print(f"   1순위: Recall 개선 (confidence threshold 조정)", flush=True)
             print(f"   2순위: 학습 데이터 품질 및 양 확보", flush=True)
             print(f"   3순위: 하이퍼파라미터 재조정 (learning rate, batch size 등)", flush=True)
@@ -725,7 +725,7 @@ def main():
     
     if success:
         print("\n" + "=" * 60)
-        print("✅ 모델 검증 완료")
+        print("[OK] 모델 검증 완료")
         print("=" * 60)
         sys.exit(0)
     else:

@@ -200,7 +200,7 @@ def main():
     print("\n[2/4] feature_json 검증")
     fj_result = validate_feature_json(sample_data["feature_json"])
     if fj_result["valid"]:
-        print("  ✅ feature_json 정상")
+        print("  [OK] feature_json 정상")
         print(f"    shape_tag: {sample_data['feature_json'].get('shape_tag')}")
         print(f"    stud_count_top: {sample_data['feature_json'].get('stud_count_top')}")
         print(f"    tube_count_bottom: {sample_data['feature_json'].get('tube_count_bottom')}")
@@ -212,7 +212,7 @@ def main():
     print("\n[3/4] recognition_hints 검증")
     if "recognition_hints" in sample_data:
         hints = sample_data["recognition_hints"]
-        print(f"  ✅ recognition_hints 존재")
+        print(f"  [OK] recognition_hints 존재")
         print(f"    ko: {hints.get('ko', 'N/A')[:50]}...")
         print(f"    top_view: {hints.get('top_view', 'N/A')[:50]}...")
         print(f"    unique_features: {hints.get('unique_features', [])}")
@@ -221,7 +221,7 @@ def main():
     
     print("\n[4/4] 벡터 검증 (clip_text_emb, semantic_vector)")
     print("  [WARNING]  실제 벡터 데이터는 사용자가 제공한 테이블에서 추출 필요")
-    print("  📋 검증 항목:")
+    print("  [REPORT] 검증 항목:")
     print("    - 차원 수 (기대: 768)")
     print("    - 제로 벡터 여부 (norm >= 0.01)")
     print("    - semantic_vector 제로 패딩 여부 (후반부 256차원)")
@@ -231,7 +231,7 @@ def main():
     print("=" * 80)
     
     # 실제 벡터 데이터 파싱 및 검증 스크립트 생성 안내
-    print("\n💡 실제 벡터 검증을 위해서는:")
+    print("\n[INFO] 실제 벡터 검증을 위해서는:")
     print("   1. clip_text_emb 배열을 파싱하여 validate_vector() 호출")
     print("   2. semantic_vector 배열을 파싱하여 validate_vector() 호출")
     print("   3. 제로 패딩 여부 확인 (semantic_vector 후반부 256차원)")

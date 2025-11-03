@@ -38,7 +38,7 @@ class LegoSetRenderer:
         self.supabase = None
         if SUPABASE_AVAILABLE and supabase_url and supabase_key:
             self.supabase = create_client(supabase_url, supabase_key)
-            print("✅ Supabase 클라이언트 연결 성공")
+            print("[OK] Supabase 클라이언트 연결 성공")
     
     def get_set_parts(self, set_num):
         """특정 세트의 부품 목록 조회"""
@@ -60,7 +60,7 @@ class LegoSetRenderer:
                 'part_id, color_id, quantity'
             ).eq('set_id', set_id).execute()
             
-            print(f"✅ 세트 {set_num}의 부품 {len(parts_result.data)}개 조회 완료")
+            print(f"[OK] 세트 {set_num}의 부품 {len(parts_result.data)}개 조회 완료")
             return parts_result.data
             
         except Exception as e:
@@ -140,7 +140,7 @@ class LegoSetRenderer:
             
             part_object = bpy.context.active_object
             part_object.name = f"LEGOPart_{part_id}"
-            print(f"✅ LDraw 부품 로드 성공: {part_id}")
+            print(f"[OK] LDraw 부품 로드 성공: {part_id}")
             return part_object
             
         except Exception as e:
@@ -187,7 +187,7 @@ class LegoSetRenderer:
         else:
             obj.data.materials.append(material)
         
-        print(f"✅ 재질 적용 완료: {color}")
+        print(f"[OK] 재질 적용 완료: {color}")
         return color
     
     def apply_random_rotation(self, obj):
@@ -197,18 +197,18 @@ class LegoSetRenderer:
         rotation_z = random.uniform(0, 2 * math.pi)
         
         obj.rotation_euler = (rotation_x, rotation_y, rotation_z)
-        print(f"✅ 회전 적용: ({math.degrees(rotation_x):.1f}°, {math.degrees(rotation_y):.1f}°, {math.degrees(rotation_z):.1f}°)")
+        print(f"[OK] 회전 적용: ({math.degrees(rotation_x):.1f}°, {math.degrees(rotation_y):.1f}°, {math.degrees(rotation_z):.1f}°)")
         return (rotation_x, rotation_y, rotation_z)
     
     def render_image(self, output_path):
         """이미지 렌더링"""
         bpy.context.scene.render.filepath = output_path
         bpy.ops.render.render(write_still=True)
-        print(f"✅ 렌더링 완료: {output_path}")
+        print(f"[OK] 렌더링 완료: {output_path}")
     
     def render_set(self, set_num, ldraw_path, output_dir, images_per_part=5):
         """세트 렌더링"""
-        print(f"🚀 레고 세트 렌더링 시작: {set_num}")
+        print(f"[START] 레고 세트 렌더링 시작: {set_num}")
         
         # 세트 부품 목록 조회
         set_parts = self.get_set_parts(set_num)

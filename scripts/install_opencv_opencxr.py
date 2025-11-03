@@ -15,15 +15,15 @@ def install_package(package_name, import_name=None):
     
     try:
         __import__(import_name)
-        print(f"✅ {package_name} 이미 설치됨")
+        print(f"[OK] {package_name} 이미 설치됨")
         return True
     except ImportError:
-        print(f"📦 {package_name} 설치 중...")
+        print(f"[PACKAGE] {package_name} 설치 중...")
         try:
             subprocess.check_call([
                 sys.executable, "-m", "pip", "install", "--user", package_name
             ])
-            print(f"✅ {package_name} 설치 완료")
+            print(f"[OK] {package_name} 설치 완료")
             return True
         except Exception as e:
             print(f"[ERROR] {package_name} 설치 실패: {e}")
@@ -47,7 +47,7 @@ def main():
     if exr_installed:
         try:
             import Imath
-            print("✅ Imath 사용 가능")
+            print("[OK] Imath 사용 가능")
         except ImportError:
             print("[WARNING] Imath를 찾을 수 없음 (OpenEXR 재설치 필요)")
     
@@ -55,11 +55,11 @@ def main():
     print("\n" + "=" * 60)
     print("설치 결과 요약")
     print("=" * 60)
-    print(f"OpenCV: {'✅ 설치됨' if cv2_installed else '[ERROR] 설치 실패'}")
-    print(f"OpenEXR: {'✅ 설치됨' if exr_installed else '[ERROR] 설치 실패'}")
+    print(f"OpenCV: {'[OK] 설치됨' if cv2_installed else '[ERROR] 설치 실패'}")
+    print(f"OpenEXR: {'[OK] 설치됨' if exr_installed else '[ERROR] 설치 실패'}")
     
     if cv2_installed and exr_installed:
-        print("\n✅ 모든 필수 패키지가 설치되었습니다.")
+        print("\n[OK] 모든 필수 패키지가 설치되었습니다.")
         print("렌더링 스크립트를 실행할 수 있습니다.")
         return 0
     else:

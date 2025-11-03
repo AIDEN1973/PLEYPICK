@@ -56,7 +56,7 @@ class AutoRequeueSystemEnhanced:
                 config_path="config/retrain_config.json",
                 supabase_client=self.supabase
             )
-            logger.info("✅ 재학습 트리거 초기화 완료")
+            logger.info("[OK] 재학습 트리거 초기화 완료")
             return True
         except Exception as e:
             logger.error(f"[ERROR] 재학습 트리거 초기화 실패: {e}")
@@ -67,7 +67,7 @@ class AutoRequeueSystemEnhanced:
         try:
             from retry_render_parameters import RetryParameterManager
             self.retry_parameter_manager = RetryParameterManager("config/retry_parameters.json")
-            logger.info("✅ 재렌더링 파라미터 매니저 초기화 완료")
+            logger.info("[OK] 재렌더링 파라미터 매니저 초기화 완료")
             return True
         except Exception as e:
             logger.error(f"[ERROR] 재렌더링 파라미터 매니저 초기화 실패: {e}")
@@ -112,7 +112,7 @@ class AutoRequeueSystemEnhanced:
                         'created_at': qa_log.get('created_at')
                     })
             
-            logger.info(f"🔍 QA FAIL 샘플 {len(fail_samples)}개 발견 (최근 {hours}시간)")
+            logger.info(f"[SEARCH] QA FAIL 샘플 {len(fail_samples)}개 발견 (최근 {hours}시간)")
             return fail_samples
             
         except Exception as e:
@@ -231,13 +231,13 @@ class AutoRequeueSystemEnhanced:
                         result = self.supabase.table('render_queue').insert(requeue_data).execute()
                         if result.data:
                             requeue_count += 1
-                            logger.info(f"🔄 재삽입: {sample['part_id']} - {sample['failure_reason']}")
+                            logger.info(f"[RETRY] 재삽입: {sample['part_id']} - {sample['failure_reason']}")
                             logger.info(f"   파라미터: samples={retry_params.samples}, lighting={retry_params.lighting}")
                     
                 except Exception as e:
                     logger.error(f"[ERROR] 재삽입 실패 {sample['part_id']}: {e}")
             
-            logger.info(f"✅ {requeue_count}개 샘플 재삽입 완료 (파라미터 적용)")
+            logger.info(f"[OK] {requeue_count}개 샘플 재삽입 완료 (파라미터 적용)")
             return requeue_count
             
         except Exception as e:
@@ -263,7 +263,7 @@ class AutoRequeueSystemEnhanced:
                         result = self.supabase.table('render_queue').insert(requeue_data).execute()
                         if result.data:
                             requeue_count += 1
-                            logger.info(f"🔄 기본 재삽입: {sample['part_id']}")
+                            logger.info(f"[RETRY] 기본 재삽입: {sample['part_id']}")
                 
                 except Exception as e:
                     logger.error(f"[ERROR] 기본 재삽입 실패 {sample['part_id']}: {e}")
@@ -331,7 +331,7 @@ class AutoRequeueSystemEnhanced:
             # 재학습 트리거 실행
             result = self.retrain_trigger.evaluate_all_triggers_with_notification()
             if result.get('recommendation', {}).get('should_retrain'):
-                logger.info("🚀 재학습 트리거 실행됨")
+                logger.info("[START] 재학습 트리거 실행됨")
                 
                 # Slack 알림 전송
                 self._send_retrain_notification(
@@ -362,9 +362,9 @@ class AutoRequeueSystemEnhanced:
             dataset_path = self._get_latest_dataset_path()
             
             # 학습 실행
-            logger.info("🎯 하이브리드 학습 파이프라인 실행")
+            logger.info("[TARGET] 하이브리드 학습 파이프라인 실행")
             results = pipeline.run_hybrid_training(dataset_path)
-            logger.info("✅ 하이브리드 학습 완료")
+            logger.info("[OK] 하이브리드 학습 완료")
             return results
             
         except Exception as e:
@@ -410,24 +410,24 @@ class AutoRequeueSystemEnhanced:
     def run_auto_requeue_cycle(self, hours: int = 24):
         """Auto-Requeue 사이클 실행 (실패 원인별 파라미터 적용)"""
         try:
-            logger.info("🔄 Auto-Requeue 사이클 시작 (실패 원인별 파라미터 적용)")
+            logger.info("[RETRY] Auto-Requeue 사이클 시작 (실패 원인별 파라미터 적용)")
             
             # 1. QA FAIL 샘플 검사
             fail_samples = self.check_qa_failures(hours)
             if not fail_samples:
-                logger.info("✅ QA FAIL 샘플 없음")
+                logger.info("[OK] QA FAIL 샘플 없음")
                 return
             
             # 2. 실패 샘플 재삽입 (파라미터 적용)
             requeue_count = self.enqueue_failed_samples_with_parameters(fail_samples)
-            logger.info(f"✅ 재삽입 완료: {requeue_count}개 (파라미터 적용)")
+            logger.info(f"[OK] 재삽입 완료: {requeue_count}개 (파라미터 적용)")
             
             # 3. 재학습 조건 확인
             if self.check_retrain_conditions(fail_samples):
                 # 4. 재학습 트리거 실행
                 self.trigger_retraining(fail_samples)
             
-            logger.info("✅ Auto-Requeue 사이클 완료")
+            logger.info("[OK] Auto-Requeue 사이클 완료")
             
         except Exception as e:
             logger.error(f"[ERROR] Auto-Requeue 사이클 실패: {e}")
