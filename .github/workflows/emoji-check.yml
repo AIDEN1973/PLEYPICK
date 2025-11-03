@@ -20,14 +20,20 @@ jobs:
         python-version: '3.9'
         
     - name: 이모지 사용 검사
+      working-directory: ${{ github.workspace }}
       run: |
         echo "=== 이모지 사용 검사 시작 ==="
+        if [ ! -f "scripts/check_emojis_simple.py" ]; then
+          echo "ERROR: scripts/check_emojis_simple.py 파일을 찾을 수 없습니다."
+          ls -la scripts/ | head -20
+          exit 1
+        fi
         python scripts/check_emojis_simple.py
         
     - name: 검사 결과 리포트
       if: failure()
       run: |
-        echo "❌ 이모지 사용 위반 발견!"
+        echo "[ERROR] 이모지 사용 위반 발견!"
         echo "NO_EMOJI_POLICY.md를 참조하여 ASCII 태그로 교체하세요."
         echo ""
         echo "허용된 ASCII 태그:"
