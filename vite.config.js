@@ -1,13 +1,79 @@
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { resolve } from 'path'
+import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { dirname } from 'path'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-import { getIntegratedConfig, validateConfig, printConfig } from './src/config/env.js'
+// 🔧 수정됨: Vercel 빌드에서 './src/config/env.js' 경로 해석 실패 대응
+// vite.config.js 내부에 최소 헬퍼 구현해 외부 모듈 의존 제거
+const DEFAULT_PORTS = {
+  frontend: 3000,
+  aiApi: 3005,
+  webpApi: 3004,
+  trainingApi: 3010,
+  syntheticApi: 3011,
+  manualUploadApi: 3030,
+  monitoring: 3040,
+  semanticVectorApi: 3022,
+}
+
+function getIntegratedConfig(mode) {
+  const env = process.env || {}
+  const toInt = (v, d) => {
+    const n = parseInt(v, 10)
+    return Number.isFinite(n) ? n : d
+  }
+  const ports = {
+    ...DEFAULT_PORTS,
+    frontend: 3000,
+    aiApi: toInt(env.VITE_PORT_AI_API, DEFAULT_PORTS.aiApi),
+    webpApi: toInt(env.VITE_PORT_WEBP_API, DEFAULT_PORTS.webpApi),
+    trainingApi: toInt(env.VITE_PORT_TRAINING_API, DEFAULT_PORTS.trainingApi),
+    syntheticApi: toInt(env.VITE_PORT_SYNTHETIC_API, DEFAULT_PORTS.syntheticApi),
+    manualUploadApi: toInt(env.VITE_PORT_MANUAL_UPLOAD_API, DEFAULT_PORTS.manualUploadApi),
+    monitoring: toInt(env.VITE_PORT_MONITORING, DEFAULT_PORTS.monitoring),
+    semanticVectorApi: toInt(env.VITE_PORT_SEMANTIC_VECTOR_API, DEFAULT_PORTS.semanticVectorApi),
+  }
+  return {
+    ports,
+    env,
+    mode,
+    isDevelopment: mode === 'development',
+    isProduction: mode === 'production',
+  }
+}
+
+function validateConfig(config) {
+  const required = ['frontend', 'aiApi', 'webpApi', 'syntheticApi', 'trainingApi']
+  const missing = required.filter((k) => !config.ports[k])
+  if (missing.length) {
+    console.error('[ERROR] 필수 포트 설정 누락:', missing.join(', ')) // 🔧 수정됨
+    return false
+  }
+  const invalid = Object.entries(config.ports)
+    .filter(([, port]) => port < 1024 || port > 65535)
+    .map(([name]) => name)
+  if (invalid.length) {
+    console.error('[ERROR] 잘못된 포트 범위:', invalid.join(', ')) // 🔧 수정됨
+    return false
+  }
+  console.log('[OK] 설정 검증 완료') // 🔧 수정됨
+  return true
+}
+
+function printConfig(config) {
+  console.log('\n[FIX] 현재 설정:') // 🔧 수정됨
+  console.log('='.repeat(40))
+  console.log(`모드: ${config.mode}`)
+  console.log(`개발환경: ${config.isDevelopment ? 'Yes' : 'No'}`)
+  console.log('\n포트 설정:')
+  Object.entries(config.ports).forEach(([name, port]) => {
+    console.log(`  ${name}: ${port}`)
+  })
+  console.log('='.repeat(40))
+}
 
 export default defineConfig(({ mode }) => {
   // 통합 설정 로드
@@ -28,13 +94,13 @@ export default defineConfig(({ mode }) => {
   // 프록시 로거 생성 함수
   const createProxyLogger = (name) => (proxy, _options) => {
     proxy.on('error', (err, _req, _res) => {
-      console.log(`❌ ${name} proxy error:`, err.message)
+      console.log(`[ERROR] ${name} proxy error:`, err.message) // 🔧 수정됨
     })
     proxy.on('proxyReq', (proxyReq, req, _res) => {
-      console.log(`📤 ${name} Request:`, req.method, req.url)
+      console.log(`[UPLOAD] ${name} Request:`, req.method, req.url) // 🔧 수정됨
     })
     proxy.on('proxyRes', (proxyRes, req, _res) => {
-      const status = proxyRes.statusCode >= 400 ? '❌' : '✅'
+      const status = proxyRes.statusCode >= 400 ? '[ERROR]' : '[OK]' // 🔧 수정됨
       console.log(`${status} ${name} Response:`, proxyRes.statusCode, req.url)
     })
   }
