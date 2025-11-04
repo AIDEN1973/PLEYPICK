@@ -34,7 +34,10 @@ class FilteredStderr:
             'IMB_load_image_from_memory',
             'background.exr',
             'unknown file-format',
-            'ImportLDraw-master'
+            'ImportLDraw-master',
+            'C:\\0001.exr',  # Blender 초기화 시 기본 경로로 인한 권한 오류 (실제 저장은 올바른 경로에서 성공)
+            'C:/0001.exr',
+            'IMB_exr_begin_write: ERROR: Permission denied'  # EXR 파일 권한 오류 (임시 경로 시도)
         ]
     
     def write(self, message):
@@ -994,12 +997,8 @@ class LDrawRenderer:
                 pass
         
         # 메타데이터 저장 최적화 (기술문서 준수 - ICC/EXIF 유지)
-        # Blender 버전 호환성을 위해 안전하게 처리
-        try:
-            if hasattr(bpy.context.scene.render.image_settings, 'exr_codec'):
-                bpy.context.scene.render.image_settings.exr_codec = 'NONE'
-        except Exception:
-            pass
+        # [FIX] exr_codec 설정 제거: 깊이 맵 출력 노드의 ZIP 압축 설정이 덮어쓰이지 않도록 함
+        # 메인 렌더 이미지는 WEBP 형식이므로 EXR 코덱 설정 불필요
             
         try:
             if hasattr(bpy.context.scene.render.image_settings, 'use_extension'):
@@ -1066,7 +1065,7 @@ class LDrawRenderer:
             # 경로는 render_image()에서 _configure_depth_output_path()로 설정됨
             depth_output.base_path = ''  # 빈 문자열 (렌더링 전에 반드시 재설정됨)
             depth_output.file_slots[0].path = ''  # 빈 문자열 (렌더링 전에 반드시 재설정됨)
-            depth_output.file_slots[0].use_node_format = False  # 노드 형식 사용 안 함
+            depth_output.file_slots[0].use_node_format = True  # [FIX] 노드 형식 사용 (node.format.exr_codec 적용 필수)
             depth_output.file_slots[0].save_as_render = False  # [FIX] 초기에는 저장 안 함 (렌더링 시 자동 설정됨)
             
             # [FIX] 깊이 출력을 EXR 형식으로 강제 설정 (렌더링 전 설정)
@@ -1080,7 +1079,23 @@ class LDrawRenderer:
             depth_output.file_slots[0].format.color_mode = 'BW'  # [FIX] RGB → BW (단일 채널)
             depth_output.file_slots[0].format.color_depth = '32'
             depth_output.file_slots[0].format.exr_codec = 'ZIP'
+            
+            # [FIX] 초기 설정 검증
+            verify_codec = depth_output.file_slots[0].format.exr_codec
+            verify_color_mode = depth_output.file_slots[0].format.color_mode
+            verify_use_node_format = depth_output.file_slots[0].use_node_format
+            
+            if verify_codec != 'ZIP':
+                print(f"[WARN] 초기 압축 설정 불일치: {verify_codec} (기대: ZIP), 재설정")
+                depth_output.file_slots[0].format.exr_codec = 'ZIP'
+                depth_output.format.exr_codec = 'ZIP'
+            
+            if not verify_use_node_format:
+                print(f"[ERROR] use_node_format=False → 노드 형식 설정이 무시됨! 재설정 중...")
+                depth_output.file_slots[0].use_node_format = True
+            
             print("[INFO] 깊이 맵 출력 형식 설정: OPEN_EXR (32비트, 단일 채널 Gray 모드)")
+            print(f"[VERIFY] 초기 EXR 설정: codec={depth_output.file_slots[0].format.exr_codec}, color_mode={verify_color_mode}, depth=32, use_node_format={depth_output.file_slots[0].use_node_format}")
             
             # Render Layers의 Depth 출력을 파일 노드에 연결
             depth_output_socket = None
@@ -1209,7 +1224,7 @@ class LDrawRenderer:
                 # Blender OutputFile 노드는 path에 파일명을 지정하면 자동으로 프레임 번호를 추가하지 않음
                 # [FIX] 언더스코어나 특수문자로 끝나면 프레임 번호가 자동 추가될 수 있으므로 정확한 파일명만 지정
                 depth_output.file_slots[0].path = file_prefix  # 전체 파일명 (확장자 제외): "6335317_007"
-                depth_output.file_slots[0].use_node_format = False
+                depth_output.file_slots[0].use_node_format = True  # [FIX] 노드 형식 사용 (node.format.exr_codec 적용 필수)
                 depth_output.file_slots[0].save_as_render = True
                 
                 # 프레임 번호 차단 및 형식 설정은 _setup_depth_map_rendering에서 완료 (중복 제거)
@@ -1219,12 +1234,27 @@ class LDrawRenderer:
                 
                 # [FIX] 형식 설정 검증
                 actual_format = depth_output.file_slots[0].format.file_format
+                actual_codec = depth_output.file_slots[0].format.exr_codec
+                actual_color_mode = depth_output.file_slots[0].format.color_mode
+                actual_use_node_format = depth_output.file_slots[0].use_node_format
+                
                 if actual_format != 'OPEN_EXR':
                     print(f"[WARN] 깊이 맵 형식 불일치: {actual_format} (기대: OPEN_EXR), 재설정 시도")
                     depth_output.file_slots[0].format.file_format = 'OPEN_EXR'
                     depth_output.format.file_format = 'OPEN_EXR'
-                else:
-                    print(f"[INFO] 깊이 맵 출력 경로 설정: base_path={base_path_normalized}, path={file_prefix}, format={actual_format}")
+                
+                if actual_codec != 'ZIP':
+                    print(f"[WARN] 깊이 맵 압축 설정 불일치: {actual_codec} (기대: ZIP), 재설정")
+                    depth_output.file_slots[0].format.exr_codec = 'ZIP'
+                    depth_output.format.exr_codec = 'ZIP'
+                    actual_codec = 'ZIP'
+                
+                if not actual_use_node_format:
+                    print(f"[ERROR] use_node_format=False → 노드 형식 설정이 무시됨! 재설정")
+                    depth_output.file_slots[0].use_node_format = True
+                
+                print(f"[INFO] 깊이 맵 출력 경로 설정: base_path={base_path_normalized}, path={file_prefix}")
+                print(f"[VERIFY] 깊이 맵 형식 설정: format={actual_format}, codec={actual_codec}, color_mode={actual_color_mode}, depth=32, use_node_format={depth_output.file_slots[0].use_node_format}")
                 
                 # [FIX] 최종 경로 검증
                 final_path = os.path.join(base_path, f"{file_prefix}.exr")
@@ -5679,60 +5709,71 @@ class LDrawRenderer:
                 if tree:
                     # OutputFile 노드가 있으면 저장 활성화 확인
                     for node in tree.nodes:
-                        if node.type == 'OUTPUT_FILE':
+                        if node.type == 'OUTPUT_FILE' and node.name == 'DepthOutput':
                             # [FIX] DepthOutput 노드만 save_as_render 활성화
-                            if node.name == 'DepthOutput':
-                                node.file_slots[0].save_as_render = True
-                                node.mute = False
-                            # [FIX] 추가: 깊이 맵 노드 형식 강제 확인 (렌더링 직전)
-                            if node.name == 'DepthOutput':
-                                # [FIX] 경로 파싱 함수 사용 (중복 제거)
-                                try:
-                                    depth_dir_abs, element_id, depth_filename = self._parse_depth_path_from_image_path(output_path)
-                                    
-                                    if not depth_dir_abs or not depth_filename:
-                                        print(f"[WARN] 경로 파싱 실패: {output_path}")
-                                        continue
-                                    
-                                    depth_filename_no_ext = depth_filename.replace('.exr', '')
-                                    base_path_normalized = depth_dir_abs.replace('\\', '/')
-                                    node.base_path = base_path_normalized
-                                    
-                                    # [FIX] C:\ 같은 잘못된 경로 재차 방지
-                                    if node.base_path == 'C:/' or node.base_path == 'C:\\' or node.base_path == '//':
-                                        print(f"[ERROR] base_path가 여전히 잘못됨: {node.base_path}, 강제 재설정")
-                                        node.base_path = base_path_normalized
-                                    
-                                    # [FIX] 전체 파일명 지정 (확장자 제외, 언더스코어 등 특수문자 없음)
-                                    # 예: "6335317_007" 형식으로 정확히 지정 (파일명에서 _0000001 패턴 제거)
-                                    import re
-                                    # 파일명에서 _0000001 같은 패턴 제거 (예: 6335317_0270001 -> 6335317_027)
-                                    normalized_filename = re.sub(r'(\d+_\d{3})\d{4,}$', r'\1', depth_filename_no_ext)
-                                    node.file_slots[0].path = normalized_filename
-                                    
-                                    # 프레임 번호 차단 및 형식 설정은 _setup_depth_map_rendering에서 완료 (중복 제거)
-                                    
-                                    # 폴더 생성 확인
-                                    os.makedirs(depth_dir_abs, exist_ok=True)
-                                    
-                                    print(f"[INFO] 깊이 맵 경로 재설정: base_path={node.base_path}, path={node.file_slots[0].path}")
-                                except Exception as path_error:
-                                    print(f"[WARN] 깊이 맵 경로 재설정 실패: {path_error}")
-                                    import traceback
-                                    traceback.print_exc()
+                            node.file_slots[0].save_as_render = True
+                            node.mute = False
+                            
+                            # [FIX] 렌더링 직전 깊이 맵 노드 형식 강제 확인
+                            # 경로 파싱 및 설정
+                            try:
+                                depth_dir_abs, element_id, depth_filename = self._parse_depth_path_from_image_path(output_path)
                                 
-                                node.format.file_format = 'OPEN_EXR'
-                                node.file_slots[0].format.file_format = 'OPEN_EXR'
-                                node.file_slots[0].format.color_mode = 'BW'  # [FIX] RGB → BW 수정
-                                node.file_slots[0].format.color_depth = '32'
+                                if not depth_dir_abs or not depth_filename:
+                                    print(f"[WARN] 렌더링 직전 경로 파싱 실패: {output_path}")
+                                    continue
+                                
+                                depth_filename_no_ext = depth_filename.replace('.exr', '')
+                                base_path_normalized = depth_dir_abs.replace('\\', '/')
+                                
+                                # 경로 유효성 검증
+                                if base_path_normalized in ('C:/', 'C:\\', '//', '', '/tmp', 'C:/tmp', 'C:\\tmp'):
+                                    print(f"[ERROR] 렌더링 직전 잘못된 경로 감지: {base_path_normalized}")
+                                    continue
+                                
+                                node.base_path = base_path_normalized
+                                
+                                # 파일명 정규화 (프레임 번호 패턴 제거)
+                                import re
+                                normalized_filename = re.sub(r'(\d+_\d{3})\d{4,}$', r'\1', depth_filename_no_ext)
+                                node.file_slots[0].path = normalized_filename
+                                
+                                # 폴더 생성
+                                os.makedirs(depth_dir_abs, exist_ok=True)
+                                
+                                print(f"[INFO] 렌더링 직전 경로 설정: base_path={node.base_path}, path={node.file_slots[0].path}")
+                            except Exception as path_error:
+                                print(f"[ERROR] 렌더링 직전 경로 설정 실패: {path_error}")
+                                import traceback
+                                traceback.print_exc()
+                                continue
+                            
+                            # 형식 강제 설정
+                            node.format.file_format = 'OPEN_EXR'
+                            node.file_slots[0].format.file_format = 'OPEN_EXR'
+                            node.file_slots[0].format.color_mode = 'BW'
+                            node.file_slots[0].format.color_depth = '32'
+                            node.file_slots[0].format.exr_codec = 'ZIP'
+                            
+                            # use_node_format 강제 활성화 (핵심 설정)
+                            if not node.file_slots[0].use_node_format:
+                                print(f"[ERROR] 렌더링 직전 use_node_format=False 감지! 강제 활성화")
+                                node.file_slots[0].use_node_format = True
+                            
+                            # 압축 설정 검증
+                            actual_codec = node.file_slots[0].format.exr_codec
+                            if actual_codec != 'ZIP':
+                                print(f"[ERROR] 렌더링 직전 압축 불일치: {actual_codec} → ZIP 재설정")
                                 node.file_slots[0].format.exr_codec = 'ZIP'
-                                # [FIX] 렌더링 직전 파일명 재확인 및 강제 설정
-                                if hasattr(node.file_slots[0], 'path') and node.file_slots[0].path:
-                                    expected_path = node.file_slots[0].path
-                                    if expected_path.endswith('_') or expected_path != depth_filename_no_ext:
-                                        node.file_slots[0].path = depth_filename_no_ext
-                                        print(f"[FIX] 렌더링 직전 파일명 재설정: {depth_filename_no_ext}")
-                                print(f"[INFO] 깊이 맵 노드 형식 재확인: {node.file_slots[0].format.file_format}, path={node.file_slots[0].path}")
+                            
+                            # 최종 검증 로그
+                            print(f"[VERIFY] 렌더링 직전 EXR 설정 확인:")
+                            print(f"  - format={node.file_slots[0].format.file_format}")
+                            print(f"  - codec={node.file_slots[0].format.exr_codec}")
+                            print(f"  - color_mode={node.file_slots[0].format.color_mode}")
+                            print(f"  - color_depth={node.file_slots[0].format.color_depth}")
+                            print(f"  - use_node_format={node.file_slots[0].use_node_format}")
+                            print(f"  - path={node.file_slots[0].path}")
             
             # [FIX] 수정됨: write_still=True는 OutputFile 노드를 실행하지 않음
             # 따라서 두 단계로 나눠서 처리:
@@ -5831,6 +5872,23 @@ class LDrawRenderer:
                                         # [FIX] write_still=False 실행 전에 save_as_render 활성화
                                         depth_node.file_slots[0].save_as_render = True
                                         
+                                        # [FIX] Compositor 실행 직전 압축 설정 재확인
+                                        final_codec = depth_node.file_slots[0].format.exr_codec
+                                        final_color_mode = depth_node.file_slots[0].format.color_mode
+                                        final_use_node_format = depth_node.file_slots[0].use_node_format
+                                        
+                                        if final_codec != 'ZIP':
+                                            print(f"[WARN] Compositor 실행 직전 압축 설정 불일치: {final_codec} (기대: ZIP), 재설정")
+                                            depth_node.file_slots[0].format.exr_codec = 'ZIP'
+                                            depth_node.format.exr_codec = 'ZIP'
+                                            final_codec = 'ZIP'
+                                        
+                                        if not final_use_node_format:
+                                            print(f"[ERROR] Compositor 실행 직전 use_node_format=False 감지! 재설정 필수")
+                                            depth_node.file_slots[0].use_node_format = True
+                                        
+                                        print(f"[VERIFY] Compositor 실행 직전 EXR 설정: codec={final_codec}, color_mode={final_color_mode}, use_node_format={depth_node.file_slots[0].use_node_format}, path={depth_node.file_slots[0].path}")
+                                        
                                         # [FIX] 근본 원인 수정: Blender는 write_still=False를 호출할 때
                                         # OutputFile 노드가 save_as_render=True여야만 파일을 저장함
                                         # 그러나 이미 렌더링된 결과를 다시 사용하지 않고 새로 렌더링함
@@ -5839,6 +5897,28 @@ class LDrawRenderer:
                                         
                                         # Compositor 실행 (write_still=True로 변경하여 즉시 저장)
                                         bpy.ops.render.render(write_still=True)
+                                        
+                                        # [FIX] EXR 파일 생성 후 압축 상태 검증
+                                        expected_exr_path = os.path.join(depth_dir_abs, f"{normalized_filename}.exr")
+                                        if os.path.exists(expected_exr_path):
+                                            file_size = os.path.getsize(expected_exr_path)
+                                            file_size_kb = file_size / 1024
+                                            print(f"[VERIFY] EXR 파일 생성 완료: {expected_exr_path}")
+                                            print(f"[VERIFY] EXR 파일 크기: {file_size:,} bytes ({file_size_kb:.2f} KB)")
+                                            
+                                            # 압축 상태 추정 (단일 채널 32비트 기준)
+                                            render_resolution = bpy.context.scene.render.resolution_x * bpy.context.scene.render.resolution_y
+                                            uncompressed_size = render_resolution * 4  # 32비트 float = 4 bytes
+                                            compression_ratio = uncompressed_size / file_size if file_size > 0 else 0
+                                            
+                                            if file_size_kb > 300:
+                                                print(f"[WARN] EXR 파일 크기가 비정상적으로 큼: {file_size_kb:.2f} KB (압축 미적용 가능성)")
+                                                print(f"[WARN] 압축률: {compression_ratio:.2f}x (예상: 3-5x)")
+                                            else:
+                                                print(f"[INFO] EXR 파일 크기 정상: {file_size_kb:.2f} KB, 압축률: {compression_ratio:.2f}x")
+                                        else:
+                                            print(f"[WARN] EXR 파일이 생성되지 않았습니다: {expected_exr_path}")
+                                        
                                         print("[INFO] Compositor 실행 및 EXR 파일 저장 완료")
                                 else:
                                     print(f"[WARN] 이미지 경로가 존재하지 않음: {current_image_path}")
@@ -7225,7 +7305,7 @@ def main():
     split = getattr(args, 'split', 'train') if hasattr(args, 'split') and args.split else 'train'
     element_or_part = getattr(args, 'element_id', args.part_id) if hasattr(args, 'element_id') and getattr(args, 'element_id') else args.part_id
     images_root = os.path.join(dataset_root, 'images', split, element_or_part)
-    labels_root = os.path.join(dataset_root, 'labels', element_or_part)
+    labels_root = os.path.join(dataset_root, 'labels', split, element_or_part)  # [FIX] 수정됨: labels도 train/val/test 폴더 포함 (어노테이션.txt:23 기준)
     meta_root   = os.path.join(dataset_root, 'meta',   element_or_part)
     meta_e_root = os.path.join(dataset_root, 'meta-e', element_or_part)  # [FIX] 수정됨: meta-e 폴더 추가
     os.makedirs(images_root, exist_ok=True)
@@ -7563,8 +7643,13 @@ def main():
                 if len(train_files) > 10:  # 최소 10개 이상일 때만 분할
                     # val 폴더 경로 생성
                     val_images_dir = train_images_dir.replace('/train/', '/val/').replace('\\train\\', '\\val\\')
-                    train_labels_dir = os.path.join(os.path.dirname(os.path.dirname(train_images_dir)), 'labels', os.path.basename(train_images_dir))
-                    val_labels_dir = os.path.join(os.path.dirname(os.path.dirname(val_images_dir)), 'labels', os.path.basename(val_images_dir))
+                    # [FIX] 수정됨: labels 경로도 train/val 폴더 포함 (어노테이션.txt:23 기준)
+                    # train_images_dir 예: images/train/{element_id}
+                    # labels/train/{element_id} 구조로 생성
+                    dataset_base = os.path.dirname(os.path.dirname(os.path.dirname(train_images_dir)))  # dataset_synthetic
+                    element_id = os.path.basename(train_images_dir)  # {element_id}
+                    train_labels_dir = os.path.join(dataset_base, 'labels', 'train', element_id)
+                    val_labels_dir = os.path.join(dataset_base, 'labels', 'val', element_id)
                     
                     # val 폴더 생성
                     os.makedirs(val_images_dir, exist_ok=True)
