@@ -1066,7 +1066,7 @@ class LDrawRenderer:
             depth_output.base_path = ''  # 빈 문자열 (렌더링 전에 반드시 재설정됨)
             depth_output.file_slots[0].path = ''  # 빈 문자열 (렌더링 전에 반드시 재설정됨)
             depth_output.file_slots[0].use_node_format = True  # [FIX] 노드 형식 사용 (node.format.exr_codec 적용 필수)
-            depth_output.file_slots[0].save_as_render = False  # [FIX] 초기에는 저장 안 함 (렌더링 시 자동 설정됨)
+            depth_output.file_slots[0].save_as_render = True  # [FIX] 렌더링 시 자동 저장 활성화
             
             # [FIX] 깊이 출력을 EXR 형식으로 강제 설정 (렌더링 전 설정)
             # [FIX] 수정됨: 단일 채널(Gray) 모드로 저장하여 용량 최적화 (약 60-70% 감소)
@@ -1225,7 +1225,7 @@ class LDrawRenderer:
                 # [FIX] 언더스코어나 특수문자로 끝나면 프레임 번호가 자동 추가될 수 있으므로 정확한 파일명만 지정
                 depth_output.file_slots[0].path = file_prefix  # 전체 파일명 (확장자 제외): "6335317_007"
                 depth_output.file_slots[0].use_node_format = True  # [FIX] 노드 형식 사용 (node.format.exr_codec 적용 필수)
-                depth_output.file_slots[0].save_as_render = True
+                depth_output.file_slots[0].save_as_render = True  # [FIX] 렌더링 시 자동 저장 활성화
                 
                 # 프레임 번호 차단 및 형식 설정은 _setup_depth_map_rendering에서 완료 (중복 제거)
                 # 최종 경로/형식 검증은 render_image에서 수행
@@ -5775,11 +5775,14 @@ class LDrawRenderer:
                             print(f"  - use_node_format={node.file_slots[0].use_node_format}")
                             print(f"  - path={node.file_slots[0].path}")
             
-            # [FIX] 수정됨: write_still=True는 OutputFile 노드를 실행하지 않음
-            # 따라서 두 단계로 나눠서 처리:
-            # 1. write_still=True로 렌더링하여 메인 이미지 저장
-            # 2. write_still=False로 Compositor 실행하여 depth 저장
+            # [FIX] 근본 원인: write_still 매개변수와 OutputFile 노드 동작
+            # - write_still=True: 메인 렌더 결과만 저장, OutputFile 노드 무시
+            # - write_still=False: Compositor 실행, OutputFile 노드 활성화
+            # 해결: 두 단계로 분리
+            # 1. write_still=True로 메인 이미지(WebP) 저장
+            # 2. write_still=False로 Compositor 재실행하여 OutputFile(EXR) 저장
             
+            # 1단계: 메인 이미지 저장
             bpy.ops.render.render(write_still=True)
             
             # [FIX] 추가: Compositor 실행하여 OutputFile 노드 저장 (depth 맵 포함)
@@ -5816,8 +5819,9 @@ class LDrawRenderer:
                             # write_still=False 호출 전에 base_path를 반드시 설정해야 함
                             try:
                                 # [FIX] 경로 파싱 함수 사용 (중복 제거)
+                                # output_path가 아직 생성되지 않았을 수 있으므로 경로 문자열만 사용
                                 current_image_path = output_path
-                                if current_image_path and os.path.exists(current_image_path):
+                                if current_image_path:
                                     depth_dir_abs, element_id, depth_filename = self._parse_depth_path_from_image_path(current_image_path)
                                     
                                     if not depth_dir_abs or not depth_filename:
@@ -5830,44 +5834,18 @@ class LDrawRenderer:
                                         import re
                                         normalized_filename = re.sub(r'(\d+_\d{3})\d{4,}$', r'\1', depth_file_prefix)
                                         
-                                        # [FIX] base_path 강제 설정 및 검증 (초기값 /tmp, C:\tmp, 빈 문자열, 임시 디렉토리 제거)
-                                        import tempfile
-                                        temp_dir = tempfile.gettempdir()
-                                        if (not depth_node.base_path or 
-                                            depth_node.base_path == '' or 
-                                            depth_node.base_path == '//' or
-                                            depth_node.base_path == '/tmp' or 
-                                            depth_node.base_path == 'C:/tmp' or 
-                                            depth_node.base_path == 'C:\\tmp' or
-                                            depth_node.base_path == 'C:/' or 
-                                            depth_node.base_path == 'C:\\' or
-                                            depth_node.base_path == temp_dir or  # 임시 디렉토리도 재설정
-                                            depth_node.base_path != depth_dir_abs_normalized):
-                                            depth_node.base_path = depth_dir_abs_normalized
-                                            if depth_node.base_path in ('', '//', '/tmp', 'C:/tmp', 'C:\\tmp', 'C:/', 'C:\\', temp_dir):
-                                                print(f"[FIX] 초기값/임시 경로 제거, 올바른 경로 설정: {depth_dir_abs_normalized}")
-                                            elif depth_node.base_path != depth_dir_abs_normalized:
-                                                print(f"[WARN] base_path 불일치, 재설정: {depth_dir_abs_normalized}")
+                                        # [FIX] base_path 설정
+                                        depth_node.base_path = depth_dir_abs_normalized
                                         
-                                        # [FIX] path 강제 설정 (초기값 depth_temp, depth, 빈 문자열, 프레임 번호 제거)
-                                        import re
-                                        current_path = depth_node.file_slots[0].path
-                                        # 0001, 0000001 같은 프레임 번호 패턴 확인
-                                        is_frame_number = re.match(r'^\d{4,}$', current_path) if current_path else False
+                                        # [FIX] path 설정 (프레임 번호 포함하여 OutputFile이 파일을 생성하도록 함)
+                                        # Blender OutputFile은 프레임 번호가 자동 추가됨 (예: path####.exr)
+                                        # 따라서 path에는 확장자 없이 파일명만 설정
+                                        depth_node.file_slots[0].path = normalized_filename
                                         
-                                        if (not depth_node.file_slots[0].path or 
-                                            depth_node.file_slots[0].path == '' or 
-                                            depth_node.file_slots[0].path == 'depth_temp' or 
-                                            depth_node.file_slots[0].path == 'depth' or
-                                            is_frame_number or  # Blender가 자동으로 추가하는 프레임 번호
-                                            depth_node.file_slots[0].path != normalized_filename):
-                                            depth_node.file_slots[0].path = normalized_filename
-                                            if depth_node.file_slots[0].path in ('', 'depth_temp', 'depth') or is_frame_number:
-                                                print(f"[FIX] 초기값/프레임 번호 제거, 올바른 파일명 설정: {normalized_filename}")
-                                        
-                                        # 프레임 번호 차단 및 형식 설정은 _setup_depth_map_rendering에서 완료 (중복 제거)
-                                        
-                                        # 최종 경로 정보는 render_image에서 출력 (중복 제거)
+                                        print(f"[INFO] OutputFile 노드 경로 재설정:")
+                                        print(f"  - base_path: {depth_node.base_path}")
+                                        print(f"  - path: {depth_node.file_slots[0].path}")
+                                        print(f"  - 예상 저장 경로: {depth_node.base_path}/{depth_node.file_slots[0].path}####.exr")
                                         
                                         # [FIX] write_still=False 실행 전에 save_as_render 활성화
                                         depth_node.file_slots[0].save_as_render = True
@@ -5889,16 +5867,16 @@ class LDrawRenderer:
                                         
                                         print(f"[VERIFY] Compositor 실행 직전 EXR 설정: codec={final_codec}, color_mode={final_color_mode}, use_node_format={depth_node.file_slots[0].use_node_format}, path={depth_node.file_slots[0].path}")
                                         
-                                        # [FIX] 근본 원인 수정: Blender는 write_still=False를 호출할 때
-                                        # OutputFile 노드가 save_as_render=True여야만 파일을 저장함
-                                        # 그러나 이미 렌더링된 결과를 다시 사용하지 않고 새로 렌더링함
-                                        # 해결: 렌더링 직전에 save_as_render=True로 설정하고,
-                                        # write_still=True로 렌더링하여 즉시 저장
+                                        # [FIX] 근본 원인 수정: write_still=False로 Compositor 재실행
+                                        # - write_still=True: 메인 렌더 결과만 저장 (WebP), OutputFile 노드 무시
+                                        # - write_still=False: Compositor 실행, OutputFile 노드 활성화 (EXR)
+                                        # 1단계에서 이미 write_still=True로 WebP 저장 완료
+                                        # 2단계에서 write_still=False로 Compositor 재실행하여 EXR 저장
                                         
-                                        # Compositor 실행 (write_still=True로 변경하여 즉시 저장)
-                                        bpy.ops.render.render(write_still=True)
+                                        print(f"[INFO] Compositor 실행 (write_still=False) - OutputFile 노드 활성화")
+                                        bpy.ops.render.render(write_still=False)
                                         
-                                        # [FIX] EXR 파일 생성 후 압축 상태 검증
+                                        # [FIX] EXR 파일 생성 후 압축 상태 검증 및 재압축
                                         expected_exr_path = os.path.join(depth_dir_abs, f"{normalized_filename}.exr")
                                         if os.path.exists(expected_exr_path):
                                             file_size = os.path.getsize(expected_exr_path)
@@ -5911,9 +5889,76 @@ class LDrawRenderer:
                                             uncompressed_size = render_resolution * 4  # 32비트 float = 4 bytes
                                             compression_ratio = uncompressed_size / file_size if file_size > 0 else 0
                                             
+                                            # [FIX] 압축 미적용 시 재압축 수행
                                             if file_size_kb > 300:
                                                 print(f"[WARN] EXR 파일 크기가 비정상적으로 큼: {file_size_kb:.2f} KB (압축 미적용 가능성)")
                                                 print(f"[WARN] 압축률: {compression_ratio:.2f}x (예상: 3-5x)")
+                                                print(f"[FIX] EXR 파일 재압축 시도 중...")
+                                                
+                                                try:
+                                                    # [FIX] Blender로 EXR 파일 로드 및 ZIP 압축으로 재저장
+                                                    # 기존 이미지 제거 (메모리 절약)
+                                                    for img in list(bpy.data.images):
+                                                        if img.filepath == expected_exr_path:
+                                                            bpy.data.images.remove(img)
+                                                    
+                                                    # EXR 파일 로드
+                                                    bpy.data.images.load(expected_exr_path, check_existing=False)
+                                                    exr_image = bpy.data.images[-1]
+                                                    
+                                                    # [FIX] ZIP 압축 설정 (scene 설정도 함께)
+                                                    scene = bpy.context.scene
+                                                    scene.render.image_settings.file_format = 'OPEN_EXR'
+                                                    if hasattr(scene.render.image_settings, 'exr_codec'):
+                                                        scene.render.image_settings.exr_codec = 'ZIP'
+                                                    
+                                                    exr_image.file_format = 'OPEN_EXR'
+                                                    if hasattr(exr_image, 'exr_codec'):
+                                                        exr_image.exr_codec = 'ZIP'
+                                                    
+                                                    # 단일 채널 모드 확인
+                                                    if hasattr(exr_image, 'channels') and exr_image.channels == 1:
+                                                        exr_image.colorspace_settings.name = 'Non-Color'
+                                                    
+                                                    # 임시 파일로 저장
+                                                    temp_exr_path = expected_exr_path + '.tmp'
+                                                    
+                                                    # [FIX] bpy.ops.image.save_as 사용 (ZIP 압축 보장)
+                                                    try:
+                                                        # 이미지 편집 컨텍스트 활성화
+                                                        bpy.context.view_layer.objects.active = None
+                                                        if hasattr(bpy.context, 'space_data'):
+                                                            bpy.context.space_data.type = 'IMAGE_EDITOR'
+                                                            bpy.context.space_data.image = exr_image
+                                                        
+                                                        bpy.ops.image.save_as(filepath=temp_exr_path, check_existing=False, relative_path=False)
+                                                    except Exception as save_error:
+                                                        # 폴백: image.save() 사용
+                                                        print(f"[WARN] save_as 실패, 폴백 사용: {save_error}")
+                                                        exr_image.filepath = temp_exr_path
+                                                        exr_image.save()
+                                                    
+                                                    # 재압축된 파일 크기 확인
+                                                    if os.path.exists(temp_exr_path):
+                                                        recompressed_size = os.path.getsize(temp_exr_path)
+                                                        recompressed_size_kb = recompressed_size / 1024
+                                                        
+                                                        # 용량이 개선되었거나 목표 범위 내이면 교체
+                                                        if recompressed_size < file_size or (150 * 1024 <= recompressed_size <= 200 * 1024):
+                                                            shutil.move(temp_exr_path, expected_exr_path)
+                                                            improvement = ((file_size - recompressed_size) / file_size * 100) if file_size > 0 else 0
+                                                            print(f"[FIX] EXR 재압축 완료: {file_size_kb:.2f} KB → {recompressed_size_kb:.2f} KB ({improvement:+.1f}%)")
+                                                        else:
+                                                            os.remove(temp_exr_path)
+                                                            print(f"[WARN] EXR 재압축 실패: 용량 개선 없음 ({recompressed_size_kb:.2f} KB)")
+                                                    
+                                                    # 메모리 정리
+                                                    bpy.data.images.remove(exr_image)
+                                                
+                                                except Exception as recompress_error:
+                                                    print(f"[WARN] EXR 재압축 실패: {recompress_error}")
+                                                    import traceback
+                                                    traceback.print_exc()
                                             else:
                                                 print(f"[INFO] EXR 파일 크기 정상: {file_size_kb:.2f} KB, 압축률: {compression_ratio:.2f}x")
                                         else:

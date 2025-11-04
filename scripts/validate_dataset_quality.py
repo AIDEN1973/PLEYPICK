@@ -1,237 +1,392 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-데이터셋 품질 검증 스크립트
-메타데이터 v2.0-draft 기준으로 품질 검증 수행
+dataset_synthetic 품질 검증 스크립트
+- 이미지 품질 검증 (WebP, 해상도, 크기)
+- 라벨 품질 검증 (bbox 유효성, 좌표 정확도)
+- 메타데이터 품질 검증 (QA 플래그, 품질 지표)
+- EXR 파일 품질 검증 (압축, 크기)
 """
 
 import os
 import json
-import math
+import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
-import argparse
+from collections import defaultdict
+from PIL import Image
+import statistics
 
-def validate_quality_standards(ssim: float, snr: float, rms: float, depth: float) -> Dict[str, bool]:
-    """품질 기준 검증 (메타데이터 v2.0-draft 기준)"""
-    return {
-        'ssim_pass': ssim >= 0.96,
-        'snr_pass': snr >= 30.0,
-        'rms_pass': rms <= 1.5,
-        'depth_pass': depth >= 0.85,
-        'overall_pass': ssim >= 0.96 and snr >= 30.0 and rms <= 1.5 and depth >= 0.85
-    }
+# Windows 콘솔 인코딩 설정
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-def validate_label_file(label_path: Path) -> List[str]:
-    """라벨 파일 검증"""
-    issues = []
+def validate_dataset_quality(base_path="output/synthetic/dataset_synthetic"):
+    """dataset_synthetic 품질 검증"""
     
-    try:
-        with open(label_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-        
-        if not lines:
-            issues.append(f"빈 라벨 파일: {label_path}")
-            return issues
-        
-        for line_num, line in enumerate(lines, 1):
-            parts = line.strip().split()
-            if len(parts) < 5:
-                issues.append(f"잘못된 라벨 형식 {label_path}:{line_num}")
-                continue
-            
-            # 클래스 ID 검증
-            try:
-                class_id = int(parts[0])
-                if class_id < 0:
-                    issues.append(f"음수 클래스 ID {label_path}:{line_num}")
-                    continue
-            except ValueError:
-                issues.append(f"잘못된 클래스 ID {label_path}:{line_num}")
-                continue
-            
-            # 좌표 검증 (NaN/Inf 체크)
-            try:
-                coords = [float(x) for x in parts[1:]]
-                if any(math.isnan(x) or math.isinf(x) for x in coords):
-                    issues.append(f"NaN/Inf 좌표 {label_path}:{line_num}")
-                    continue
-                if any(x < 0 or x > 1 for x in coords):
-                    issues.append(f"범위 초과 좌표 {label_path}:{line_num}")
-                    continue
-            except ValueError:
-                issues.append(f"잘못된 좌표 형식 {label_path}:{line_num}")
-                continue
-    
-    except Exception as e:
-        issues.append(f"라벨 파일 읽기 오류 {label_path}: {e}")
-    
-    return issues
-
-def validate_metadata_quality(meta_path: Path) -> Tuple[List[str], Dict[str, float]]:
-    """메타데이터 품질 검증"""
-    issues = []
-    quality_metrics = {}
-    
-    try:
-        with open(meta_path, 'r', encoding='utf-8') as f:
-            meta = json.load(f)
-        
-        # 품질 지표 추출
-        quality = meta.get('quality', {})
-        ssim = quality.get('ssim', 0.0)
-        snr = quality.get('snr', 0.0)
-        rms = quality.get('rms', 0.0)
-        depth = quality.get('depth_score', 0.0)
-        
-        quality_metrics = {
-            'ssim': ssim,
-            'snr': snr,
-            'rms': rms,
-            'depth': depth
-        }
-        
-        # 품질 기준 검증
-        quality_check = validate_quality_standards(ssim, snr, rms, depth)
-        if not quality_check['overall_pass']:
-            issues.append(f"품질 기준 미달 {meta_path}: SSIM={ssim:.3f}, SNR={snr:.1f}, RMS={rms:.3f}, Depth={depth:.3f}")
-    
-    except Exception as e:
-        issues.append(f"메타데이터 읽기 오류 {meta_path}: {e}")
-    
-    return issues, quality_metrics
-
-def validate_dataset_structure(dataset_path: Path) -> List[str]:
-    """데이터셋 구조 검증"""
-    issues = []
-    
-    # 필수 디렉토리 확인
-    required_dirs = ['images/train', 'images/val', 'images/test', 'labels/train', 'labels/val', 'labels/test']
-    for dir_path in required_dirs:
-        full_path = dataset_path / dir_path
-        if not full_path.exists():
-            issues.append(f"필수 디렉토리 누락: {full_path}")
-    
-    # dataset.yaml 확인
-    yaml_file = dataset_path / 'dataset.yaml'
-    if not yaml_file.exists():
-        issues.append(f"dataset.yaml 파일 누락: {yaml_file}")
-    else:
-        try:
-            import yaml
-            with open(yaml_file, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
-            required_keys = ['train', 'val', 'test', 'nc', 'names']
-            for key in required_keys:
-                if key not in config:
-                    issues.append(f"dataset.yaml에 필수 키 누락: {key}")
-        except Exception as e:
-            issues.append(f"dataset.yaml 읽기 오류: {e}")
-    
-    return issues
-
-def validate_dataset_quality(dataset_path: str) -> bool:
-    """데이터셋 품질 종합 검증"""
-    dataset_dir = Path(dataset_path)
-    
-    if not dataset_dir.exists():
-        print(f"[ERROR] 데이터셋 경로가 존재하지 않습니다: {dataset_path}")
+    base = Path(base_path)
+    if not base.exists():
+        print(f"[ERROR] 경로가 존재하지 않습니다: {base_path}")
         return False
     
-    print(f"[VALIDATE] 데이터셋 품질 검증 시작: {dataset_path}")
+    errors = []
+    warnings = []
+    stats = defaultdict(list)
+    qa_flags = defaultdict(int)
     
-    all_issues = []
-    total_files = 0
-    valid_files = 0
-    quality_stats = {'ssim': [], 'snr': [], 'rms': [], 'depth': []}
+    print("=" * 80)
+    print("dataset_synthetic 품질 검증")
+    print("=" * 80)
+    print(f"검증 경로: {base.absolute()}")
+    print()
     
-    # 구조 검증
-    structure_issues = validate_dataset_structure(dataset_dir)
-    all_issues.extend(structure_issues)
+    images_train = base / 'images' / 'train'
+    labels_train = base / 'labels' / 'train'
+    meta_dir = base / 'meta'
+    meta_e_dir = base / 'meta-e'
+    depth_dir = base / 'depth'
     
-    # 이미지와 라벨 파일 검증
-    for split in ['train', 'val', 'test']:
-        images_dir = dataset_dir / "images" / split
-        labels_dir = dataset_dir / "labels" / split
+    # 부품 폴더 찾기
+    element_folders = [d for d in images_train.iterdir() if d.is_dir()] if images_train.exists() else []
+    
+    for element_folder in element_folders:
+        element_id = element_folder.name
+        print(f"[품질 검증] 부품: {element_id}")
         
-        if not images_dir.exists() or not labels_dir.exists():
-            continue
+        images_path = images_train / element_id
+        labels_path = labels_train / element_id
+        meta_path = meta_dir / element_id
+        meta_e_path = meta_e_dir / element_id
+        depth_path = depth_dir / element_id
         
-        for image_file in images_dir.glob('*.webp'):
-            total_files += 1
-            label_file = labels_dir / image_file.with_suffix('.txt').name
+        # 1. 이미지 품질 검증
+        print("  [1] 이미지 품질 검증")
+        image_files = sorted(images_path.glob('*.webp')) if images_path.exists() else []
+        
+        for img_file in image_files:
+            try:
+                with Image.open(img_file) as img:
+                    width, height = img.size
+                    file_size = img_file.stat().st_size
+                    
+                    stats['image_widths'].append(width)
+                    stats['image_heights'].append(height)
+                    stats['image_sizes'].append(file_size)
+                    
+                    # 해상도 검증
+                    if width < 640 or height < 640:
+                        warnings.append(f"{img_file.name}: 해상도 낮음 ({width}x{height})")
+                    
+                    # 파일 크기 검증 (WebP Q90 기준)
+                    size_kb = file_size / 1024
+                    if size_kb < 5:
+                        warnings.append(f"{img_file.name}: 파일 크기 비정상적으로 작음 ({size_kb:.2f} KB)")
+                    elif size_kb > 500:
+                        warnings.append(f"{img_file.name}: 파일 크기 비정상적으로 큼 ({size_kb:.2f} KB)")
+                    
+                    # WebP 형식 확인
+                    if img.format != 'WEBP':
+                        errors.append(f"{img_file.name}: WebP 형식 아님 ({img.format})")
             
-            if not label_file.exists():
-                all_issues.append(f"라벨 파일 누락: {label_file}")
-                continue
-            
-            # 라벨 파일 검증
-            label_issues = validate_label_file(label_file)
-            all_issues.extend(label_issues)
-            
-            # 메타데이터 품질 검증 (있는 경우)
-            meta_file = dataset_dir / "meta" / image_file.stem / f"{image_file.stem}.json"
-            if meta_file.exists():
-                meta_issues, quality_metrics = validate_metadata_quality(meta_file)
-                all_issues.extend(meta_issues)
+            except Exception as e:
+                errors.append(f"{img_file.name}: 이미지 읽기 오류: {e}")
+        
+        if image_files:
+            avg_width = statistics.mean(stats['image_widths'])
+            avg_height = statistics.mean(stats['image_heights'])
+            avg_size_kb = statistics.mean(stats['image_sizes']) / 1024
+            print(f"    ✓ 이미지: {len(image_files)}개")
+            print(f"    - 평균 해상도: {avg_width:.0f}x{avg_height:.0f}")
+            print(f"    - 평균 크기: {avg_size_kb:.2f} KB")
+        
+        # 2. 라벨 품질 검증
+        print("  [2] 라벨 품질 검증")
+        label_files = sorted(labels_path.glob('*.txt')) if labels_path.exists() else []
+        
+        for label_file in label_files:
+            try:
+                with open(label_file, 'r') as f:
+                    lines = f.readlines()
                 
-                # 품질 통계 수집
-                for key, value in quality_metrics.items():
-                    quality_stats[key].append(value)
+                if not lines:
+                    warnings.append(f"{label_file.name}: 빈 라벨 파일")
+                    continue
+                
+                for line_num, line in enumerate(lines, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) < 5:
+                        continue
+                    
+                    try:
+                        class_id = int(parts[0])
+                        center_x = float(parts[1])
+                        center_y = float(parts[2])
+                        width = float(parts[3])
+                        height = float(parts[4])
+                        
+                        # Bbox 유효성 검증
+                        x_min = center_x - width / 2
+                        x_max = center_x + width / 2
+                        y_min = center_y - height / 2
+                        y_max = center_y + height / 2
+                        
+                        if not (0 <= x_min < x_max <= 1 and 0 <= y_min < y_max <= 1):
+                            errors.append(f"{label_file.name}:{line_num}: bbox 범위 오류 (x:[{x_min:.3f}, {x_max:.3f}], y:[{y_min:.3f}, {y_max:.3f}])")
+                        
+                        # Bbox 크기 검증 (너무 작거나 큰 bbox)
+                        bbox_area = width * height
+                        stats['bbox_areas'].append(bbox_area)
+                        
+                        if bbox_area < 0.01:
+                            warnings.append(f"{label_file.name}:{line_num}: bbox 너무 작음 (area={bbox_area:.4f})")
+                        elif bbox_area > 0.95:
+                            warnings.append(f"{label_file.name}:{line_num}: bbox 너무 큼 (area={bbox_area:.4f})")
+                        
+                        # Segmentation polygon 검증
+                        if len(parts) > 5:
+                            polygon_coords = [float(x) for x in parts[5:]]
+                            if len(polygon_coords) % 2 != 0:
+                                errors.append(f"{label_file.name}:{line_num}: 폴리곤 좌표 개수 오류")
+                            
+                            # 폴리곤 좌표 범위
+                            for coord in polygon_coords:
+                                if not (0 <= coord <= 1):
+                                    warnings.append(f"{label_file.name}:{line_num}: 폴리곤 좌표 범위 초과 ({coord:.3f})")
+                    
+                    except (ValueError, IndexError) as e:
+                        errors.append(f"{label_file.name}:{line_num}: 파싱 오류: {e}")
             
-            if not label_issues:
-                valid_files += 1
+            except Exception as e:
+                errors.append(f"{label_file.name}: 파일 읽기 오류: {e}")
+        
+        if label_files:
+            print(f"    ✓ 라벨: {len(label_files)}개")
+            if stats['bbox_areas']:
+                avg_area = statistics.mean(stats['bbox_areas'])
+                print(f"    - 평균 bbox 면적: {avg_area:.4f}")
+        
+        # 3. 메타데이터 품질 검증
+        print("  [3] 메타데이터 품질 검증")
+        meta_files = sorted(meta_path.glob('*.json')) if meta_path.exists() else []
+        meta_e_files = sorted(meta_e_path.glob('*_e2.json')) if meta_e_path.exists() else []
+        
+        for meta_file in meta_files:
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                
+                # QA 플래그 수집
+                if 'qa_flag' in meta:
+                    qa_flags[meta['qa_flag']] += 1
+                
+                # 품질 지표 수집
+                if 'reprojection_rms_px' in meta:
+                    rms = meta['reprojection_rms_px']
+                    stats['rms_values'].append(rms)
+                    if rms > 1.5:
+                        warnings.append(f"{meta_file.name}: RMS 높음 ({rms:.3f}px)")
+                
+                if 'ssim' in meta:
+                    ssim = meta['ssim']
+                    stats['ssim_values'].append(ssim)
+                    if ssim < 0.965:
+                        warnings.append(f"{meta_file.name}: SSIM 낮음 ({ssim:.4f})")
+                
+                if 'snr' in meta:
+                    snr = meta['snr']
+                    stats['snr_values'].append(snr)
+                    if snr < 30:
+                        warnings.append(f"{meta_file.name}: SNR 낮음 ({snr:.2f} dB)")
+                
+                if 'depth_quality_score' in meta:
+                    depth_score = meta['depth_quality_score']
+                    stats['depth_scores'].append(depth_score)
+                    if depth_score < 0.5:
+                        warnings.append(f"{meta_file.name}: Depth 품질 낮음 ({depth_score:.3f})")
+            
+            except Exception as e:
+                errors.append(f"{meta_file.name}: 메타데이터 읽기 오류: {e}")
+        
+        # 메타-E 품질 검증
+        for meta_e_file in meta_e_files:
+            try:
+                with open(meta_e_file, 'r', encoding='utf-8') as f:
+                    meta_e = json.load(f)
+                
+                # QA 플래그 수집
+                if 'qa_flag' in meta_e:
+                    qa_flags[meta_e['qa_flag']] += 1
+                elif 'qa' in meta_e and 'qa_flag' in meta_e['qa']:
+                    qa_flags[meta_e['qa']['qa_flag']] += 1
+                
+                # 품질 지표 수집
+                if 'reprojection_rms_px' in meta_e:
+                    rms = meta_e['reprojection_rms_px']
+                    if rms not in stats['rms_values']:
+                        stats['rms_values'].append(rms)
+                
+                if 'ssim' in meta_e:
+                    ssim = meta_e['ssim']
+                    if ssim not in stats['ssim_values']:
+                        stats['ssim_values'].append(ssim)
+            
+            except Exception as e:
+                errors.append(f"{meta_e_file.name}: 메타-E 읽기 오류: {e}")
+        
+        if meta_files or meta_e_files:
+            print(f"    ✓ 메타: {len(meta_files)}개, 메타-E: {len(meta_e_files)}개")
+        
+        # 4. EXR 파일 품질 검증
+        print("  [4] EXR 파일 품질 검증")
+        depth_files = sorted(depth_path.glob('*.exr')) if depth_path.exists() else []
+        
+        for depth_file in depth_files:
+            try:
+                file_size = depth_file.stat().st_size
+                size_kb = file_size / 1024
+                
+                stats['depth_sizes'].append(file_size)
+                
+                # EXR 파일 크기 검증 (단일 채널 + ZIP 압축 기준: 150-200KB)
+                if size_kb < 50:
+                    warnings.append(f"{depth_file.name}: EXR 파일 크기 비정상적으로 작음 ({size_kb:.2f} KB)")
+                elif size_kb > 500:
+                    errors.append(f"{depth_file.name}: EXR 파일 크기 비정상적으로 큼 ({size_kb:.2f} KB) - 압축 미적용 가능성")
+                elif size_kb > 300:
+                    warnings.append(f"{depth_file.name}: EXR 파일 크기 큼 ({size_kb:.2f} KB) - 압축 확인 필요")
+            
+            except Exception as e:
+                errors.append(f"{depth_file.name}: EXR 파일 읽기 오류: {e}")
+        
+        if depth_files:
+            avg_depth_size_kb = statistics.mean(stats['depth_sizes']) / 1024 if stats['depth_sizes'] else 0
+            print(f"    ✓ EXR: {len(depth_files)}개")
+            print(f"    - 평균 크기: {avg_depth_size_kb:.2f} KB")
+            
+            # 압축 상태 추정
+            if stats['image_widths'] and stats['image_heights']:
+                avg_resolution = statistics.mean(stats['image_widths']) * statistics.mean(stats['image_heights'])
+                uncompressed_size = avg_resolution * 4  # 32bit float = 4 bytes
+                if stats['depth_sizes']:
+                    avg_compressed = statistics.mean(stats['depth_sizes'])
+                    compression_ratio = uncompressed_size / avg_compressed if avg_compressed > 0 else 0
+                    print(f"    - 압축률: {compression_ratio:.2f}x")
+                    if compression_ratio < 2.0:
+                        warnings.append(f"EXR 압축률 낮음 ({compression_ratio:.2f}x) - ZIP 압축 확인 필요")
     
-    # 품질 통계 리포트
-    if quality_stats['ssim']:
-        avg_ssim = sum(quality_stats['ssim']) / len(quality_stats['ssim'])
-        avg_snr = sum(quality_stats['snr']) / len(quality_stats['snr'])
-        avg_rms = sum(quality_stats['rms']) / len(quality_stats['rms'])
-        avg_depth = sum(quality_stats['depth']) / len(quality_stats['depth'])
-        
-        print(f"[QUALITY] 평균 품질 지표:")
-        print(f"  - SSIM: {avg_ssim:.3f} (기준: ≥0.96)")
-        print(f"  - SNR: {avg_snr:.1f} (기준: ≥30.0)")
-        print(f"  - RMS: {avg_rms:.3f} (기준: ≤1.5)")
-        print(f"  - Depth: {avg_depth:.3f} (기준: ≥0.85)")
-        
-        # 품질 기준 통과율 계산
-        pass_count = 0
-        for i in range(len(quality_stats['ssim'])):
-            if validate_quality_standards(
-                quality_stats['ssim'][i],
-                quality_stats['snr'][i],
-                quality_stats['rms'][i],
-                quality_stats['depth'][i]
-            )['overall_pass']:
-                pass_count += 1
-        
-        pass_rate = (pass_count / len(quality_stats['ssim'])) * 100
-        print(f"  - 품질 기준 통과율: {pass_rate:.1f}% ({pass_count}/{len(quality_stats['ssim'])}개)")
+    print()
     
-    # 결과 리포트
-    print(f"[STATS] 검증 완료: {valid_files}/{total_files} 파일 유효")
-    if all_issues:
-        print(f"[WARN] {len(all_issues)}개 문제 발견:")
-        for issue in all_issues[:20]:  # 최대 20개만 표시
-            print(f"  - {issue}")
-        if len(all_issues) > 20:
-            print(f"  ... 및 {len(all_issues) - 20}개 추가 문제")
+    # 5. 전체 품질 지표 요약
+    print("=" * 80)
+    print("품질 지표 요약")
+    print("=" * 80)
+    
+    if stats['image_widths']:
+        print(f"이미지 해상도: {statistics.mean(stats['image_widths']):.0f}x{statistics.mean(stats['image_heights']):.0f} (평균)")
+        print(f"이미지 크기: {statistics.mean(stats['image_sizes']) / 1024:.2f} KB (평균)")
+    
+    if stats['bbox_areas']:
+        print(f"Bbox 면적: {statistics.mean(stats['bbox_areas']):.4f} (평균)")
+    
+    if stats['rms_values']:
+        avg_rms = statistics.mean(stats['rms_values'])
+        print(f"재투영 RMS: {avg_rms:.3f}px (평균)")
+        if avg_rms <= 1.5:
+            print("  ✓ RMS 품질 양호 (≤1.5px)")
+        else:
+            print("  ⚠ RMS 품질 주의 (>1.5px)")
+    
+    if stats['ssim_values']:
+        avg_ssim = statistics.mean(stats['ssim_values'])
+        print(f"SSIM: {avg_ssim:.4f} (평균)")
+        if avg_ssim >= 0.965:
+            print("  ✓ SSIM 품질 양호 (≥0.965)")
+        else:
+            print("  ⚠ SSIM 품질 주의 (<0.965)")
+    
+    if stats['snr_values']:
+        avg_snr = statistics.mean(stats['snr_values'])
+        print(f"SNR: {avg_snr:.2f} dB (평균)")
+        if avg_snr >= 30:
+            print("  ✓ SNR 품질 양호 (≥30 dB)")
+        else:
+            print("  ⚠ SNR 품질 주의 (<30 dB)")
+    
+    if stats['depth_scores']:
+        avg_depth = statistics.mean(stats['depth_scores'])
+        print(f"Depth 품질 점수: {avg_depth:.3f} (평균)")
+    
+    if stats['depth_sizes']:
+        avg_depth_size = statistics.mean(stats['depth_sizes']) / 1024
+        print(f"EXR 파일 크기: {avg_depth_size:.2f} KB (평균)")
+        if 150 <= avg_depth_size <= 200:
+            print("  ✓ EXR 크기 정상 (150-200KB)")
+        else:
+            print("  ⚠ EXR 크기 주의 (150-200KB 범위 밖)")
+    
+    print()
+    
+    # QA 플래그 분포
+    if qa_flags:
+        print("QA 플래그 분포:")
+        total_qa = sum(qa_flags.values())
+        for flag, count in sorted(qa_flags.items()):
+            percentage = (count / total_qa) * 100 if total_qa > 0 else 0
+            print(f"  - {flag}: {count}개 ({percentage:.1f}%)")
+        
+        pass_count = qa_flags.get('PASS', 0)
+        pass_rate = (pass_count / total_qa) * 100 if total_qa > 0 else 0
+        print(f"  PASS 비율: {pass_rate:.1f}%")
+        if pass_rate >= 80:
+            print("  ✓ PASS 비율 양호 (≥80%)")
+        else:
+            print("  ⚠ PASS 비율 주의 (<80%)")
+    
+    print()
+    
+    # 6. 오류 및 경고 요약
+    print("=" * 80)
+    print("검증 결과")
+    print("=" * 80)
+    
+    if errors:
+        print(f"오류: {len(errors)}개")
+        for error in errors[:10]:
+            print(f"  ✗ {error}")
+        if len(errors) > 10:
+            print(f"  ... 외 {len(errors) - 10}개 오류")
+        print()
+    
+    if warnings:
+        print(f"경고: {len(warnings)}개")
+        for warning in warnings[:10]:
+            print(f"  ⚠ {warning}")
+        if len(warnings) > 10:
+            print(f"  ... 외 {len(warnings) - 10}개 경고")
+        print()
+    
+    if not errors and not warnings:
+        print("✓ 모든 품질 검증 통과!")
+        quality_score = 100
+    elif not errors:
+        print("⚠ 경고만 있음 (학습 가능)")
+        quality_score = 80 - min(len(warnings) * 2, 20)
     else:
-        print("[OK] 데이터셋 품질 검증 통과")
+        print("✗ 오류 발견 (품질 개선 필요)")
+        quality_score = max(0, 60 - len(errors) * 5)
     
-    return len(all_issues) == 0
-
-def main():
-    """메인 함수"""
-    parser = argparse.ArgumentParser(description='데이터셋 품질 검증')
-    parser.add_argument('dataset_path', help='검증할 데이터셋 경로')
+    print()
+    print(f"품질 점수: {quality_score}/100")
     
-    args = parser.parse_args()
-    
-    success = validate_dataset_quality(args.dataset_path)
-    return 0 if success else 1
+    return quality_score >= 60
 
-if __name__ == "__main__":
-    exit(main())
-
+if __name__ == '__main__':
+    import sys
+    base_path = sys.argv[1] if len(sys.argv) > 1 else "output/synthetic/dataset_synthetic"
+    success = validate_dataset_quality(base_path)
+    sys.exit(0 if success else 1)
