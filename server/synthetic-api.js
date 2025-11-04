@@ -496,9 +496,22 @@ const portManager = {
 const conversionJobs = new Map()
 const conversionProgress = new Map()
 
+// 동시 렌더링 제어 (최대 1개 Blender 프로세스만 실행)
+let activeBlenderProcesses = new Set()
+const MAX_CONCURRENT_BLENDER = 1  // 최대 동시 Blender 프로세스 수
+
 // 렌더링 시작 API
 app.post('/api/synthetic/start-rendering', async (req, res) => {
   try {
+    // 🔧 수정됨: 동시 렌더링 제한 (최대 1개만 실행)
+    if (activeBlenderProcesses.size >= MAX_CONCURRENT_BLENDER) {
+      return res.json({
+        success: false,
+        error: `동시 렌더링 제한: 최대 ${MAX_CONCURRENT_BLENDER}개만 실행 가능 (현재 ${activeBlenderProcesses.size}개 실행 중)`,
+        queuePosition: activeBlenderProcesses.size
+      })
+    }
+    
     // 🔧 수정됨: 세트 렌더링 지원 (setNumber, renderType 매핑)
     let { mode, partId, setNum, setNumber, renderType, imageCount } = req.body
     
@@ -1887,9 +1900,11 @@ async function startBlenderRendering(job) {
         args.push('--color-hex', colorHex)
       }
     } catch {}
-  } else if (colorId === null) {
-    console.log('ℹ️ colorId가 null입니다. elementId는 색상 정보가 없으므로 기본 회색으로 렌더링합니다')
-    // colorId가 null인 경우 Blender에서 기본 회색을 사용하도록 함 (랜덤 색상 금지)
+  } else if (colorId === null && !colorRgbaToSend) {
+    // [FIX] colorId가 null이지만 colorRgbaToSend가 있으면 색상 정보가 있는 것임
+    // colorId와 colorRgba 모두 없을 때만 메시지 출력
+    console.log('ℹ️ colorId가 null이고 RGB 정보도 없습니다. 기본 회색으로 렌더링합니다')
+    // colorId가 null이고 RGB 정보도 없는 경우 Blender에서 기본 회색을 사용하도록 함 (랜덤 색상 금지)
   }
   
   console.log('🎨 Blender 렌더링 시작:', blenderPath, args.join(' '))
@@ -1936,6 +1951,10 @@ async function startBlenderRendering(job) {
     }
     
     console.log('✅ Blender 프로세스 시작됨 (PID:', blenderProcess.pid, ')')
+    
+    // 🔧 수정됨: 동시 렌더링 제어에 추가
+    activeBlenderProcesses.add(blenderProcess.pid)
+    console.log(`[동시 렌더링] 현재 실행 중: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개`)
   } catch (spawnError) {
     console.error('❌ Blender 프로세스 시작 실패:', spawnError)
     job.status = 'failed'
@@ -1953,6 +1972,15 @@ async function startBlenderRendering(job) {
   // 프로세스 출력 처리
   blenderProcess.stdout.on('data', (data) => {
     const output = data.toString()
+    
+    // [FIX] ImportLDraw 애드온 background.exr 오류 메시지 필터링
+    if (output.includes('IMB_load_image_from_memory') && 
+        output.includes('background.exr') && 
+        output.includes('unknown file-format')) {
+      // 이 오류는 무시 (렌더링에 영향 없음)
+      return
+    }
+    
     console.log('🎨 Blender 출력:', output.trim())
     
     // 진행률 파싱 (여러 패턴 시도)
@@ -1991,6 +2019,15 @@ async function startBlenderRendering(job) {
   
   blenderProcess.stderr.on('data', (data) => {
     const error = data.toString()
+    
+    // [FIX] ImportLDraw 애드온 background.exr 오류 메시지 필터링
+    if (error.includes('IMB_load_image_from_memory') && 
+        error.includes('background.exr') && 
+        error.includes('unknown file-format')) {
+      // 이 오류는 무시 (렌더링에 영향 없음)
+      return
+    }
+    
     console.error('❌ Blender 오류:', error.trim())
     
     job.logs.push({
@@ -2015,6 +2052,12 @@ async function startBlenderRendering(job) {
   
   blenderProcess.on('close', async (code) => {
     try {
+    // 🔧 수정됨: 동시 렌더링 제어에서 제거
+    if (blenderProcess.pid) {
+      activeBlenderProcesses.delete(blenderProcess.pid)
+      console.log(`[동시 렌더링] 프로세스 종료: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개 남음`)
+    }
+    
     console.log(`🏁 Blender 프로세스 종료: 코드 ${code}`)
     
     if (code === 0) {
