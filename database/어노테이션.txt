@@ -20,7 +20,7 @@ Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상�
 1. 데이터 레이아웃 (변경 없음 + 파일 추가 설명)
 /dataset_{SET_ID}/
 ├── images/train|val|test/{element_id}/{uuid}.webp
-├── labels/{element_id}/{uuid}.txt
+├── labels/train|val|test/{element_id}/{uuid}.txt
 ├── meta/{element_id}/{uuid}.json           # Full Meta (v1.6.1)
 ├── meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용         # Essential (v1.6.1-E2)
 ├── masks_bin/{element_id}/{uuid}.png

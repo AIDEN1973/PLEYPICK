@@ -26,7 +26,7 @@ BrickBox AI 메타데이터 기술 문서 (운영형 · 상세판)
 
 /dataset_{SET_ID}/
   images/{split}/{element_id}/{uuid}.webp
-  labels/{element_id}/{uuid}.txt
+  labels/{split}/{element_id}/{uuid}.txt
   meta/{element_id}/{uuid}.json        # Full Meta (v1.6.1)
   meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용      # Essential (v1.6.1-E2)
   masks_bin/{element_id}/{uuid}.png

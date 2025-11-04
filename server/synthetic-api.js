@@ -498,19 +498,81 @@ const conversionProgress = new Map()
 
 // 동시 렌더링 제어 (최대 1개 Blender 프로세스만 실행)
 let activeBlenderProcesses = new Set()
+let renderingLock = false  // 렌더링 시작 락 (race condition 방지)
 const MAX_CONCURRENT_BLENDER = 1  // 최대 동시 Blender 프로세스 수
+
+// 실제 실행 중인 Blender 프로세스 확인 (PID 유효성 검증)
+function validateActiveProcesses() {
+  const validPids = new Set()
+  activeBlenderProcesses.forEach(pid => {
+    try {
+      // Windows에서 프로세스 존재 확인
+      if (process.platform === 'win32') {
+        const { execSync } = require('child_process')
+        try {
+          const result = execSync(`tasklist /FI "PID eq ${pid}" /NH`, { 
+            timeout: 1000,
+            encoding: 'utf8',
+            stdio: 'pipe'
+          })
+          // tasklist가 PID를 찾으면 결과에 PID가 포함됨
+          if (result && result.includes(String(pid))) {
+            validPids.add(pid)
+          } else {
+            // 프로세스가 존재하지 않음
+            console.log(`[동시 렌더링] 유효하지 않은 PID 제거: ${pid}`)
+          }
+        } catch (execError) {
+          // execSync 실패 시 프로세스가 존재하지 않는 것으로 간주
+          console.log(`[동시 렌더링] 유효하지 않은 PID 제거: ${pid} (확인 실패)`)
+        }
+      } else {
+        // Linux/Mac에서 프로세스 존재 확인
+        try {
+          process.kill(pid, 0)  // 시그널 0은 프로세스 존재 확인만
+          validPids.add(pid)
+        } catch {
+          // 프로세스가 존재하지 않음 (ESRCH 에러)
+          console.log(`[동시 렌더링] 유효하지 않은 PID 제거: ${pid}`)
+        }
+      }
+    } catch (error) {
+      // 예상치 못한 오류 발생 시 PID를 제거하지 않음 (안전 장치)
+      console.error(`[동시 렌더링] PID 확인 오류: ${pid}`, error)
+      // 오류 발생 시에도 PID 유지 (확인 실패로 인한 제거 방지)
+      validPids.add(pid)
+    }
+  })
+  activeBlenderProcesses = validPids
+  return validPids.size
+}
 
 // 렌더링 시작 API
 app.post('/api/synthetic/start-rendering', async (req, res) => {
   try {
-    // 🔧 수정됨: 동시 렌더링 제한 (최대 1개만 실행)
-    if (activeBlenderProcesses.size >= MAX_CONCURRENT_BLENDER) {
+    // 실제 실행 중인 프로세스 재검증 (좀비 프로세스 제거)
+    const actualCount = validateActiveProcesses()
+    
+    // 렌더링 락 확인 (race condition 방지)
+    if (renderingLock) {
       return res.json({
         success: false,
-        error: `동시 렌더링 제한: 최대 ${MAX_CONCURRENT_BLENDER}개만 실행 가능 (현재 ${activeBlenderProcesses.size}개 실행 중)`,
-        queuePosition: activeBlenderProcesses.size
+        error: `렌더링 시작 중입니다. 잠시 후 다시 시도해주세요.`,
+        queuePosition: actualCount + 1
       })
     }
+    
+    // 동시 렌더링 제한 (최대 1개만 실행)
+    if (actualCount >= MAX_CONCURRENT_BLENDER) {
+      return res.json({
+        success: false,
+        error: `동시 렌더링 제한: 최대 ${MAX_CONCURRENT_BLENDER}개만 실행 가능 (현재 ${actualCount}개 실행 중)`,
+        queuePosition: actualCount
+      })
+    }
+    
+    // 렌더링 락 설정
+    renderingLock = true
     
     // 🔧 수정됨: 세트 렌더링 지원 (setNumber, renderType 매핑)
     let { mode, partId, setNum, setNumber, renderType, imageCount } = req.body
@@ -547,7 +609,7 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
     console.log('🎨 실제 Blender 렌더링 시작:', { mode, partId, setNum, imageCount, quality })
     
     // Blender 렌더링 프로세스 시작
-    // 🔧 수정됨: async 함수를 안전하게 호출 (서버 크래시 방지)
+    // 렌더링 락은 startBlenderRendering 내부에서 프로세스가 실제로 시작되거나 실패한 후 해제됨
     startBlenderRendering(job).catch(error => {
       console.error('❌ [startBlenderRendering 에러]:', error)
       job.status = 'failed'
@@ -558,6 +620,7 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
       })
       // 작업 상태 저장
       saveActiveJobsState()
+      // 락은 startBlenderRendering 내부에서 이미 해제됨
     })
     
     // 작업 시작 시 즉시 상태 저장
@@ -571,6 +634,8 @@ app.post('/api/synthetic/start-rendering', async (req, res) => {
     
   } catch (error) {
     console.error('렌더링 시작 실패:', error)
+    // 렌더링 락 해제 (에러 발생 시)
+    renderingLock = false
     res.status(500).json({
       success: false,
       error: error.message
@@ -1952,9 +2017,24 @@ async function startBlenderRendering(job) {
     
     console.log('✅ Blender 프로세스 시작됨 (PID:', blenderProcess.pid, ')')
     
-    // 🔧 수정됨: 동시 렌더링 제어에 추가
+    // PID 유효성 확인
+    if (!blenderProcess.pid || typeof blenderProcess.pid !== 'number') {
+      throw new Error('Blender 프로세스 PID가 유효하지 않습니다')
+    }
+    
+    // 동시 렌더링 제어에 추가 (race condition 방지: 이 시점에서 재검증)
+    const currentCount = validateActiveProcesses()
+    if (currentCount >= MAX_CONCURRENT_BLENDER) {
+      // 이미 다른 프로세스가 실행 중이면 이 프로세스 종료
+      blenderProcess.kill()
+      throw new Error(`동시 렌더링 제한: 이미 ${currentCount}개 프로세스가 실행 중입니다`)
+    }
+    
     activeBlenderProcesses.add(blenderProcess.pid)
-    console.log(`[동시 렌더링] 현재 실행 중: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개`)
+    console.log(`[동시 렌더링] 프로세스 추가: PID ${blenderProcess.pid}, 현재 실행 중: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개`)
+    
+    // 렌더링 락 해제 (프로세스가 실제로 추가된 후)
+    renderingLock = false
   } catch (spawnError) {
     console.error('❌ Blender 프로세스 시작 실패:', spawnError)
     job.status = 'failed'
@@ -1963,6 +2043,8 @@ async function startBlenderRendering(job) {
       message: `Blender 프로세스 시작 실패: ${spawnError?.message || String(spawnError)}`,
       type: 'error'
     })
+    // 렌더링 락 해제 (실패 시)
+    renderingLock = false
     // 🔧 수정됨: 에러 발생해도 함수 반환 (서버 크래시 방지)
     return
   }
@@ -2046,16 +2128,27 @@ async function startBlenderRendering(job) {
       message: `프로세스 오류: ${error.message}`,
       type: 'error'
     })
+    // 동시 렌더링 제어에서 제거 (오류 발생 시)
+    if (blenderProcess.pid) {
+      activeBlenderProcesses.delete(blenderProcess.pid)
+      console.log(`[동시 렌더링] 프로세스 오류로 제거: PID ${blenderProcess.pid}, 현재 실행 중: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개`)
+    }
     // 🔧 수정됨: 에러 발생해도 서버는 계속 실행 (다른 작업 유지)
     // 이 에러는 해당 작업에만 영향
   })
   
   blenderProcess.on('close', async (code) => {
     try {
-    // 🔧 수정됨: 동시 렌더링 제어에서 제거
+    // 동시 렌더링 제어에서 제거
     if (blenderProcess.pid) {
-      activeBlenderProcesses.delete(blenderProcess.pid)
-      console.log(`[동시 렌더링] 프로세스 종료: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개 남음`)
+      const wasRemoved = activeBlenderProcesses.delete(blenderProcess.pid)
+      if (wasRemoved) {
+        console.log(`[동시 렌더링] 프로세스 종료: PID ${blenderProcess.pid}, 현재 실행 중: ${activeBlenderProcesses.size}/${MAX_CONCURRENT_BLENDER}개 남음`)
+      } else {
+        console.log(`[동시 렌더링] 경고: 종료된 프로세스 PID ${blenderProcess.pid}가 목록에 없었음`)
+      }
+      // 실제 실행 중인 프로세스 재검증 (좀비 프로세스 제거)
+      validateActiveProcesses()
     }
     
     console.log(`🏁 Blender 프로세스 종료: 코드 ${code}`)
