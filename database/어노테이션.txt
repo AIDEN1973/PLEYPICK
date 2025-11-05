@@ -47,7 +47,7 @@ Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상�
   "element_id": "453601",
   "part_id": "4536",
   "class_map_version": "v2025-10-11-a",
-  "image_size": [1024, 1024],  # 고해상도 기본 설정
+  "image_size": [768, 768],  # 최소 해상도 768x768 (YOLO 학습 입력 크기 imgsz=768과 일치, 기술문서 2.4 준수)
 
   "class_id_mapping": { "4536": 12, "3001": 13, "3068b": 14 },
   "render_source": "auto_renderer_v5",
@@ -149,7 +149,7 @@ Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상�
     "uv_map_info": {
       "has_uv": true,
       "texture_path": "textures/4536_diffuse.png",
-      "uv_resolution": [1024, 1024],
+      "uv_resolution": [768, 768],  # 최소 해상도 768x768 (기술문서 2.4 준수)
       "pattern_type": "decal",
       "coverage_ratio": 0.83,
       "uv_distortion": 0.04,
@@ -562,3 +562,8 @@ FOR EACH ROW EXECUTE FUNCTION enqueue_failed_samples();
 
 
 # [AI Update] 2025-11-03 21:02:10 — depth/{element_id}/{uuid}\.bin → depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)
+
+# [AI Update] 2025-11-04 — 렌더링 해상도 최소 요구사항: image_size [1024, 1024] → [768, 768]
+# - 기술문서 2.4 준수: 최소 해상도 768x768 이상
+# - YOLO 학습 입력 크기 imgsz=768과 일치, 다운샘플링 제거로 품질 유지 및 성능 향상
+# - uv_resolution도 동일하게 768x768로 수정

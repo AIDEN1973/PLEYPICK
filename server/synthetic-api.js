@@ -1558,40 +1558,141 @@ async function startBlenderRendering(job) {
           // 🔧 수정됨: 한 개씩 순차 렌더링 및 완료 대기
           await startBlenderRendering(partJob)
           
-          // 렌더링 완료까지 대기 (최대 20분)
-          const maxWaitTime = 20 * 60 * 1000
+          // [FIX] Blender 프로세스 종료 감지 개선
+          // partJob.blenderProcess에 close 이벤트 핸들러 추가
+          if (partJob.blenderProcess) {
+            partJob.blenderProcess.on('close', (code) => {
+              console.log(`[부품 ${i + 1}] Blender 프로세스 종료: 코드 ${code}`)
+              if (code === 0) {
+                partJob.status = 'completed'
+                partJob.progress = 100
+                console.log(`[부품 ${i + 1}] 렌더링 완료 상태 업데이트`)
+              } else {
+                partJob.status = 'failed'
+                console.log(`[부품 ${i + 1}] 렌더링 실패 상태 업데이트 (코드: ${code})`)
+              }
+            })
+          }
+          
+          // 렌더링 완료까지 대기 (최대 30분)
+          const maxWaitTime = 30 * 60 * 1000
           const startTime = Date.now()
+          let checkCount = 0
           
           while (partJob.status === 'running' && (Date.now() - startTime) < maxWaitTime) {
             await new Promise(resolve => setTimeout(resolve, 3000)) // 3초마다 체크
+            checkCount++
             
             // 프로세스가 종료되었는지 확인
-            if (partJob.blenderProcess && partJob.blenderProcess.exitCode !== null) {
-              break
+            if (partJob.blenderProcess) {
+              // exitCode가 null이 아니면 프로세스 종료됨
+              if (partJob.blenderProcess.exitCode !== null) {
+                const exitCode = partJob.blenderProcess.exitCode
+                console.log(`[부품 ${i + 1}] 프로세스 종료 감지 (exitCode: ${exitCode})`)
+                
+                if (exitCode === 0) {
+                  partJob.status = 'completed'
+                  partJob.progress = 100
+                } else {
+                  partJob.status = 'failed'
+                }
+                break
+              }
+              
+              // 프로세스가 kill되었는지 확인 (Windows)
+              try {
+                if (process.platform === 'win32') {
+                  const { execSync } = require('child_process')
+                  try {
+                    const result = execSync(`tasklist /FI "PID eq ${partJob.blenderProcess.pid}" /NH`, { 
+                      timeout: 1000,
+                      encoding: 'utf8',
+                      stdio: 'pipe'
+                    })
+                    if (!result || !result.includes(String(partJob.blenderProcess.pid))) {
+                      console.log(`[부품 ${i + 1}] 프로세스가 더 이상 실행 중이지 않음 (종료 감지)`)
+                      partJob.status = partJob.status === 'completed' ? 'completed' : 'failed'
+                      break
+                    }
+                  } catch (execError) {
+                    // 프로세스가 존재하지 않음
+                    console.log(`[부품 ${i + 1}] 프로세스 종료 확인 (tasklist 실패)`)
+                    partJob.status = partJob.status === 'completed' ? 'completed' : 'failed'
+                    break
+                  }
+                }
+              } catch (checkError) {
+                // 프로세스 확인 오류는 무시하고 계속 대기
+                console.warn(`[부품 ${i + 1}] 프로세스 확인 오류:`, checkError.message)
+              }
+            }
+            
+            // 10회 체크마다 로그 출력 (30초마다)
+            if (checkCount % 10 === 0) {
+              const elapsed = Math.floor((Date.now() - startTime) / 1000)
+              console.log(`[부품 ${i + 1}] 렌더링 대기 중... (${elapsed}초 경과, 상태: ${partJob.status})`)
+            }
+          }
+          
+          // 타임아웃 처리
+          if (partJob.status === 'running' && (Date.now() - startTime) >= maxWaitTime) {
+            console.warn(`[부품 ${i + 1}] 렌더링 타임아웃 (${maxWaitTime / 1000 / 60}분 초과)`)
+            partJob.status = 'failed'
+            
+            // 프로세스 강제 종료 시도
+            if (partJob.blenderProcess && partJob.blenderProcess.pid) {
+              try {
+                console.log(`[부품 ${i + 1}] 타임아웃으로 인한 프로세스 종료 시도: PID ${partJob.blenderProcess.pid}`)
+                partJob.blenderProcess.kill('SIGTERM')
+                
+                // 5초 후에도 종료되지 않으면 강제 종료
+                setTimeout(() => {
+                  if (partJob.blenderProcess && partJob.blenderProcess.exitCode === null) {
+                    try {
+                      partJob.blenderProcess.kill('SIGKILL')
+                      console.log(`[부품 ${i + 1}] 프로세스 강제 종료 (SIGKILL)`)
+                    } catch (killError) {
+                      console.error(`[부품 ${i + 1}] 프로세스 강제 종료 실패:`, killError)
+                    }
+                  }
+                }, 5000)
+              } catch (killError) {
+                console.error(`[부품 ${i + 1}] 프로세스 종료 시도 실패:`, killError)
+              }
             }
           }
           
           // 최종 상태 확인
-          if (partJob.status === 'completed') {
+          const finalStatus = partJob.status
+          console.log(`[부품 ${i + 1}] 최종 상태: ${finalStatus}`)
+          
+          if (finalStatus === 'completed') {
             results.completed++
             job.logs.push({ 
               timestamp: new Date(), 
               type: 'success', 
               message: `✅ 부품 ${i + 1}/${setPartsData.length} 완료: ${setPart.lego_parts?.name || partId}` 
             })
-          } else if (partJob.status === 'failed') {
+            console.log(`✅ [부품 ${i + 1}] 렌더링 완료: ${setPart.lego_parts?.name || partId}`)
+          } else {
+            // failed 또는 running (타임아웃)
             results.failed++
+            const errorMsg = finalStatus === 'running' ? '타임아웃' : '렌더링 실패'
             results.errors.push({
               partId: partJob.config.partId,
               elementId: partJob.config.elementId,
-              error: '렌더링 실패 또는 타임아웃'
+              error: errorMsg
             })
             job.logs.push({ 
               timestamp: new Date(), 
               type: 'error', 
-              message: `❌ 부품 ${i + 1}/${setPartsData.length} 실패: ${setPart.lego_parts?.name || partId}` 
+              message: `❌ 부품 ${i + 1}/${setPartsData.length} 실패: ${setPart.lego_parts?.name || partId} (${errorMsg})` 
             })
+            console.log(`❌ [부품 ${i + 1}] 렌더링 실패: ${setPart.lego_parts?.name || partId} (${errorMsg})`)
           }
+          
+          // [FIX] 다음 부품으로 진행하기 전에 현재 부품 상태 확실히 업데이트
+          partJob.status = finalStatus
           
           // 작업 정보 삭제 (메모리 정리)
           setTimeout(() => {

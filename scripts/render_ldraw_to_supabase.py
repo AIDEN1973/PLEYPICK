@@ -665,7 +665,7 @@ class LDrawRenderer:
             'output_dir': './output/synthetic',
             'output_subdir': '',
             'element_id': '',
-            'resolution': '1024x1024',
+            'resolution': '768x768',  # YOLO 학습 최적 해상도 (기술문서 2.4: 최소 768x768)
             'target_fill': 0.92,
             'color_management': color_management,
             'supabase_url': supabase_url,
@@ -674,7 +674,7 @@ class LDrawRenderer:
             'color_hex': '4B9F4A'
         }
         self.supabase = None
-        self.current_samples = 384  # 기본 샘플 수 (보수적 최적화: 512 → 384, 약 25% 속도 향상, 품질 보장)
+        self.current_samples = 256  # 기본 샘플 수 (최적화: 384 → 256, 약 33% 속도 향상, 품질 보장)
         # 적응형 렌더링 설정 (부품별 샘플 수 최적화)
         self.adaptive_sampling = True
         self.sample_presets = {
@@ -686,7 +686,7 @@ class LDrawRenderer:
         self.background = background  # 'white' | 'gray' | 'auto'
         self.color_management = 'filmic' if color_management == 'auto' else color_management  # 기본값을 filmic으로 (분석서 권장)
         self.background_gray_value = 0.5
-        self.resolution = (1024, 1024)  # 고해상도 기본 설정 (기술문서 준수)
+        self.resolution = (768, 768)  # YOLO 학습 최적 해상도 (기술문서 4.2: imgsz=768)
         self.target_fill = 0.85
         # 데이터셋 경로 구성용 프로필
         self.set_id = set_id or 'synthetic'
@@ -738,7 +738,7 @@ class LDrawRenderer:
             samples = 640  # 투명/반사 색상 (기존 960 → 640, 약 33% 속도 향상, 품질 보장)
             print(f"[적응형 렌더링] 부품 {part_id}: 투명/반사 색상 → {samples} 샘플 (Adaptive sampling 활성화)")
         else:
-            samples = 384  # 기본 샘플 수 (기존 512 → 384, 약 25% 속도 향상, 품질 보장)
+            samples = 256  # 기본 샘플 수 (기존 384 → 256, 약 33% 속도 향상, 품질 보장)
             print(f"[적응형 렌더링] 부품 {part_id}: 기본 색상 → {samples} 샘플 (Adaptive sampling 활성화)")
         
         return samples
@@ -3470,7 +3470,7 @@ class LDrawRenderer:
             bbox = metadata.get('bounding_box', {})
             if 'pixel_coords' in bbox:
                 coords = bbox['pixel_coords']
-                resolution = metadata.get('render_settings', {}).get('resolution', [1024, 1024])
+                resolution = metadata.get('render_settings', {}).get('resolution', [768, 768])  # 기술문서 2.4: 최소 768x768
                 width, height = resolution[0], resolution[1]
                 
                 x_min_norm = coords.get('x_min', 0) / width
@@ -3816,24 +3816,65 @@ class LDrawRenderer:
             return False
     
     def _setup_parallel_rendering(self):
-        """병렬 렌더링 설정"""
+        """병렬 렌더링 설정 (CPU + 메모리 기반 최적화)"""
         try:
             # CPU 코어 수 확인
             cpu_count = multiprocessing.cpu_count()
             print(f"CPU cores: {cpu_count}")
             
-            # 최적 워커 수 결정
+            # 메모리 확인 (워커당 약 3GB 필요)
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                mem_available_gb = mem.available / (1024**3)
+                mem_total_gb = mem.total / (1024**3)
+                print(f"Memory: {mem_total_gb:.2f} GB (total), {mem_available_gb:.2f} GB (available)")
+            except:
+                mem_available_gb = None
+                print("Memory check unavailable")
+            
+            # CPU 기반 초기 워커 수 결정
             if cpu_count >= 8:
-                self.max_workers = 4  # 8코어 이상: 4개 워커
-                print("High-performance parallel rendering (4 workers)")
+                initial_workers = 4  # 8코어 이상: 4개 워커
             elif cpu_count >= 4:
-                self.max_workers = 3  # 4-7코어: 3개 워커
-                print("Medium-performance parallel rendering (3 workers)")
+                initial_workers = 3  # 4-7코어: 3개 워커
             elif cpu_count >= 2:
-                self.max_workers = 2  # 2-3코어: 2개 워커
+                initial_workers = 2  # 2-3코어: 2개 워커
+            else:
+                initial_workers = 1  # 1코어: 순차 렌더링
+            
+            # 메모리 기반 워커 수 조정 (워커당 약 2.5GB 필요 + 시스템 여유)
+            if mem_available_gb is not None:
+                # 시스템 여유: 메모리 총량에 따라 조정
+                if mem_total_gb >= 32:
+                    system_reserve = 4  # 32GB 이상: 4GB 여유
+                elif mem_total_gb >= 16:
+                    system_reserve = 2  # 16-32GB: 2GB 여유
+                else:
+                    system_reserve = 1  # 16GB 미만: 1GB 여유
+                
+                # 안전한 메모리 사용량 계산 (워커당 2.5GB)
+                safe_workers = int((mem_available_gb - system_reserve) / 2.5)
+                safe_workers = max(1, min(safe_workers, initial_workers))  # 최소 1, 최대 initial_workers
+                
+                if safe_workers < initial_workers:
+                    print(f"[WARN] 메모리 부족으로 워커 수 감소: {initial_workers} → {safe_workers}")
+                    print(f"[WARN] 사용 가능 메모리: {mem_available_gb:.2f} GB (워커당 약 2.5GB 필요, 시스템 여유: {system_reserve}GB)")
+                    self.max_workers = safe_workers
+                else:
+                    print(f"[INFO] 메모리 충분: {mem_available_gb:.2f} GB 사용 가능, {safe_workers} 워커 사용 가능")
+                    self.max_workers = safe_workers
+            else:
+                self.max_workers = initial_workers
+            
+            # 워커 수별 성능 레벨 출력
+            if self.max_workers >= 4:
+                print("High-performance parallel rendering (4 workers)")
+            elif self.max_workers >= 3:
+                print("Medium-performance parallel rendering (3 workers)")
+            elif self.max_workers >= 2:
                 print("Low-performance parallel rendering (2 workers)")
             else:
-                self.max_workers = 1  # 1코어: 순차 렌더링
                 print("단일 코어, 순차 렌더링")
             
             # 병렬 렌더링 활성화
@@ -4039,7 +4080,7 @@ class LDrawRenderer:
                 'roughness': bsdf_rough,
                 'uv_map_info': {
                     'has_uv': True,
-                    'uv_resolution': [1024, 1024]
+                    'uv_resolution': list(self.resolution) if hasattr(self, 'resolution') else [768, 768]  # 기술문서 2.4: 최소 768x768
                 }
             }
             # 3) 재현성 정보
@@ -7056,7 +7097,7 @@ class LDrawRenderer:
             'bounding_box': make_json_safe(bbox_data),
             'polygon_uv': make_json_safe(polygon_uv),
             'render_settings': {
-                'resolution': [1024, 1024],
+                'resolution': list(self.resolution),  # YOLO 학습 최적 해상도 (기술문서 2.4: 최소 768x768)
                 'samples': int(bpy.context.scene.cycles.samples) if hasattr(bpy.context.scene, 'cycles') else int(self.current_samples),
                 'engine': 'cycles',
                 'device': self._get_compute_device(),
@@ -7356,7 +7397,14 @@ def main():
     os.makedirs(images_root, exist_ok=True)
     os.makedirs(labels_root, exist_ok=True)
     os.makedirs(meta_root,   exist_ok=True)
-    os.makedirs(meta_e_root, exist_ok=True)  # [FIX] 수정됨: meta-e 폴더 생성
+    os.makedirs(meta_e_root, exist_ok=True)
+    # [FIX] 수정됨: labels/val/test 폴더 구조 미리 생성 (어노테이션.txt:23 기준 - labels/train|val|test/{element_id})
+    if split == 'train':
+        val_labels_root = os.path.join(dataset_root, 'labels', 'val', element_or_part)
+        test_labels_root = os.path.join(dataset_root, 'labels', 'test', element_or_part)
+        os.makedirs(val_labels_root, exist_ok=True)
+        os.makedirs(test_labels_root, exist_ok=True)
+    # [FIX] 수정됨: metadata 폴더 생성 방지 (기술문서에 명시되지 않음)
     # part_output_dir는 이미지가 저장될 디렉토리로 설정(images)
     part_output_dir = images_root
     os.makedirs(part_output_dir, exist_ok=True)
@@ -7534,8 +7582,19 @@ def main():
             print(f" 로컬 경로: {local_images_dir}")
             return results  # 렌더링 완전 건너뛰기
         elif local_file_count > 0:
-            print(f"[INFO] 로컬에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 불완전한 렌더링 발견: {local_file_count}개 파일 (최소 기준: {MIN_FILES_FOR_COMPLETE}개)")
-            print(f" 덮어쓰기 진행")
+            # [FIX] 수정됨: 부족한 개수만 추가 렌더링
+            missing_count = MIN_FILES_FOR_COMPLETE - local_file_count
+            print(f"[INFO] 로컬에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 불완전한 렌더링 발견: {local_file_count}개 파일")
+            print(f"[INFO] 부족한 개수: {missing_count}개 (목표: {MIN_FILES_FOR_COMPLETE}개) → {missing_count}개만 추가 렌더링")
+            # 기존 파일명을 existing_remote에 추가하여 중복 방지
+            base_id_for_filename = args.output_subdir if getattr(args, 'output_subdir', None) else args.part_id
+            for local_file in local_webp_files:
+                existing_remote.add(local_file)
+            # 렌더링 개수를 부족한 개수로 조정
+            args.count = missing_count
+            # [FIX] 수정됨: 렌더링 시작 인덱스를 기존 파일 개수로 설정하여 연속 번호 유지
+            args.start_index = local_file_count
+            print(f"[INFO] 렌더링 개수 조정: {args.count}개 (시작 인덱스: {args.start_index})")
         else:
             print(f"[NEW] 로컬에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 없음. 원격 체크 진행...")
             
@@ -7585,7 +7644,7 @@ def main():
         except Exception:
             existing_remote = set()
 
-    # 렌더링 상태 초기화 - total_count 설정
+    # 렌더링 상태 초기화 - total_count 설정 (부족한 개수만 렌더링하도록 조정된 경우 반영)
     renderer.rendering_state['total_count'] = args.count
     renderer.rendering_state['part_id'] = args.part_id
     renderer.rendering_state['completed_count'] = 0
@@ -7601,7 +7660,9 @@ def main():
             
             # 렌더링할 인덱스 목록 생성 (중복 제외) - WebP 포맷 대응
             render_indices = []
-            for i in range(args.count):
+            start_index = getattr(args, 'start_index', 0)  # [FIX] 수정됨: 시작 인덱스 지원 (부족한 개수만 렌더링 시 사용)
+            for idx in range(args.count):
+                i = start_index + idx  # 실제 렌더링 인덱스
                 base_id_for_filename = args.output_subdir if getattr(args, 'output_subdir', None) else args.part_id
                 image_filename = f"{base_id_for_filename}_{i:03d}.webp"  # WebP 포맷으로 변경
                 if image_filename not in existing_remote:
@@ -7627,9 +7688,11 @@ def main():
         else:
             # 순차 렌더링 (기존 방식)
             print("🔄 순차 렌더링 모드")
-            for i in range(args.count):
+            start_index = getattr(args, 'start_index', 0)  # [FIX] 수정됨: 시작 인덱스 지원 (부족한 개수만 렌더링 시 사용)
+            for idx in range(args.count):
+                i = start_index + idx  # 실제 렌더링 인덱스
                 try:
-                    print(f" 렌더링 진행: {i+1}/{args.count}")
+                    print(f" 렌더링 진행: {idx+1}/{args.count} (인덱스: {i})")
                     # 예정 파일명 (로컬/원격 동일) 계산하여 중복 시 스킵 - WebP 포맷 대응
                     base_id_for_filename = args.output_subdir if getattr(args, 'output_subdir', None) else args.part_id
                     image_filename = f"{base_id_for_filename}_{i:03d}.webp"  # WebP 포맷으로 변경
@@ -7641,7 +7704,7 @@ def main():
                         ldraw_file, 
                         args.part_id, 
                         part_output_dir,
-                        i,
+                        i,  # 실제 인덱스 사용
                         force_color_id=args.color_id
                     )
                     if result:
