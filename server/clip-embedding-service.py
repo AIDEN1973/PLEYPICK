@@ -98,14 +98,14 @@ async def generate_clip_image_embedding(image_base64: str) -> List[float]:
         image_data = base64.b64decode(image_base64)
         image = Image.open(BytesIO(image_data)).convert('RGB')
         
-        # 🔧 수정됨: 이미지 크기 검증 (너무 작은 이미지 방지)
+        # [FIX] 수정됨: 이미지 크기 검증 (너무 작은 이미지 방지)
         width, height = image.size
         if width < 1 or height < 1:
             raise ValueError(f"Image size too small: {width}x{height}")
         if width > 10000 or height > 10000:
             raise ValueError(f"Image size too large: {width}x{height}")
         
-        # 🔧 수정됨: 최소 크기 보장 (1x1 같은 경우 리사이즈) - 크롭 품질 개선
+        # [FIX] 수정됨: 최소 크기 보장 (1x1 같은 경우 리사이즈) - 크롭 품질 개선
         min_size = 128  # 64 → 128 (더 나은 임베딩 품질, 근본 원인 해결)
         if width < min_size or height < min_size:
             # 작은 이미지는 최소 크기로 리사이즈 (비율 유지)
@@ -119,7 +119,7 @@ async def generate_clip_image_embedding(image_base64: str) -> List[float]:
             print(f"[WARNING] Image resized from {width}x{height} to {new_width}x{new_height} (min_size: {min_size})")
         
         # 이미지 전처리
-        # 🔧 수정됨: processor 호출 시 명시적으로 이미지 리스트 전달
+        # [FIX] 수정됨: processor 호출 시 명시적으로 이미지 리스트 전달
         try:
             inputs = processor(images=[image], return_tensors="pt", padding=True).to(device)
         except Exception as proc_error:
