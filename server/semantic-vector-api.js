@@ -1,6 +1,6 @@
 /**
  * Semantic Vector API 서버
- * FGC Encoder를 사용한 semantic_vector 생성 서비스
+ * CLIP ViT-L/14를 사용한 semantic_vector 생성 서비스 (정합성 확보)
  * 포트: 3022
  */
 
@@ -66,7 +66,7 @@ async function preprocessImageForONNX(imageData) {
     
     return tensor
   } catch (error) {
-    console.error('❌ 이미지 전처리 실패:', error)
+    console.error('[ERROR] 이미지 전처리 실패:', error)
     throw error
   }
 }
@@ -87,16 +87,16 @@ app.get('/health', async (req, res) => {
       // 모델 파일 경로 (__dirname 기준으로 안정화)
       const modelPath = path.join(__dirname, '..', 'public', 'models', 'fgc_encoder.onnx')
       
-      console.log(`🔍 [헬스체크] 모델 경로: ${modelPath}`)
-      console.log(`🔍 [헬스체크] 현재 작업 디렉토리: ${process.cwd()}`)
-      console.log(`🔍 [헬스체크] __dirname: ${__dirname}`)
+      console.log(`[CHECK] [헬스체크] 모델 경로: ${modelPath}`)
+      console.log(`[CHECK] [헬스체크] 현재 작업 디렉토리: ${process.cwd()}`)
+      console.log(`[CHECK] [헬스체크] __dirname: ${__dirname}`)
       
       // 모델 파일 존재 확인
       if (!fs.existsSync(modelPath)) {
         throw new Error(`모델 파일이 존재하지 않습니다: ${modelPath}`)
       }
       
-      console.log(`✅ [헬스체크] 모델 파일 존재 확인`)
+      console.log(`[OK] [헬스체크] 모델 파일 존재 확인`)
       
       // ONNX 세션 생성 테스트
       const session = await ort.InferenceSession.create(modelPath, {
@@ -148,7 +148,7 @@ app.get('/api/proxy-image', async (req, res) => {
   }
 
   try {
-    console.log(`🔄 [프록시] 이미지 다운로드: ${url}`)
+    console.log(`[INFO] [프록시] 이미지 다운로드: ${url}`)
     
     const response = await fetch(url, {
       headers: {
@@ -168,7 +168,7 @@ app.get('/api/proxy-image', async (req, res) => {
     response.body.pipeTo(res.writable)
 
   } catch (error) {
-    console.error('❌ [프록시] 이미지 다운로드 실패:', error.message)
+    console.error('[ERROR] [프록시] 이미지 다운로드 실패:', error.message)
     res.status(500).json({ error: 'Failed to proxy image' })
   }
 })
@@ -182,19 +182,19 @@ app.post('/api/semantic-vector', async (req, res) => {
       return res.status(400).json({ error: 'Missing imageUrl' })
     }
 
-    console.log(`🚀 [Semantic Vector] 생성 시작: ${partId} (${colorId})`)
-    console.log(`🖼️ [Semantic Vector] 이미지 URL: ${imageUrl}`)
+    console.log(`[START] [Semantic Vector] 생성 시작: ${partId} (${colorId})`)
+    console.log(`[INFO] [Semantic Vector] 이미지 URL: ${imageUrl}`)
 
     // 1. 이미지 다운로드
     let imageResponse
     try {
       imageResponse = await fetch(imageUrl)
     } catch (corsError) {
-      console.warn(`⚠️ [Semantic Vector] 직접 다운로드 실패 (CORS): ${corsError.message}`)
+      console.warn(`[WARNING] [Semantic Vector] 직접 다운로드 실패 (CORS): ${corsError.message}`)
       
       // 프록시를 통한 다운로드 시도
       const proxyUrl = `http://localhost:${PORT}/api/proxy-image?url=${encodeURIComponent(imageUrl)}`
-      console.log(`🔄 [Semantic Vector] 프록시 다운로드 시도: ${proxyUrl}`)
+      console.log(`[INFO] [Semantic Vector] 프록시 다운로드 시도: ${proxyUrl}`)
       
       imageResponse = await fetch(proxyUrl)
     }
@@ -204,73 +204,65 @@ app.post('/api/semantic-vector', async (req, res) => {
     }
 
     const imageBlob = await imageResponse.blob()
-    const imageData = await imageBlob.arrayBuffer()
-    console.log(`✅ [Semantic Vector] 이미지 다운로드 완료: ${imageData.byteLength} bytes`)
+    const imageBuffer = Buffer.from(await imageBlob.arrayBuffer())
+    console.log(`[OK] [Semantic Vector] 이미지 다운로드 완료: ${imageBuffer.length} bytes`)
 
-    // 2. FGC Encoder 초기화 및 임베딩 생성
-    console.log(`🔍 [Semantic Vector] FGC Encoder 초기화...`)
+    // 2. CLIP ViT-L/14 이미지 임베딩 생성 (정합성 확보)
+    console.log(`[FIX] [Semantic Vector] CLIP ViT-L/14 이미지 임베딩 생성...`)
     
-    let fgcEmbedding
-    let method = 'Unknown'
+    const CLIP_SERVICE_URL = process.env.VITE_CLIP_SERVICE_URL || 'http://localhost:3021'
+    
+    // 이미지를 base64로 변환
+    const imageBase64 = imageBuffer.toString('base64')
+    
+    let semanticVector
+    let method = 'CLIP ViT-L/14'
     
     try {
-      // 서버 환경에서 ONNX Runtime Node 사용
-      const ort = await import('onnxruntime-node')
-      
-      // 모델 파일 경로 (__dirname 기준으로 안정화)
-      const modelPath = path.join(__dirname, '..', 'public', 'models', 'fgc_encoder.onnx')
-      
-      console.log(`🔍 [Semantic Vector] ONNX 모델 로드: ${modelPath}`)
-      console.log(`🔍 [Semantic Vector] 현재 작업 디렉토리: ${process.cwd()}`)
-      console.log(`🔍 [Semantic Vector] __dirname: ${__dirname}`)
-      
-      // ONNX 세션 생성
-      const session = await ort.InferenceSession.create(modelPath, {
-        executionProviders: ['cpu'],
-        graphOptimizationLevel: 'all'
+      const clipResponse = await fetch(`${CLIP_SERVICE_URL}/v1/image-embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image_base64: imageBase64,
+          model: 'clip-vit-l/14',
+          dimensions: 768
+        })
       })
       
-      console.log(`✅ [Semantic Vector] ONNX 모델 로드 성공:`, {
-        inputNames: session.inputNames,
-        outputNames: session.outputNames
-      })
+      if (!clipResponse.ok) {
+        const errorText = await clipResponse.text().catch(() => '')
+        throw new Error(`CLIP 서비스 오류: ${clipResponse.status} ${errorText}`)
+      }
       
-      // 이미지 전처리 (224x224 RGB)
-      const processedImage = await preprocessImageForONNX(imageData)
+      const clipData = await clipResponse.json()
+      semanticVector = clipData?.data?.[0]?.embedding || null
       
-      // ONNX 추론 실행 (Tensor 형태) // 🔧 수정됨
-      const inputTensor = new ort.Tensor('float32', processedImage, [1, 3, 224, 224]) // 🔧 수정됨
-      const results = await session.run({ [session.inputNames[0]]: inputTensor }) // 🔧 수정됨
+      if (!semanticVector || !Array.isArray(semanticVector)) {
+        throw new Error('CLIP 이미지 임베딩 응답 형식 오류')
+      }
       
-      // 결과 추출 및 정규화 // 🔧 수정됨
-      const rawEmbedding = Array.from(results[session.outputNames[0]].data)
-      let norm = Math.sqrt(rawEmbedding.reduce((sum, val) => sum + val * val, 0))
-      if (!isFinite(norm) || norm === 0) { norm = 1 } // 🔧 수정됨
-      fgcEmbedding = rawEmbedding.map(val => val / norm)
+      if (semanticVector.length !== 768) {
+        throw new Error(`CLIP 이미지 임베딩 차원 오류: 예상 768, 실제 ${semanticVector.length}`)
+      }
       
-      method = 'FGC-Encoder (ONNX)'
-      console.log(`✅ [Semantic Vector] 실제 FGC Encoder 사용: ${method}`)
+      // L2 정규화 확인 (CLIP 서비스에서 이미 정규화됨)
+      const norm = Math.sqrt(semanticVector.reduce((sum, val) => sum + val * val, 0))
+      if (Math.abs(norm - 1.0) > 0.01) {
+        console.warn(`[WARNING] [Semantic Vector] CLIP 임베딩 norm 비정상: ${norm.toFixed(4)} (예상: 1.0)`)
+        // 재정규화
+        semanticVector = semanticVector.map(val => val / norm)
+      }
+      
+      console.log(`[OK] [Semantic Vector] CLIP ViT-L/14 임베딩 생성 완료: ${semanticVector.length}D`)
       
     } catch (error) {
-      console.error(`❌ [Semantic Vector] FGC Encoder 초기화 실패: ${error.message}`)
-      console.log(`🔄 [Semantic Vector] 더미 모델로 폴백...`)
-      
-      // 더미 FGC 임베딩 생성 (512차원)
-      fgcEmbedding = Array.from({ length: 512 }, () => Math.random() * 2 - 1)
-      method = 'FGC-Encoder (더미)'
+      console.error(`[ERROR] [Semantic Vector] CLIP 서비스 호출 실패: ${error.message}`)
+      throw new Error(`CLIP 이미지 임베딩 생성 실패: ${error.message}`)
     }
     
-    // L2 정규화 // 🔧 수정됨
-    let norm = Math.sqrt(fgcEmbedding.reduce((sum, val) => sum + val * val, 0))
-    if (!isFinite(norm) || norm === 0) { norm = 1 } // 🔧 수정됨
-    const normalizedFGC = fgcEmbedding.map(val => val / norm)
-    
-    console.log(`✅ [Semantic Vector] FGC 임베딩 생성 완료: ${normalizedFGC.length}D (${method})`)
-
-    // 3. Semantic Vector는 512차원 유지 (0-padding 제거)
-    const semanticVector = normalizedFGC
-    
-    console.log(`✅ [Semantic Vector] semantic_vector 생성 완료: ${semanticVector.length}D`)
+    console.log(`[OK] [Semantic Vector] semantic_vector 생성 완료: ${semanticVector.length}D (${method})`)
 
     res.json({
       success: true,
@@ -283,7 +275,7 @@ app.post('/api/semantic-vector', async (req, res) => {
     })
 
   } catch (error) {
-    console.error(`❌ [Semantic Vector] 생성 실패:`, error.message)
+    console.error(`[ERROR] [Semantic Vector] 생성 실패:`, error.message)
     res.status(500).json({
       success: false,
       error: error.message,
@@ -314,7 +306,7 @@ app.post('/api/normalize-vector', (req, res) => {
     })
 
   } catch (error) {
-    console.error('❌ [벡터 정규화] 실패:', error.message)
+    console.error('[ERROR] [벡터 정규화] 실패:', error.message)
     res.status(500).json({
       success: false,
       error: error.message
@@ -324,24 +316,24 @@ app.post('/api/normalize-vector', (req, res) => {
 
 // 서버 시작
 app.listen(PORT, () => {
-  console.log(`🚀 Semantic Vector API 서버 시작됨`)
-  console.log(`📡 포트: ${PORT}`)
-  console.log(`🌐 URL: http://localhost:${PORT}`)
-  console.log(`📋 엔드포인트:`)
+  console.log(`[START] Semantic Vector API 서버 시작됨`)
+  console.log(`[INFO] 포트: ${PORT}`)
+  console.log(`[INFO] URL: http://localhost:${PORT}`)
+  console.log(`[INFO] 엔드포인트:`)
   console.log(`   GET  /health - 헬스 체크`)
   console.log(`   GET  /api/proxy-image - 이미지 프록시`)
   console.log(`   POST /api/semantic-vector - semantic_vector 생성`)
   console.log(`   POST /api/normalize-vector - 벡터 정규화`)
-  console.log(`⏰ 시작 시간: ${new Date().toISOString()}`)
+  console.log(`[INFO] 시작 시간: ${new Date().toISOString()}`)
 })
 
 // 에러 처리
 process.on('uncaughtException', (error) => {
-  console.error('❌ [Uncaught Exception]:', error.message)
+  console.error('[ERROR] [Uncaught Exception]:', error.message)
   process.exit(1)
 })
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ [Unhandled Rejection]:', reason)
+  console.error('[ERROR] [Unhandled Rejection]:', reason)
   process.exit(1)
 })
