@@ -244,6 +244,7 @@ export function useHybridCache() {
         color_lab: vectorData.color_lab,
         size_stud: vectorData.size_stud,
         clip_embedding: vectorData.clip_embedding,
+        metadata: vectorData.metadata || null, // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
         timestamp: Date.now()
       }
       
@@ -274,7 +275,8 @@ export function useHybridCache() {
             shape_vector: res.shape_vector,
             color_lab: res.color_lab,
             size_stud: res.size_stud,
-            clip_embedding: res.clip_embedding
+            clip_embedding: res.clip_embedding,
+            metadata: res.metadata || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 포함
           }
         }
       } catch (e) {
@@ -293,7 +295,8 @@ export function useHybridCache() {
               shape_vector: request.result.shape_vector,
               color_lab: request.result.color_lab,
               size_stud: request.result.size_stud,
-              clip_embedding: request.result.clip_embedding
+              clip_embedding: request.result.clip_embedding,
+              metadata: request.result.metadata || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 포함
             })
           } else {
             resolve({ found: false })
@@ -340,28 +343,33 @@ export function useHybridCache() {
           if (!allowed.has(key)) continue
           // 유효 벡터만 저장: 셋 중 하나라도 존재해야 함
           const fj = row.feature_json || {}
-          // 🔧 수정됨: semantic_vector 폴백 적용
-          let shapeVec = fj.shape_vector || fj.shape || row.semantic_vector || null
-          // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
-          if (shapeVec && Array.isArray(shapeVec)) {
-            shapeVec = normalizeVector(shapeVec)
+          // 🔧 수정됨: shape_vector 추출 우선순위 변경 (근본 문제 해결)
+          // 1. feature_json.shape_vector (CLIP 기반)
+          // 2. clip_text_emb (CLIP ViT-L/14, 실시간 검출과 동일 모델)
+          // 3. semantic_vector는 사용 안 함 (FGC Encoder, CLIP과 호환 불가)
+          // 근본 원인 해결: CLIP 모델로 통일
+          let shapeVec = fj.shape_vector || fj.shape || row.clip_text_emb || null
+          // 🔧 수정됨: 문자열 배열/문자열 모두 normalizeVector로 처리
+          if (shapeVec) {
+            shapeVec = normalizeVector(shapeVec) // 🔧 수정됨: Array.isArray 체크 제거
           }
           
           const colorLab = fj.color_lab || fj.color || null
           const sizeStud = (fj.size_stud !== undefined ? fj.size_stud : fj.size)
           if (!shapeVec && !colorLab && typeof sizeStud !== 'number') continue
           
-          // clip_text_emb도 숫자 배열로 변환 // 🔧 수정됨
+          // clip_text_emb도 숫자 배열로 변환 (문자열도 처리) // 🔧 수정됨
           let clipEmbedding = row.clip_text_emb || null
-          if (clipEmbedding && Array.isArray(clipEmbedding)) {
-            clipEmbedding = normalizeVector(clipEmbedding)
+          if (clipEmbedding) {
+            clipEmbedding = normalizeVector(clipEmbedding) // 🔧 수정됨: Array.isArray 체크 제거
           }
           
           const vectorData = {
             shape_vector: shapeVec || null,
             color_lab: colorLab || null,
             size_stud: typeof sizeStud === 'number' ? sizeStud : null,
-            clip_embedding: clipEmbedding || null
+            clip_embedding: clipEmbedding || null,
+            metadata: fj || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
           }
           // 🔧 수정됨: 로컬 저장 시 이미 숫자 배열로 변환된 상태
           const ok = await saveVectorToLocal(row.part_id, row.color_id, vectorData)
@@ -642,8 +650,11 @@ export function useHybridCache() {
       
       // 각 벡터를 로컬에 저장
       const savePromises = vectorsData.map(async (vector) => {
+        // 🔧 수정됨: shape_vector 추출 우선순위 변경 (근본 문제 해결)
+        // 🔧 수정됨: semantic_vector 완전 제거 (CLIP 모델로 통일)
+        const shapeVec = vector.feature_json?.shape_vector || vector.clip_text_emb || null
         const vectorData = {
-          shape_vector: vector.feature_json?.shape_vector || null,
+          shape_vector: shapeVec,
           color_lab: vector.feature_json?.color_lab || null,
           size_stud: vector.feature_json?.size_stud || null,
           clip_embedding: vector.clip_text_emb || null
@@ -766,22 +777,63 @@ export function useHybridCache() {
       
       // 🔧 수정됨: 로컬 벡터도 문자열 배열일 수 있으므로 숫자 배열로 변환
       let shapeVector = vectorResult.shape_vector
-      if (shapeVector && Array.isArray(shapeVector)) {
-        shapeVector = normalizeVector(shapeVector)
+      if (shapeVector) {
+        shapeVector = normalizeVector(shapeVector) // 🔧 수정됨: Array.isArray 체크 제거
+      }
+      
+      // 🔧 수정됨: 로컬에 shape_vector가 없으면 원격에서 로드
+      if (!shapeVector) {
+        console.log(`🔧 로컬 shape_vector 없음: ${part.part_id}/${part.color_id} - 원격에서 로드 시도`)
+        const remoteResult = await compareRemoteVectors(detection, part)
+        // 원격에서 로드한 벡터를 로컬에 저장 (다음 번을 위해)
+        if (remoteResult > 0.2) {
+          // 원격 벡터를 로컬에 저장하려면 원격 데이터를 다시 가져와야 함
+          // 여기서는 일단 원격 결과를 반환
+          return remoteResult
+        }
       }
       
       let clipEmbedding = vectorResult.clip_embedding
-      if (clipEmbedding && Array.isArray(clipEmbedding)) {
-        clipEmbedding = normalizeVector(clipEmbedding)
+      if (clipEmbedding) {
+        clipEmbedding = normalizeVector(clipEmbedding) // 🔧 수정됨: Array.isArray 체크 제거
       }
       
-      // 실제 벡터 유사도 계산
-      const similarity = calculateVectorSimilarity(detection.features, {
+      // 🔧 디버깅: 로컬 벡터 구조 확인
+      console.log(`🔧 로컬 벡터 구조 확인: ${part.part_id}/${part.color_id}`, {
+        hasShapeVector: !!shapeVector,
+        shapeVectorType: shapeVector ? (Array.isArray(shapeVector) ? `array[${shapeVector.length}]` : typeof shapeVector) : 'null',
+        hasClipEmbedding: !!clipEmbedding,
+        clipEmbeddingType: clipEmbedding ? (Array.isArray(clipEmbedding) ? `array[${clipEmbedding.length}]` : typeof clipEmbedding) : 'null',
+        vectorResultKeys: Object.keys(vectorResult),
+        vectorResultShapeVectorRaw: vectorResult.shape_vector ? (typeof vectorResult.shape_vector === 'string' ? vectorResult.shape_vector.substring(0, 50) : typeof vectorResult.shape_vector) : 'null'
+      })
+      
+      // 🔧 수정됨: detection.features의 벡터도 정규화
+      let detectedShapeVector = detection.features.shape_vector
+      if (detectedShapeVector) {
+        detectedShapeVector = normalizeVector(detectedShapeVector)
+      }
+      
+      let detectedClipEmbedding = detection.features.clip_embedding
+      if (detectedClipEmbedding) {
+        detectedClipEmbedding = normalizeVector(detectedClipEmbedding)
+      }
+      
+      // 실제 벡터 유사도 계산 (정규화된 벡터 사용)
+      const normalizedDetectionFeatures = {
+        ...detection.features,
+        shape_vector: detectedShapeVector || detection.features.shape_vector,
+        clip_embedding: detectedClipEmbedding || detection.features.clip_embedding
+      }
+      
+      // 🔧 수정됨: partMetadata 전달 (Adaptive Feature Fusion을 위해)
+      const partMetadata = vectorResult.metadata || null
+      const similarity = calculateVectorSimilarity(normalizedDetectionFeatures, {
         shape_vector: shapeVector,
         color_lab: vectorResult.color_lab,
         size_stud: vectorResult.size_stud,
         clip_embedding: clipEmbedding
-      })
+      }, partMetadata)
       
       // 유사도가 0이면 기본 점수 부여
       if (similarity === 0) {
@@ -800,10 +852,10 @@ export function useHybridCache() {
   // 원격 벡터 비교 (Supabase에서 벡터만 조회)
   const compareRemoteVectors = async (detection, part) => {
     try {
-      // Supabase에서 벡터 데이터만 조회 (semantic_vector도 함께 조회) // 🔧 수정됨
+      // Supabase에서 벡터 데이터만 조회 // 🔧 수정됨: semantic_vector 제거
       const { data: vectorData, error: vectorError } = await supabase
         .from('parts_master_features')
-        .select('feature_json, clip_text_emb, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+        .select('feature_json, clip_text_emb') // 🔧 수정됨: semantic_vector 제거 (CLIP 모델로 통일)
         .eq('part_id', part.part_id)
         .eq('color_id', part.color_id)
         .single()
@@ -814,18 +866,33 @@ export function useHybridCache() {
         return 0.2
       }
       
-      // shape_vector 추출: feature_json 내부 우선, 없으면 semantic_vector 사용 // 🔧 수정됨
-      let shapeVector = vectorData.feature_json?.shape_vector || vectorData.semantic_vector || null
+      // 🔧 수정됨: shape_vector 추출 우선순위 변경 (semantic_vector 완전 제거)
+      // 1. feature_json.shape_vector (CLIP 기반, 최우선)
+      // 2. clip_text_emb (CLIP ViT-L/14, 실시간 검출과 동일 모델)
+      // 3. semantic_vector는 사용 안 함 (FGC Encoder, CLIP과 호환 불가)
+      // 근본 원인 해결: CLIP 모델로 통일하여 벡터 비교 일관성 확보
+      let shapeVector = vectorData.feature_json?.shape_vector || vectorData.clip_text_emb || null
       
-      // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환
-      if (shapeVector && Array.isArray(shapeVector)) {
-        shapeVector = normalizeVector(shapeVector)
+      // 🔧 수정됨: 문자열 배열을 숫자 배열로 변환 (문자열도 처리)
+      if (shapeVector) {
+        shapeVector = normalizeVector(shapeVector) // 🔧 수정됨: Array.isArray 체크 제거
       }
       
-      // clip_text_emb도 숫자 배열로 변환 // 🔧 수정됨
+      // clip_text_emb도 숫자 배열로 변환 (문자열도 처리) // 🔧 수정됨
       let clipEmbedding = vectorData.clip_text_emb || null
-      if (clipEmbedding && Array.isArray(clipEmbedding)) {
-        clipEmbedding = normalizeVector(clipEmbedding)
+      if (clipEmbedding) {
+        clipEmbedding = normalizeVector(clipEmbedding) // 🔧 수정됨: Array.isArray 체크 제거, normalizeVector가 문자열도 처리
+      }
+      
+      // 🔧 수정됨: detection.features의 벡터도 정규화
+      let detectedShapeVector = detection.features?.shape_vector
+      if (detectedShapeVector) {
+        detectedShapeVector = normalizeVector(detectedShapeVector)
+      }
+      
+      let detectedClipEmbedding = detection.features?.clip_embedding
+      if (detectedClipEmbedding) {
+        detectedClipEmbedding = normalizeVector(detectedClipEmbedding)
       }
       
       // 🔧 수정됨: 벡터 구조 확인 로그 (정규화 후 타입 확인)
@@ -835,17 +902,25 @@ export function useHybridCache() {
         hasClipEmbedding: !!clipEmbedding,
         clipEmbeddingType: clipEmbedding ? (Array.isArray(clipEmbedding) ? `array[${clipEmbedding.length}](${typeof clipEmbedding[0]})` : typeof clipEmbedding) : 'null',
         hasDetectionFeatures: !!detection.features,
-        detectionFeaturesShapeVector: detection.features?.shape_vector ? (Array.isArray(detection.features.shape_vector) ? `array[${detection.features.shape_vector.length}](${typeof detection.features.shape_vector[0]})` : typeof detection.features.shape_vector) : 'null',
-        detectionFeaturesClipEmbedding: detection.features?.clip_embedding ? (Array.isArray(detection.features.clip_embedding) ? `array[${detection.features.clip_embedding.length}](${typeof detection.features.clip_embedding[0]})` : typeof detection.features.clip_embedding) : 'null'
+        detectionFeaturesShapeVector: detectedShapeVector ? (Array.isArray(detectedShapeVector) ? `array[${detectedShapeVector.length}](${typeof detectedShapeVector[0]})` : typeof detectedShapeVector) : 'null',
+        detectionFeaturesClipEmbedding: detectedClipEmbedding ? (Array.isArray(detectedClipEmbedding) ? `array[${detectedClipEmbedding.length}](${typeof detectedClipEmbedding[0]})` : typeof detectedClipEmbedding) : 'null'
       })
       
-      // 벡터 유사도 계산
-      const similarity = calculateVectorSimilarity(detection.features, {
+      // 벡터 유사도 계산 (정규화된 벡터 사용)
+      const normalizedDetectionFeatures = detection.features ? {
+        ...detection.features,
+        shape_vector: detectedShapeVector || detection.features.shape_vector,
+        clip_embedding: detectedClipEmbedding || detection.features.clip_embedding
+      } : null
+      
+      // 🔧 수정됨: partMetadata 전달 (Adaptive Feature Fusion을 위해)
+      const partMetadata = vectorData.feature_json || null
+      const similarity = calculateVectorSimilarity(normalizedDetectionFeatures, {
         shape_vector: shapeVector, // 🔧 수정됨: 숫자 배열로 변환됨
         color_lab: vectorData.feature_json?.color_lab,
         size_stud: vectorData.feature_json?.size_stud,
         clip_embedding: clipEmbedding // 🔧 수정됨: 숫자 배열로 변환됨
-      })
+      }, partMetadata)
       
       // 🔧 수정됨: 상세 유사도 로그
       console.log(`🔧 원격 벡터 유사도 계산 결과: ${part.part_id} - 유사도: ${similarity.toFixed(4)}`)
@@ -864,45 +939,69 @@ export function useHybridCache() {
     }
   }
 
-  // 벡터 유사도 계산 함수
-  const calculateVectorSimilarity = (detectedFeatures, partFeatures) => {
+  // 벡터 유사도 계산 함수 (Adaptive Feature Fusion 적용: 기술문서 5.2) // 🔧 수정됨: 근본 개선
+  const calculateVectorSimilarity = (detectedFeatures, partFeatures, partMetadata = null) => {
     if (!detectedFeatures || !partFeatures) return 0
 
     try {
-      const weights = { shape: 0.45, color: 0.25, size: 0.15, clip: 0.15 }
+      // 🔧 수정됨: Adaptive Feature Fusion 가중치 (기술문서 5.2)
+      // 초기값: w_img=0.65, w_meta=0.25, w_txt=0.15
+      let weights = { 
+        img: 0.65,    // 이미지 임베딩 (shape_vector)
+        meta: 0.25,   // 메타데이터 (color, size)
+        txt: 0.15    // 텍스트 임베딩 (clip_embedding)
+      }
+      
+      // 🔧 수정됨: 부품 종류별 가중치 조정 (기술문서 5.2)
+      if (partMetadata) {
+        const studCount = partMetadata.stud_count_top || partMetadata.feature_json?.stud_count_top || 0
+        const tileRatio = partMetadata.tile_ratio || partMetadata.feature_json?.tile_ratio || 0
+        
+        if (studCount <= 1 && tileRatio >= 0.4) {
+          // 타일/프린트 위주: w_meta=0.20, w_txt=0.20
+          weights.meta = 0.20
+          weights.txt = 0.20
+          weights.img = 0.60
+        } else if (studCount >= 2) {
+          // 스터드/튜브 뚜렷: w_meta=0.30, w_txt=0.10
+          weights.meta = 0.30
+          weights.txt = 0.10
+          weights.img = 0.60
+        }
+      }
+      
       let weightedSum = 0
       let weightTotal = 0
 
-      // 1) Shape (둘 다 존재하는 경우에만 적용)
+      // 1) 이미지 임베딩 (shape_vector) - w_img
       if (Array.isArray(detectedFeatures.shape_vector) && Array.isArray(partFeatures.shape_vector)) {
         const shapeSim = calculateCosineSimilarity(
           detectedFeatures.shape_vector,
           partFeatures.shape_vector
         )
-        if (Number.isFinite(shapeSim)) {
-          console.log(`🔧 벡터 유사도 계산: Shape similarity = ${shapeSim.toFixed(4)} (weight: ${weights.shape})`)
-          weightedSum += shapeSim * weights.shape
-          weightTotal += weights.shape
-        } else {
-          console.warn(`🔧 벡터 유사도 계산: Shape similarity 계산 실패 (NaN 또는 Infinity)`)
+        if (Number.isFinite(shapeSim) && shapeSim >= 0) {
+          weightedSum += shapeSim * weights.img
+          weightTotal += weights.img
         }
-      } else {
-        console.log(`🔧 벡터 유사도 계산: Shape 벡터 없음 (detected: ${!!detectedFeatures.shape_vector}, part: ${!!partFeatures.shape_vector})`)
       }
 
-      // 2) Color (둘 다 존재하는 경우에만 적용)
+      // 2) 메타데이터 (color, size) - w_meta
+      let metaSim = 0
+      let metaCount = 0
+      
+      // Color
       if (detectedFeatures.color_lab && partFeatures.color_lab) {
         const colorSim = calculateColorSimilarity(
           detectedFeatures.color_lab,
           partFeatures.color_lab
         )
-        if (Number.isFinite(colorSim)) {
-          weightedSum += colorSim * weights.color
-          weightTotal += weights.color
+        if (Number.isFinite(colorSim) && colorSim >= 0) {
+          metaSim += colorSim
+          metaCount++
         }
       }
-
-      // 3) Size (둘 다 존재하는 경우에만 적용)
+      
+      // Size
       if (
         typeof detectedFeatures.size_stud === 'number' &&
         typeof partFeatures.size_stud === 'number'
@@ -911,21 +1010,27 @@ export function useHybridCache() {
           detectedFeatures.size_stud,
           partFeatures.size_stud
         )
-        if (Number.isFinite(sizeSim)) {
-          weightedSum += sizeSim * weights.size
-          weightTotal += weights.size
+        if (Number.isFinite(sizeSim) && sizeSim >= 0) {
+          metaSim += sizeSim
+          metaCount++
         }
       }
+      
+      if (metaCount > 0) {
+        const avgMetaSim = metaSim / metaCount
+        weightedSum += avgMetaSim * weights.meta
+        weightTotal += weights.meta
+      }
 
-      // 4) CLIP 텍스트 임베딩 (둘 다 존재하는 경우에만 적용)
+      // 3) 텍스트 임베딩 (clip_embedding) - w_txt
       if (Array.isArray(detectedFeatures.clip_embedding) && Array.isArray(partFeatures.clip_embedding)) {
         const clipSim = calculateCosineSimilarity(
           detectedFeatures.clip_embedding,
           partFeatures.clip_embedding
         )
-        if (Number.isFinite(clipSim)) {
-          weightedSum += clipSim * weights.clip
-          weightTotal += weights.clip
+        if (Number.isFinite(clipSim) && clipSim >= 0) {
+          weightedSum += clipSim * weights.txt
+          weightTotal += weights.txt
         }
       }
 
@@ -942,6 +1047,30 @@ export function useHybridCache() {
 
   // 벡터를 숫자 배열로 변환 (문자열 배열 처리) // 🔧 수정됨
   const normalizeVector = (vec) => {
+    // 🔧 수정됨: PostgreSQL vector 타입 문자열 처리 추가 (예: "[0.1,0.2,0.3]")
+    if (typeof vec === 'string') {
+      // 벡터 형식인지 확인: "[숫자"로 시작하는지 체크
+      const trimmed = vec.trim()
+      if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+        // 벡터 형식이 아니면 null 반환 (일반 텍스트 등)
+        return null
+      }
+      
+      try {
+        // PostgreSQL vector 형식: "[0.1,0.2,0.3]" → 배열로 파싱
+        const parsed = JSON.parse(vec)
+        if (Array.isArray(parsed)) {
+          vec = parsed
+        } else {
+          // JSON 배열이 아니면 null 반환 (조용히 처리)
+          return null
+        }
+      } catch (err) {
+        // JSON 파싱 실패 시 null 반환 (조용히 처리, 경고 로그 제거)
+        return null
+      }
+    }
+    
     if (!Array.isArray(vec)) return null
     // 이미 숫자 배열이면 그대로 반환
     if (vec.length > 0 && typeof vec[0] === 'number') return vec
@@ -1135,3 +1264,4 @@ export function useHybridCache() {
     searchLocalCache
   }
 }
+

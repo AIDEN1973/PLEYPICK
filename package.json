@@ -11,6 +11,7 @@
     "postprocess": "node --env-file=.env scripts/postprocess_worker.js",
     "synthetic": "node --env-file=.env server/synthetic-api.js",
     "synthetic:auto": "node --env-file=.env scripts/start-synthetic-api.js",
+    "dev:api": "node --env-file=.env server/synthetic-api.js",
     "manual-upload": "node --env-file=.env server/manual-upload-api.cjs",
     "monitoring": "node --env-file=.env server/monitoring-api.js",
     "clip:service": "pip install -r server/requirements-clip.txt && python server/clip-embedding-service.py",

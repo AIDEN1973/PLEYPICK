@@ -1,398 +1,304 @@
 #!/usr/bin/env python3
 """
-기존 .pt 모델을 .onnx로 변환하여 Supabase Storage에 업로드하는 스크립트
+PyTorch 모델을 ONNX로 변환하는 유틸리티 스크립트
+
+Supabase Storage에 업로드된 .pt 파일을 다운로드하여 ONNX로 변환하고 다시 업로드합니다.
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
 from datetime import datetime
 
-# 환경변수 관리 시스템 사용
+# .env 파일 로드 (환경변수 관리 시스템과 일관성 유지)
 try:
-    from scripts.env_integration import get_supabase_config, apply_environment
-    apply_environment()
-    ENV_MANAGER_AVAILABLE = True
-    print("[OK] 환경변수 관리 시스템 로드됨")
+    from dotenv import load_dotenv
+    # 프로젝트 루트의 .env 파일 로드
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+        print(f"[OK] .env 파일 로드: {env_path}")
 except ImportError:
-    ENV_MANAGER_AVAILABLE = False
-    # 폴백: .env 파일 로드
-    try:
-        from dotenv import load_dotenv
-        env_path = Path(__file__).parent.parent / '.env'
-        if env_path.exists():
-            load_dotenv(env_path, override=True)
-            print(f"[OK] .env 파일 로드됨: {env_path}")
-    except ImportError:
-        print("[WARN] python-dotenv가 설치되지 않음. pip install python-dotenv")
-    except Exception as e:
-        print(f"[WARN] .env 파일 로드 실패: {e}")
+    print("[WARN] python-dotenv가 설치되지 않음. pip install python-dotenv")
+except Exception as e:
+    print(f"[WARN] .env 파일 로드 실패: {e}")
 
-# Supabase 클라이언트
 try:
     from supabase import create_client
-except ImportError:
-    print("[ERROR] Supabase 클라이언트가 설치되지 않았습니다.")
-    print("다음 명령어로 설치하세요: pip install supabase")
-    sys.exit(1)
-
-# YOLO 관련 임포트
-try:
     from ultralytics import YOLO
-except ImportError:
-    print("[ERROR] ultralytics가 설치되지 않았습니다.")
-    print("다음 명령어로 설치하세요: pip install ultralytics")
+except ImportError as e:
+    print(f"[ERROR] 필요한 패키지가 설치되지 않았습니다: {e}")
+    print("다음 명령어로 설치하세요: pip install supabase ultralytics")
     sys.exit(1)
 
+def setup_supabase():
+    """Supabase 클라이언트 설정 (환경변수 관리 시스템 사용)"""
+    # [FIX] 수정됨: 환경변수 관리 시스템 사용
+    # scripts/env_manager.mjs는 Node.js 전용이므로 Python에서는 직접 .env 파일 로드
+    
+    # .env 파일에서 환경변수 로드
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+    
+    # Supabase 설정 (Service Role 우선)
+    supabase_url = (
+        os.getenv('SUPABASE_URL')
+        or os.getenv('VITE_SUPABASE_URL')
+        or 'https://npferbxuxocbfnfbpcnz.supabase.co'
+    )
+    
+    supabase_key = (
+        os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        or os.getenv('VITE_SUPABASE_SERVICE_ROLE')
+        # 기본 Service Role Key (환경변수 없을 경우)
+        or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+    )
+    
+    if not supabase_url or not supabase_key:
+        print("[ERROR] Supabase 설정을 찾을 수 없습니다")
+        sys.exit(1)
+    
+    print(f"[INFO] Supabase URL: {supabase_url}")
+    print(f"[INFO] Service Role Key 사용: {supabase_key[:20]}...")
+    
+    return create_client(supabase_url, supabase_key)
 
-def download_pt_model(supabase, model_name):
-    """Supabase Storage에서 .pt 모델 다운로드"""
+def download_model(supabase, model_path, local_path):
+    """Supabase Storage에서 모델 다운로드"""
     try:
-        print(f"[DOWNLOAD] {model_name}.pt 다운로드 중...")
+        print(f"[DOWNLOAD] 모델 다운로드 중: {model_path}")
+        response = supabase.storage.from_('models').download(model_path)
         
-        # Storage에서 파일 다운로드
-        response = supabase.storage.from_('models').download(f"{model_name}.pt")
+        if hasattr(response, 'error') and response.error:
+            print(f"[ERROR] 다운로드 실패: {response.error}")
+            return False
         
-        # Supabase Python 클라이언트는 bytes를 반환
+        # 바이너리 데이터로 받은 경우
         if isinstance(response, bytes):
-            model_data = response
-        elif hasattr(response, 'content'):
-            model_data = response.content
-        elif hasattr(response, 'read'):
-            model_data = response.read()
+            with open(local_path, 'wb') as f:
+                f.write(response)
         else:
-            print(f"[ERROR] 다운로드 응답 형식을 알 수 없습니다: {type(response)}")
-            return None
+            # 파일 객체인 경우
+            with open(local_path, 'wb') as f:
+                f.write(response.read())
         
-        # 임시 디렉토리에 저장
-        temp_dir = Path("public/models/temp")
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        
-        pt_path = temp_dir / f"{model_name}.pt"
-        with open(pt_path, 'wb') as f:
-            f.write(model_data)
-        
-        print(f"[OK] 다운로드 완료: {pt_path} ({len(model_data)} bytes)")
-        return pt_path
-        
+        print(f"[OK] 다운로드 완료: {local_path} ({Path(local_path).stat().st_size / 1024 / 1024:.2f} MB)")
+        return True
     except Exception as e:
-        print(f"[ERROR] 다운로드 실패: {e}")
+        print(f"[ERROR] 다운로드 중 오류: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        return False
 
-
-def convert_to_onnx(pt_path, model_name, imgsz=640):
+def convert_to_onnx(pt_path, onnx_path, imgsz=640):
     """PyTorch 모델을 ONNX로 변환"""
     try:
-        print(f"[CONVERT] {pt_path} → ONNX 변환 중...")
-        
-        # YOLO 모델 로드
+        print(f"[CONVERT] ONNX 변환 시작: {pt_path}")
         model = YOLO(str(pt_path))
         
-        # ONNX 변환 목적 경로
-        onnx_path = pt_path.parent / f"{model_name}.onnx"
+        # ONNX 변환
+        export_result = model.export(
+            format='onnx',
+            imgsz=imgsz,
+            simplify=True,
+            opset=12
+        )
         
-        # 이미 존재하면 삭제
-        if onnx_path.exists():
-            onnx_path.unlink()
-        
-        # ONNX 변환 (목적 경로 지정)
-        model.export(format='onnx', imgsz=imgsz)
-        
-        # model.export()는 원본 파일과 같은 디렉토리에 모델명.onnx로 저장하는 경우가 많음
-        # 또는 현재 작업 디렉토리에 저장될 수 있음
-        
-        # 우선순위 1: 목적 경로에 이미 생성되었는지 확인
-        if onnx_path.exists():
-            print(f"[OK] ONNX 변환 완료: {onnx_path}")
-            return onnx_path
-        
-        # 우선순위 2: pt_path와 같은 디렉토리에서 찾기
-        pt_dir = pt_path.parent
-        possible_names = [
-            f"{model_name}.onnx",
-            "yolo11n.onnx",
-            "yolo11s-seg.onnx",
-            "yolo11n-seg.onnx",
-            "yolo11s.onnx",
-            "best.onnx"
+        # export()는 모델 객체의 경로를 반환하거나, 현재 디렉토리에 저장할 수 있음
+        # 여러 가능한 경로에서 파일 찾기
+        possible_paths = [
+            Path(onnx_path),  # 목적지 경로
+            Path(pt_path).with_suffix('.onnx'),  # .pt와 같은 디렉토리
+            Path("yolo11n-seg.onnx"),  # YOLO 기본 이름
+            Path("yolo11n.onnx"),
+            Path("yolo11s-seg.onnx"),
+            Path("yolo11s.onnx"),
+            Path("best.onnx"),
         ]
         
-        for name in possible_names:
-            candidate = pt_dir / name
-            if candidate.exists():
-                if candidate != onnx_path:
-                    candidate.rename(onnx_path)
-                    print(f"[OK] ONNX 변환 완료 (이동): {candidate} → {onnx_path}")
+        # export_result가 문자열 경로인 경우
+        if isinstance(export_result, (str, Path)):
+            possible_paths.insert(0, Path(export_result))
+        
+        exported_file = None
+        for p in possible_paths:
+            if p and p.exists():
+                if p != Path(onnx_path):
+                    # 파일이 다른 경로에 있으면 목적지로 이동
+                    p.rename(onnx_path)
+                    print(f"[OK] ONNX 파일 이동: {p} → {onnx_path}")
                 else:
-                    print(f"[OK] ONNX 변환 완료: {onnx_path}")
-                return onnx_path
+                    print(f"[OK] ONNX 파일 저장: {onnx_path}")
+                exported_file = Path(onnx_path)
+                break
         
-        # 우선순위 3: 현재 작업 디렉토리에서 찾기
-        current_dir = Path.cwd()
-        for name in possible_names:
-            candidate = current_dir / name
-            if candidate.exists():
-                candidate.rename(onnx_path)
-                print(f"[OK] ONNX 변환 완료 (현재 디렉토리에서 이동): {candidate} → {onnx_path}")
-                return onnx_path
+        if not exported_file:
+            raise FileNotFoundError(f"ONNX 파일을 찾을 수 없습니다. 검색 경로: {possible_paths}")
         
-        # 우선순위 4: pt_path 디렉토리 전체 검색
-        for file in pt_dir.glob("*.onnx"):
-            if file.exists():
-                file.rename(onnx_path)
-                print(f"[OK] ONNX 변환 완료 (검색 후 이동): {file} → {onnx_path}")
-                return onnx_path
-        
-        raise FileNotFoundError(f"ONNX 파일을 찾을 수 없습니다. 검색 위치: {pt_dir}, {current_dir}")
+        print(f"[OK] ONNX 변환 완료: {onnx_path} ({exported_file.stat().st_size / 1024 / 1024:.2f} MB)")
+        return True
         
     except Exception as e:
         print(f"[ERROR] ONNX 변환 실패: {e}")
         import traceback
         traceback.print_exc()
-        return None
+        return False
 
-
-def upload_onnx_model(supabase, onnx_path, model_name):
-    """ONNX 모델을 Supabase Storage에 업로드"""
+def upload_onnx(supabase, onnx_path, model_name):
+    """ONNX 모델을 Supabase Storage에 업로드 (학습 스크립트와 동일한 방식)"""
     try:
-        print(f"[UPLOAD] {onnx_path} 업로드 중...")
+        onnx_bucket_path = f"{model_name}.onnx"
+        print(f"[UPLOAD] ONNX 모델 업로드 중: {onnx_bucket_path}")
         
-        # ONNX 파일 읽기
         with open(onnx_path, 'rb') as f:
             onnx_data = f.read()
         
-        # 공개 URL 생성 (업로드 실패해도 URL은 생성)
-        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
-        bucket_path = f"{model_name}.onnx"
-        public_url = f"{supabase_url}/storage/v1/object/public/models/{bucket_path}"
-        
-        # 업로드 시도
+        # [FIX] 수정됨: 학습 스크립트와 동일한 업로드 방식 사용
+        # local_yolo_training.py의 upload_and_register_model 함수와 동일한 방식
         upload_result = supabase.storage.from_('models').upload(
-            bucket_path,
+            onnx_bucket_path,
             onnx_data
         )
         
-        # 업로드 응답 처리 (local_yolo_training.py와 동일한 방식)
+        # Supabase Storage 업로드 응답 처리 (학습 스크립트와 동일)
         if hasattr(upload_result, 'error') and upload_result.error:
-            print(f"[ERROR] ONNX 모델 업로드 실패: {upload_result.error}")
-            print(f"[WARN] 업로드 실패로 인해 예상 공개 URL을 사용합니다: {public_url}")
-        else:
-            print(f"[OK] ONNX 모델 업로드 성공, 공개 URL: {public_url}")
-        
-        # 실패해도 URL 반환 (나중에 수동 업로드 가능)
-        return public_url
-        
-    except Exception as e:
-        print(f"[ERROR] 업로드 실패: {e}")
-        import traceback
-        traceback.print_exc()
-        # 에러가 나도 공개 URL 반환
-        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
-        bucket_path = f"{model_name}.onnx"
-        public_url = f"{supabase_url}/storage/v1/object/public/models/{bucket_path}"
-        print(f"[WARN] 예상 공개 URL: {public_url}")
-        return public_url
-
-
-def update_model_registry(supabase, model_name, onnx_url, onnx_path):
-    """model_registry 테이블 업데이트"""
-    try:
-        print(f"[UPDATE] model_registry 업데이트 중: {model_name}")
-        
-        # 기존 모델 정보 조회
-        result = supabase.table('model_registry')\
-            .select('*')\
-            .eq('model_name', model_name)\
-            .execute()
-        
-        if result.error:
-            print(f"[ERROR] 모델 조회 실패: {result.error}")
-            return False
-        
-        if not result.data or len(result.data) == 0:
-            print(f"[WARN] 모델을 찾을 수 없습니다: {model_name}")
-            return False
-        
-        model_data = result.data[0]
-        
-        # 업데이트 데이터 준비
-        update_data = {
-            'updated_at': datetime.now().isoformat()
-        }
-        
-        # model_url이 .pt인 경우 .onnx로 업데이트
-        if model_data.get('model_url', '').endswith('.pt'):
-            update_data['model_url'] = onnx_url
-            print(f"[UPDATE] model_url 업데이트: .pt → .onnx")
-        
-        # model_path가 .pt인 경우 .onnx로 업데이트
-        if model_data.get('model_path', '').endswith('.pt'):
-            update_data['model_path'] = f"{model_name}.onnx"
-            print(f"[UPDATE] model_path 업데이트: .pt → .onnx")
-        
-        # 업데이트 실행 (에러 처리 개선)
-        try:
-            update_result = supabase.table('model_registry')\
-                .update(update_data)\
-                .eq('model_name', model_name)\
-                .execute()
+            error_msg = upload_result.error
+            print(f"[ERROR] ONNX 모델 업로드 실패: {error_msg}")
             
-            if hasattr(update_result, 'error') and update_result.error:
-                print(f"[ERROR] 업데이트 실패: {update_result.error}")
+            # 파일이 이미 존재하는 경우 update 시도
+            if 'already exists' in str(error_msg) or 'duplicate' in str(error_msg).lower():
+                print(f"[INFO] 파일이 이미 존재합니다. 업데이트 시도 중...")
+                try:
+                    update_result = supabase.storage.from_('models').update(
+                        onnx_bucket_path,
+                        onnx_data
+                    )
+                    if hasattr(update_result, 'error') and update_result.error:
+                        print(f"[ERROR] ONNX 모델 업데이트 실패: {update_result.error}")
+                        return False
+                    else:
+                        print(f"[OK] ONNX 모델 업데이트 성공")
+                        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
+                        onnx_public_url = f"{supabase_url}/storage/v1/object/public/models/{onnx_bucket_path}"
+                        print(f"[OK] ONNX 모델 업로드 완료, 공개 URL: {onnx_public_url}")
+                        return True
+                except Exception as update_err:
+                    print(f"[ERROR] 업데이트 시도 실패: {update_err}")
+                    return False
+            else:
+                # 학습 스크립트처럼 예상 공개 URL을 생성하고 계속 진행
+                supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
+                onnx_public_url = f"{supabase_url}/storage/v1/object/public/models/{onnx_bucket_path}"
+                print(f"[WARN] 모델 업로드 실패로 인해 예상 공개 URL을 사용합니다: {onnx_public_url}")
                 return False
-        except Exception as update_err:
-            print(f"[ERROR] 업데이트 실행 실패: {update_err}")
-            # 에러가 나도 업데이트 데이터는 출력
-            print(f"[INFO] 수동 업데이트용 SQL:")
-            print(f"UPDATE model_registry SET")
-            print(f"  model_url = '{onnx_url}',")
-            print(f"  model_path = '{onnx_path.split('/')[-1] if '/' in str(onnx_path) else onnx_path}',")
-            print(f"  updated_at = NOW()")
-            print(f"WHERE model_name = '{model_name}';")
-            return False
+        else:
+            # 업로드 성공
+            supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
+            onnx_public_url = f"{supabase_url}/storage/v1/object/public/models/{onnx_bucket_path}"
+            print(f"[OK] ONNX 모델 업로드 성공, 공개 URL: {onnx_public_url}")
+            return True
         
-        print(f"[OK] model_registry 업데이트 완료")
+        # model_registry 업데이트
+        try:
+            # model_name에서 타임스탬프 추출
+            # brickbox_s_seg_stage1_20251106_132857 -> stage1
+            stage = 'stage1' if 'stage1' in model_name else ('stage2' if 'stage2' in model_name else 'single')
+            
+            # 활성 모델 찾기
+            registry_response = supabase.table('model_registry').select('*').eq('model_name', model_name).execute()
+            
+            if registry_response.data and len(registry_response.data) > 0:
+                model_record = registry_response.data[0]
+                # model_url과 model_path 업데이트 (ONNX 우선)
+                supabase.table('model_registry').update({
+                    'model_url': onnx_public_url,
+                    'model_path': onnx_bucket_path,
+                    'updated_at': datetime.now().isoformat()
+                }).eq('id', model_record['id']).execute()
+                print(f"[OK] model_registry 업데이트 완료: {model_name}")
+            else:
+                print(f"[WARN] model_registry에서 모델을 찾을 수 없습니다: {model_name}")
+        except Exception as e:
+            print(f"[WARN] model_registry 업데이트 실패: {e}")
+        
         return True
         
     except Exception as e:
-        print(f"[ERROR] 업데이트 실패: {e}")
+        print(f"[ERROR] ONNX 업로드 중 오류: {e}")
         import traceback
         traceback.print_exc()
         return False
-
-
-def process_model(model_name, imgsz=None):
-    """모델 변환 프로세스 전체 실행"""
-    print("\n" + "="*60)
-    print(f"🔄 모델 변환 시작: {model_name}")
-    print("="*60)
-    
-    # Supabase 클라이언트 초기화 (환경변수 관리 시스템 사용)
-    if ENV_MANAGER_AVAILABLE:
-        supabase_config = get_supabase_config()
-        supabase_url = supabase_config['url']
-        supabase_key = supabase_config['service_role'] or supabase_config['anon_key']
-        print(f"[DEBUG] 환경변수 관리 시스템 사용: {supabase_url}")
-    else:
-        # 폴백: 기존 방식
-        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
-        supabase_key = (
-            os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-            or os.getenv('VITE_SUPABASE_SERVICE_ROLE')
-            or os.getenv('SUPABASE_ANON_KEY')
-            or os.getenv('VITE_SUPABASE_ANON_KEY')
-        )
-        print(f"[DEBUG] 기본 환경변수 사용: {supabase_url}")
-    
-    if not supabase_url or not supabase_key:
-        print("[ERROR] Supabase 환경변수가 설정되지 않음")
-        return False
-    
-    print(f"[DEBUG] Supabase Key 타입: {'SERVICE_ROLE' if (ENV_MANAGER_AVAILABLE and supabase_config.get('service_role')) or (not ENV_MANAGER_AVAILABLE and (os.getenv('SUPABASE_SERVICE_ROLE_KEY') or os.getenv('VITE_SUPABASE_SERVICE_ROLE'))) else 'ANON'} (길이: {len(supabase_key) if supabase_key else 0})")
-    
-    supabase = create_client(supabase_url, supabase_key)
-    
-    # training_metadata에서 imgsz 확인
-    if imgsz is None:
-        try:
-            result = supabase.table('model_registry')\
-                .select('training_metadata')\
-                .eq('model_name', model_name)\
-                .maybe_single()\
-                .execute()
-            
-            if result.data and result.data.get('training_metadata'):
-                training_meta = result.data['training_metadata']
-                if isinstance(training_meta, dict):
-                    imgsz = training_meta.get('imgsz', 640)
-                    print(f"[INFO] training_metadata에서 imgsz 확인: {imgsz}")
-        except:
-            pass
-        
-        if imgsz is None:
-            imgsz = 640
-            print(f"[INFO] 기본 imgsz 사용: {imgsz}")
-    
-    # 1. .pt 모델 다운로드
-    pt_path = download_pt_model(supabase, model_name)
-    if not pt_path:
-        return False
-    
-    # 2. ONNX 변환
-    onnx_path = convert_to_onnx(pt_path, model_name, imgsz)
-    if not onnx_path:
-        # 임시 파일 정리
-        pt_path.unlink()
-        return False
-    
-    # 3. ONNX 업로드
-    onnx_url = upload_onnx_model(supabase, onnx_path, model_name)
-    if not onnx_url:
-        # 임시 파일 정리
-        pt_path.unlink()
-        onnx_path.unlink()
-        return False
-    
-    # 4. model_registry 업데이트
-    success = update_model_registry(supabase, model_name, onnx_url, onnx_path)
-    
-    # ONNX 파일은 보존 (수동 업로드용)
-    print(f"[INFO] ONNX 파일 보존: {onnx_path}")
-    
-    # 임시 파일 정리 (PT 파일만 삭제)
-    try:
-        pt_path.unlink()
-        print(f"[CLEANUP] PyTorch 임시 파일 삭제 완료")
-    except:
-        pass
-    
-    if success:
-        print("\n" + "="*60)
-        print(f"✅ 모델 변환 완료: {model_name}")
-        print("="*60)
-        print(f"ONNX URL: {onnx_url}")
-        return True
-    else:
-        print("\n" + "="*60)
-        print(f"[WARNING] 모델 변환 완료 (등록 실패): {model_name}")
-        print("="*60)
-        return False
-
 
 def main():
-    """메인 함수"""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='기존 .pt 모델을 .onnx로 변환하여 업로드')
-    parser.add_argument('--model_name', help='모델 이름 (확장자 제외, 예: brickbox_s_seg_stage1_20251030_220157)')
-    parser.add_argument('--imgsz', type=int, help='이미지 크기 (기본값: training_metadata에서 자동 확인 또는 640)')
-    parser.add_argument('--batch', nargs='+', help='여러 모델 일괄 처리')
+    parser = argparse.ArgumentParser(description='PyTorch 모델을 ONNX로 변환하고 업로드')
+    parser.add_argument('model_path', help='Supabase Storage의 모델 경로 (예: brickbox_s_seg_stage1_20251106_132857.pt)')
+    parser.add_argument('--imgsz', type=int, default=640, help='이미지 크기 (기본값: 640)')
+    parser.add_argument('--no-upload', action='store_true', help='변환만 하고 업로드하지 않음')
     
     args = parser.parse_args()
     
-    models_to_process = []
+    # 모델 이름 추출 (.pt 확장자 제거)
+    model_name = args.model_path.replace('.pt', '')
     
-    if args.batch:
-        models_to_process = args.batch
-    elif args.model_name:
-        models_to_process = [args.model_name]
-    else:
-        print("[ERROR] 모델 이름을 지정하세요: --model_name 또는 --batch")
-        parser.print_help()
-        return
+    # 임시 디렉토리 생성
+    temp_dir = Path("temp_onnx_convert")
+    temp_dir.mkdir(exist_ok=True)
     
-    success_count = 0
-    for model_name in models_to_process:
-        if process_model(model_name, args.imgsz):
-            success_count += 1
+    pt_local_path = temp_dir / args.model_path
+    onnx_local_path = temp_dir / f"{model_name}.onnx"
     
-    print("\n" + "="*60)
-    print(f"📊 전체 결과: {success_count}/{len(models_to_process)} 성공")
-    print("="*60)
+    try:
+        # Supabase 클라이언트 설정
+        supabase = setup_supabase()
+        
+        # 모델 다운로드
+        if not download_model(supabase, args.model_path, pt_local_path):
+            print("[ERROR] 모델 다운로드 실패")
+            sys.exit(1)
+        
+        # ONNX 변환
+        if not convert_to_onnx(pt_local_path, onnx_local_path, args.imgsz):
+            print("[ERROR] ONNX 변환 실패")
+            sys.exit(1)
+        
+        # 업로드 (옵션)
+        upload_success = True
+        if not args.no_upload:
+            upload_success = upload_onnx(supabase, onnx_local_path, model_name)
+            if not upload_success:
+                print("[ERROR] ONNX 업로드 실패")
+                print("[INFO] 수동 업로드 스크립트 사용:")
+                print(f"  python scripts/upload_onnx_to_storage.py {onnx_local_path} {model_name}")
+        
+        print("\n" + "="*60)
+        if upload_success and not args.no_upload:
+            print("[SUCCESS] ONNX 변환 및 업로드 완료!")
+        else:
+            print("[SUCCESS] ONNX 변환 완료!")
+        print("="*60)
+        print(f"모델: {model_name}")
+        print(f"ONNX 파일: {onnx_local_path}")
+        if args.no_upload:
+            print(f"\n[INFO] 업로드하려면 다음 명령 실행:")
+            print(f"  python scripts/upload_onnx_to_storage.py {onnx_local_path} {model_name}")
+        
+    except Exception as e:
+        print(f"[ERROR] 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+    finally:
+        # 임시 파일 정리 (--no-upload 옵션 사용 시에는 삭제하지 않음)
+        if temp_dir.exists():
+            if args.no_upload:
+                print(f"[INFO] 임시 디렉토리 유지: {temp_dir}")
+                print(f"[INFO] 업로드 후 수동으로 삭제하세요: rmdir /s /q {temp_dir}")
+            else:
+                import shutil
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                print(f"[CLEANUP] 임시 디렉토리 삭제: {temp_dir}")
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

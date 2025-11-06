@@ -10,34 +10,49 @@ import os
 import sys
 import json
 import time
+import multiprocessing
 from pathlib import Path
 from datetime import datetime
 
 # .env 파일 로드 (강화된 버전)
+# [FIX] 수정됨: 워커 프로세스에서 중복 로드 메시지 방지
+# YOLO 학습 시 workers=4로 인해 워커 프로세스가 생성되며 각 워커가 스크립트를 다시 임포트함
+# Windows multiprocessing spawn 모드에서는 각 워커가 스크립트를 처음부터 실행하므로 중복 로드 메시지 발생
+# 메인 프로세스에서만 로드 메시지 출력하도록 수정
 try:
     from dotenv import load_dotenv
     # 프로젝트 루트 디렉토리에서 .env 파일 로드
     env_path = Path(__file__).parent.parent / '.env'
     if env_path.exists():
         load_dotenv(env_path, override=True)  # override=True로 기존 환경변수 덮어쓰기
-        print(f"[OK] .env 파일 로드됨: {env_path}")
-        
-        # 환경변수 검증
-        required_vars = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_SERVICE_ROLE']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-        if missing_vars:
-            print(f"[WARN] 필수 환경변수 누락: {missing_vars}")
-        else:
-            print("[OK] 필수 환경변수 모두 로드됨")
+        # 메인 프로세스에서만 출력 (워커 프로세스는 출력하지 않음)
+        # multiprocessing spawn 모드에서 워커 프로세스는 부모 프로세스 ID가 다름
+        is_main_process = multiprocessing.current_process().name == 'MainProcess'
+        if is_main_process:
+            print(f"[OK] .env 파일 로드됨: {env_path}")
+            
+            # 환경변수 검증
+            required_vars = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_SERVICE_ROLE']
+            missing_vars = [var for var in required_vars if not os.getenv(var)]
+            if missing_vars:
+                print(f"[WARN] 필수 환경변수 누락: {missing_vars}")
+            else:
+                print("[OK] 필수 환경변수 모두 로드됨")
     else:
-        print(f"[WARN] .env 파일을 찾을 수 없음: {env_path}")
-        print("[INFO] 시스템 환경변수 사용")
+        is_main_process = multiprocessing.current_process().name == 'MainProcess'
+        if is_main_process:
+            print(f"[WARN] .env 파일을 찾을 수 없음: {env_path}")
+            print("[INFO] 시스템 환경변수 사용")
 except ImportError:
-    print("[WARN] python-dotenv가 설치되지 않음. pip install python-dotenv")
-    print("[INFO] 시스템 환경변수 사용")
+    is_main_process = multiprocessing.current_process().name == 'MainProcess'
+    if is_main_process:
+        print("[WARN] python-dotenv가 설치되지 않음. pip install python-dotenv")
+        print("[INFO] 시스템 환경변수 사용")
 except Exception as e:
-    print(f"[WARN] .env 파일 로드 실패: {e}")
-    print("[INFO] 시스템 환경변수 사용")
+    is_main_process = multiprocessing.current_process().name == 'MainProcess'
+    if is_main_process:
+        print(f"[WARN] .env 파일 로드 실패: {e}")
+        print("[INFO] 시스템 환경변수 사용")
 
 # Supabase 클라이언트
 try:
@@ -171,11 +186,42 @@ def prepare_dataset(set_num, part_id=None):
     if set_num == 'latest':
         # 부품 단위 학습의 경우 해당 부품 디렉토리 사용
         if part_id:
-            # 먼저 엘리먼트 ID로 시도 (데이터셋이 엘리먼트 ID로 저장됨)
-            dataset_path = Path(f"C:/cursor/brickbox/output/synthetic/{part_id}")
+            # 먼저 dataset_synthetic 구조 확인 (새 구조: dataset_synthetic/{element_id}/images)
+            # [FIX] 수정됨: path_config.py 유틸리티 사용 (환경 변수 기반 경로)
+            try:
+                from scripts.utils.path_config import get_dataset_synthetic_path, get_part_dataset_path
+                dataset_synthetic_path = get_dataset_synthetic_path()
+            except ImportError:
+                # 폴백: 기본 경로 사용
+                dataset_synthetic_path = Path("output/synthetic/dataset_synthetic")
             
-        # 완벽한 폴더 구조 확인
-        if dataset_path.exists():
+            if dataset_synthetic_path.exists():
+                part_dir = dataset_synthetic_path / part_id
+                if part_dir.exists():
+                    dataset_path = part_dir
+                    print(f"[INFO] 새 구조 감지: dataset_synthetic/{part_id}/")
+                else:
+                    # 폴백: 기존 구조 (output/synthetic/{part_id}/images)
+                    try:
+                        from scripts.utils.path_config import get_synthetic_root
+                        dataset_path = get_synthetic_root() / part_id
+                    except ImportError:
+                        # 폴백: 기본 경로 사용 (상대 경로, 프로젝트 루트 기준)
+                        dataset_path = Path("output/synthetic") / part_id
+                        if not dataset_path.is_absolute():
+                            project_root = Path(__file__).parent.parent
+                            dataset_path = project_root / dataset_path
+            else:
+                # 폴백: 기존 구조
+                try:
+                    from scripts.utils.path_config import get_synthetic_root
+                    dataset_path = get_synthetic_root() / part_id
+                except ImportError:
+                    dataset_path = Path("output/synthetic") / part_id
+            
+        # 새 구조 확인: dataset_synthetic/{element_id}/images, labels, meta, meta-e
+        # [FIX] 수정됨: dataset_path가 None이 아닌 경우에만 확인
+        if dataset_path and dataset_path.exists():
             images_dir = dataset_path / 'images'
             labels_dir = dataset_path / 'labels'
             meta_dir = dataset_path / 'meta'
@@ -186,16 +232,83 @@ def prepare_dataset(set_num, part_id=None):
                 print(f"[INFO] 필요한 폴더: images/, labels/, meta/, meta-e/")
                 dataset_path = None
             else:
-                print(f"[OK] 완벽한 폴더 구조 확인: {dataset_path}")
+                print(f"[OK] 새 구조 확인 (부품 단위): {dataset_path}")
                 print(f"  - images/: {images_dir.exists()}")
                 print(f"  - labels/: {labels_dir.exists()}")
                 print(f"  - meta/: {meta_dir.exists()}")
                 print(f"  - meta-e/: {meta_e_dir.exists()}")
                 
-                # dataset.yaml 생성 (완벽한 폴더 구조용)
+                # [FIX] 수정됨: 새 구조는 train/val/test split이 없으므로 학습 시점에 동적 생성
+                # dataset.yaml 생성 (새 구조용: train/val/test split 동적 생성)
                 dataset_yaml_path = dataset_path / 'dataset.yaml'
                 if not dataset_yaml_path.exists():
-                    print(f"[INFO] dataset.yaml 생성: {dataset_yaml_path}")
+                    print(f"[INFO] dataset.yaml 생성 (새 구조): {dataset_yaml_path}")
+                    
+                    # train/val/test split을 동적으로 생성
+                    import random
+                    import shutil
+                    
+                    # images 폴더의 모든 파일 가져오기
+                    image_files = list(images_dir.glob('*.png')) + list(images_dir.glob('*.webp'))
+                    if len(image_files) > 0:
+                        random.shuffle(image_files)
+                        
+                        # 80/10/10 분할
+                        train_idx = int(len(image_files) * 0.8)
+                        val_idx = train_idx + int(len(image_files) * 0.1)
+                        
+                        train_files = image_files[:train_idx]
+                        val_files = image_files[train_idx:val_idx]
+                        test_files = image_files[val_idx:]
+                        
+                        # train/val/test 폴더 생성
+                        train_dir = images_dir / 'train'
+                        val_dir = images_dir / 'val'
+                        test_dir = images_dir / 'test'
+                        train_dir.mkdir(exist_ok=True)
+                        val_dir.mkdir(exist_ok=True)
+                        test_dir.mkdir(exist_ok=True)
+                        
+                        train_labels_dir = labels_dir / 'train'
+                        val_labels_dir = labels_dir / 'val'
+                        test_labels_dir = labels_dir / 'test'
+                        train_labels_dir.mkdir(exist_ok=True)
+                        val_labels_dir.mkdir(exist_ok=True)
+                        test_labels_dir.mkdir(exist_ok=True)
+                        
+                        # 파일 이동 (하드링크 또는 복사)
+                        for img_file in train_files:
+                            dst = train_dir / img_file.name
+                            if not dst.exists():
+                                shutil.copy2(img_file, dst)
+                            label_file = labels_dir / (img_file.stem + '.txt')
+                            if label_file.exists():
+                                dst_label = train_labels_dir / label_file.name
+                                if not dst_label.exists():
+                                    shutil.copy2(label_file, dst_label)
+                        
+                        for img_file in val_files:
+                            dst = val_dir / img_file.name
+                            if not dst.exists():
+                                shutil.copy2(img_file, dst)
+                            label_file = labels_dir / (img_file.stem + '.txt')
+                            if label_file.exists():
+                                dst_label = val_labels_dir / label_file.name
+                                if not dst_label.exists():
+                                    shutil.copy2(label_file, dst_label)
+                        
+                        for img_file in test_files:
+                            dst = test_dir / img_file.name
+                            if not dst.exists():
+                                shutil.copy2(img_file, dst)
+                            label_file = labels_dir / (img_file.stem + '.txt')
+                            if label_file.exists():
+                                dst_label = test_labels_dir / label_file.name
+                                if not dst_label.exists():
+                                    shutil.copy2(label_file, dst_label)
+                        
+                        print(f"[INFO] train/val/test split 생성 완료: train={len(train_files)}, val={len(val_files)}, test={len(test_files)}")
+                    
                     yaml_content = {
                         'path': str(dataset_path.absolute()),
                         'train': 'images/train',
@@ -248,16 +361,44 @@ def prepare_dataset(set_num, part_id=None):
                         if data and len(data) > 0:
                             actual_part_id = data[0].get('part_id')
                             if actual_part_id:
-                                dataset_path = Path(f"C:/cursor/brickbox/output/synthetic/{actual_part_id}")
+                                # [FIX] 수정됨: path_config.py 유틸리티 사용
+                                try:
+                                    from scripts.utils.path_config import get_part_dataset_path
+                                    dataset_path = get_part_dataset_path(actual_part_id)
+                                except ImportError:
+                                    # 폴백: 기본 경로 사용 (상대 경로, 프로젝트 루트 기준)
+                                    dataset_path = Path("output/synthetic") / actual_part_id
+                                    if not dataset_path.is_absolute():
+                                        project_root = Path(__file__).parent.parent
+                                        dataset_path = project_root / dataset_path
                                 print(f"[CONVERT] part_id {actual_part_id} 디렉토리로 시도: {dataset_path}")
                 except Exception as e:
                     print(f"[WARN] part_id 조회 실패: {e}")
         else:
-            dataset_path = Path("C:/cursor/brickbox/output/synthetic/prepared")
+            # [FIX] 수정됨: path_config.py 유틸리티 사용
+            try:
+                from scripts.utils.path_config import get_synthetic_root
+                dataset_path = get_synthetic_root() / "prepared"
+            except ImportError:
+                # 폴백: 기본 경로 사용 (상대 경로, 프로젝트 루트 기준)
+                dataset_path = Path("output/synthetic/prepared")
+                if not dataset_path.is_absolute():
+                    project_root = Path(__file__).parent.parent
+                    dataset_path = project_root / dataset_path
     else:
-        dataset_path = Path(f"C:/cursor/brickbox/output/synthetic/set_{set_num}")
+        # [FIX] 수정됨: path_config.py 유틸리티 사용
+        try:
+            from scripts.utils.path_config import get_synthetic_root
+            dataset_path = get_synthetic_root() / f"set_{set_num}"
+        except ImportError:
+            # 폴백: 기본 경로 사용 (상대 경로, 프로젝트 루트 기준)
+            dataset_path = Path(f"output/synthetic/set_{set_num}")
+            if not dataset_path.is_absolute():
+                project_root = Path(__file__).parent.parent
+                dataset_path = project_root / dataset_path
 
-    if not dataset_path.exists():
+    # [FIX] 수정됨: dataset_path가 None이거나 존재하지 않는 경우 처리
+    if not dataset_path or not dataset_path.exists():
         print(f"[ERROR] 데이터셋 경로가 존재하지 않습니다: {dataset_path}")
         return None
     
@@ -411,6 +552,9 @@ def create_filtered_dataset(original_yaml, target_parts):
         filtered_files = {'train': [], 'val': [], 'test': []}
         total_images = 0
         
+        # [FIX] 수정됨: 새 구조 지원 (dataset_synthetic/{element_id}/images/train, val, test)
+        # 기존 구조도 호환성 유지 (dataset_synthetic/images/train/{element_id})
+        
         for split_name, split_path in [('train', train_path), ('val', val_path), ('test', test_path)]:
             if not split_path.exists():
                 print(f"[WARN] {split_name} 경로가 존재하지 않음: {split_path}")
@@ -419,24 +563,46 @@ def create_filtered_dataset(original_yaml, target_parts):
             print(f"[SEARCH] {split_name} 폴더 스캔 중...")
             split_images = []
             
-            # 이미지 파일들 찾기 (webp 형식)
-            for image_file in split_path.glob('*.webp'):
-                # 부품 ID가 파일명에 포함된 이미지만 필터링
-                # 1. element_id 패턴: {element_id}_{sequence}.webp
-                # 2. part_id 패턴: {part_id}_{sequence}.webp (엘리먼트 ID가 없는 경우)
-                for part_id in target_parts:
-                    # 파일명이 해당 부품으로 시작하는지 확인
-                    if image_file.name.startswith(f"{part_id}_"):
-                        # 라벨 파일 경로 (labels 폴더에서)
-                        label_path = split_path.parent.parent / "labels" / split_path.name / image_file.with_suffix('.txt').name
-                        if label_path.exists():
-                            # 라벨 파일에서 해당 부품의 라벨만 추출
-                            filtered_labels = filter_labels_for_parts(label_path, target_parts, part_to_class_id)
-                            if filtered_labels:
-                                split_images.append(str(image_file))
-                                total_images += 1
-                                print(f"  [OK] {image_file.name} (부품: {part_id})")
-                        break
+            # 새 구조 확인: split_path가 dataset_synthetic/{element_id}/images/train인지 확인
+            # 기존 구조: split_path가 dataset_synthetic/images/train/{element_id}인지 확인
+            
+            # 새 구조: dataset_synthetic/{element_id}/images/train
+            # 부품 폴더가 split_path의 부모의 부모
+            split_path_parts = split_path.parts
+            if len(split_path_parts) >= 3 and split_path_parts[-1] in ('train', 'val', 'test') and split_path_parts[-2] == 'images':
+                # 새 구조: .../{element_id}/images/{split}
+                element_id_from_path = split_path_parts[-3]
+                # 새 구조에서는 이미 해당 부품 폴더 내부이므로 파일을 직접 찾음
+                image_files = list(split_path.glob('*.png')) + list(split_path.glob('*.webp'))
+                for image_file in image_files:
+                    for part_id in target_parts:
+                        if image_file.name.startswith(f"{part_id}_") or element_id_from_path == part_id:
+                            # 라벨 파일 경로: {element_id}/labels/{split}/{filename}.txt
+                            label_path = split_path.parent.parent / "labels" / split_path.name / image_file.with_suffix('.txt').name
+                            if label_path.exists():
+                                filtered_labels = filter_labels_for_parts(label_path, target_parts, part_to_class_id)
+                                if filtered_labels:
+                                    split_images.append(str(image_file))
+                                    total_images += 1
+                                    print(f"  [OK] {image_file.name} (부품: {part_id}, 새 구조)")
+                            break
+            else:
+                # 기존 구조: dataset_synthetic/images/train/{element_id}
+                # 이미지 파일들 찾기 (png 형식, 이전 webp도 호환)
+                image_files = list(split_path.glob('*.png')) + list(split_path.glob('*.webp'))
+                for image_file in image_files:
+                    # 부품 ID가 파일명에 포함된 이미지만 필터링
+                    for part_id in target_parts:
+                        if image_file.name.startswith(f"{part_id}_"):
+                            # 라벨 파일 경로 (labels 폴더에서)
+                            label_path = split_path.parent.parent / "labels" / split_path.name / image_file.with_suffix('.txt').name
+                            if label_path.exists():
+                                filtered_labels = filter_labels_for_parts(label_path, target_parts, part_to_class_id)
+                                if filtered_labels:
+                                    split_images.append(str(image_file))
+                                    total_images += 1
+                                    print(f"  [OK] {image_file.name} (부품: {part_id}, 기존 구조)")
+                            break
             
             filtered_files[split_name] = split_images
             print(f"[STATS] {split_name}: {len(split_images)}개 이미지")
@@ -615,7 +781,7 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
     if job_id:
         try:
             supabase = setup_supabase()
-        print(f"[NETWORK] 데이터베이스 연결됨 (작업 ID: {job_id})")
+            print(f"[NETWORK] 데이터베이스 연결됨 (작업 ID: {job_id})")
         except Exception as e:
             print(f"[WARN] Supabase 연결 실패: {e}")
     
@@ -678,19 +844,55 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
             stage1_model.save(stage1_path)
             print(f"[OK] Stage 1 모델 저장 완료: {stage1_path}")
             
-            # Stage 1 ONNX 변환 // [FIX] 수정됨
+            # Stage 1 ONNX 변환 // [FIX] 수정됨: export 후 올바른 경로에서 파일 찾기
             stage1_onnx_path = None
             try:
                 stage1_onnx_path = Path("public/models/lego_yolo_stage1_latest.onnx")
-                stage1_model.export(format='onnx', imgsz=config.get('imgsz', 640))
-                exported_path = Path("public/models/yolo11n.onnx")
-                if exported_path.exists():
-                    exported_path.rename(stage1_onnx_path)
-                    print(f"[OK] Stage 1 ONNX 모델 저장 완료: {stage1_onnx_path}")
-                else:
-                    raise FileNotFoundError("ONNX 파일을 찾을 수 없습니다")
+                # public/models 디렉토리 생성
+                stage1_onnx_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # export 시 명시적으로 파일 경로 지정
+                export_result = stage1_model.export(
+                    format='onnx', 
+                    imgsz=config.get('imgsz', 640),
+                    simplify=True,
+                    opset=12
+                )
+                
+                # export()는 모델 객체의 경로를 반환하거나, 학습 결과 디렉토리에 저장할 수 있음
+                # 먼저 명시적으로 지정한 경로 확인, 없으면 여러 가능한 경로 검색
+                possible_paths = [
+                    stage1_onnx_path,  # 명시적 경로
+                    Path("public/models/yolo11n-seg.onnx"),  # YOLO 기본 이름 (세그멘테이션)
+                    Path("public/models/yolo11n.onnx"),  # YOLO 기본 이름
+                    Path("public/models/best.onnx"),  # best 모델
+                    Path(str(stage1_path).replace('.pt', '.onnx')),  # .pt 경로 기반
+                ]
+                
+                # 학습 결과 디렉토리도 확인 (stage1_results가 있는 경우)
+                if hasattr(stage1_results, 'save_dir') and stage1_results.save_dir:
+                    possible_paths.append(Path(stage1_results.save_dir) / "weights" / "best.onnx")
+                    possible_paths.append(Path(stage1_results.save_dir) / "best.onnx")
+                
+                exported_file = None
+                for p in possible_paths:
+                    if p and p.exists():
+                        if p != stage1_onnx_path:
+                            # 파일이 다른 경로에 있으면 목적지로 이동
+                            p.rename(stage1_onnx_path)
+                            print(f"[OK] Stage 1 ONNX 모델 이동 완료: {p} → {stage1_onnx_path}")
+                        else:
+                            print(f"[OK] Stage 1 ONNX 모델 저장 완료: {stage1_onnx_path}")
+                        exported_file = stage1_onnx_path
+                        break
+                
+                if not exported_file:
+                    raise FileNotFoundError(f"ONNX 파일을 찾을 수 없습니다. 검색 경로: {possible_paths}")
+                    
             except Exception as onnx_error:
                 print(f"[WARN] Stage 1 ONNX 변환 실패: {onnx_error}")
+                import traceback
+                traceback.print_exc()
                 stage1_onnx_path = None
             
             # Stage 1 모델 업로드
@@ -708,31 +910,57 @@ def train_hybrid_models(dataset_yaml, config, job_id=None):
             stage2_model.save(stage2_path)
             print(f"[OK] Stage 2 모델 저장 완료: {stage2_path}")
             
-            # Stage 2 ONNX 변환 // [FIX] 수정됨
+            # Stage 2 ONNX 변환 // [FIX] 수정됨: export 후 올바른 경로에서 파일 찾기
             stage2_onnx_path = None
             try:
                 stage2_onnx_path = Path("public/models/lego_yolo_stage2_latest.onnx")
-                stage2_model.export(format='onnx', imgsz=config.get('imgsz', 640))
-                exported_path = Path("public/models/yolo11s-seg.onnx")
-                if exported_path.exists():
-                    exported_path.rename(stage2_onnx_path)
-                    print(f"[OK] Stage 2 ONNX 모델 저장 완료: {stage2_onnx_path}")
-                else:
-                    # 다른 가능한 경로 확인
-                    possible_paths = [
-                        Path("public/models/yolo11s.onnx"),
-                        Path("public/models/yolo11n.onnx"),
-                        Path("public/models/best.onnx")
-                    ]
-                    for p in possible_paths:
-                        if p.exists():
+                # public/models 디렉토리 생성
+                stage2_onnx_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # export 시 명시적으로 파일 경로 지정
+                export_result = stage2_model.export(
+                    format='onnx', 
+                    imgsz=config.get('imgsz', 640),
+                    simplify=True,
+                    opset=12
+                )
+                
+                # export()는 모델 객체의 경로를 반환하거나, 학습 결과 디렉토리에 저장할 수 있음
+                # 먼저 명시적으로 지정한 경로 확인, 없으면 여러 가능한 경로 검색
+                possible_paths = [
+                    stage2_onnx_path,  # 명시적 경로
+                    Path("public/models/yolo11s-seg.onnx"),  # YOLO 기본 이름 (세그멘테이션)
+                    Path("public/models/yolo11s.onnx"),  # YOLO 기본 이름
+                    Path("public/models/yolo11n-seg.onnx"),  # fallback
+                    Path("public/models/yolo11n.onnx"),  # fallback
+                    Path("public/models/best.onnx"),  # best 모델
+                    Path(str(stage2_path).replace('.pt', '.onnx')),  # .pt 경로 기반
+                ]
+                
+                # 학습 결과 디렉토리도 확인 (stage2_results가 있는 경우)
+                if hasattr(stage2_results, 'save_dir') and stage2_results.save_dir:
+                    possible_paths.append(Path(stage2_results.save_dir) / "weights" / "best.onnx")
+                    possible_paths.append(Path(stage2_results.save_dir) / "best.onnx")
+                
+                exported_file = None
+                for p in possible_paths:
+                    if p and p.exists():
+                        if p != stage2_onnx_path:
+                            # 파일이 다른 경로에 있으면 목적지로 이동
                             p.rename(stage2_onnx_path)
                             print(f"[OK] Stage 2 ONNX 모델 이동 완료: {p} → {stage2_onnx_path}")
-                            break
-                    else:
-                        raise FileNotFoundError("ONNX 파일을 찾을 수 없습니다")
+                        else:
+                            print(f"[OK] Stage 2 ONNX 모델 저장 완료: {stage2_onnx_path}")
+                        exported_file = stage2_onnx_path
+                        break
+                
+                if not exported_file:
+                    raise FileNotFoundError(f"ONNX 파일을 찾을 수 없습니다. 검색 경로: {possible_paths}")
+                    
             except Exception as onnx_error:
                 print(f"[WARN] Stage 2 ONNX 변환 실패: {onnx_error}")
+                import traceback
+                traceback.print_exc()
                 stage2_onnx_path = None
             
             # Stage 2 모델 업로드
@@ -1103,10 +1331,10 @@ def upload_and_register_model(model_path, onnx_path, config):
         current_stage = config.get('model_stage', 'single')
         if current_stage in ('stage1', 'stage2'):
             # 하이브리드 모드: 동일 stage만 비활성화
-        supabase.table('model_registry').update({
-            'is_active': False,
-            'status': 'inactive'
-        }).eq('is_active', True).eq('model_stage', current_stage).execute()
+            supabase.table('model_registry').update({
+                'is_active': False,
+                'status': 'inactive'
+            }).eq('is_active', True).eq('model_stage', current_stage).execute()
             print(f"[INFO] {current_stage} 기존 활성 모델 비활성화")
         else:
             # 단일 모드: 모든 활성 모델 비활성화

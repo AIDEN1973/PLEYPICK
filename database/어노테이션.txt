@@ -17,14 +17,14 @@ Operational Efficiency: Edge-Essential 최소형, 추론 성능 세분 로깅, A
 
 Interoperability: 선택적 JSON-LD @context Export로 타 산업 표준과 상호운용
 
-1. 데이터 레이아웃 (변경 없음 + 파일 추가 설명)
+1. 데이터 레이아웃 (부품 단위 폴더 구조)
 /dataset_{SET_ID}/
-├── images/train|val|test/{element_id}/{uuid}.webp
-├── labels/train|val|test/{element_id}/{uuid}.txt
-├── meta/{element_id}/{uuid}.json           # Full Meta (v1.6.1)
-├── meta-e/{element_id}/{uuid}.json 또는 {uuid}_e2.json 허용         # Essential (v1.6.1-E2)
-├── masks_bin/{element_id}/{uuid}.png
-└── depth/{element_id}/{uuid}.bin (.exr 원본 병행 보관 허용)           # Z-Depth (RLE + Zstd + Base64)
+├── {element_id}/
+│   ├── images/{uuid}.png (또는 .webp)
+│   ├── labels/{uuid}.txt
+│   ├── meta/{uuid}.json           # Full Meta (v1.6.1)
+│   ├── meta-e/{uuid}_e2.json      # Essential (v1.6.1-E2)
+│   └── depth/{Blender 넘버링}.exr  # Z-Depth (Blender 자동 넘버링 사용)
 
 
 추가 요구: meta/{uuid}.json 내 보안/접근 레벨은 지표용만 기록. 실제 접근제어는 DB 정책 테이블에서 집행(§8).

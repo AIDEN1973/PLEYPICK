@@ -467,6 +467,7 @@ export const useAutomatedModelRegistry = () => {
           body: JSON.stringify({
             jobId: jobData.id, // 생성된 job_id 전달
             partId: config.partId || config.part_id,
+            setNum: config.set_num,
             modelStage: config.model_stage || 'stage1',
             epochs: config.epochs || 100,
             batchSize: config.batch_size || 16,

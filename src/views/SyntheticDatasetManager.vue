@@ -41,16 +41,55 @@
             <div class="schema-item">
               <span class="schema-label">품질 기준:</span>
               <span class="schema-value">
-                SSIM ≥0.965 (WebP q=90) | SNR ≥30dB | Reprojection ≤1.5px | Depth Score ≥0.85
+                SSIM ≥0.96 | SNR ≥30dB | Reprojection ≤1.5px | Depth Score ≥0.85
               </span>
               <small>기술문서 3.1절, 어노테이션 6절 준수</small>
             </div>
             <div class="schema-item">
-              <span class="schema-label">WebP 정책:</span>
+              <span class="schema-label">이미지 형식:</span>
               <span class="schema-value">
-                학습: q=90 (60-70% 절감) | 템플릿: lossless 또는 q=95
+                PNG 무손실 렌더링 (SNR/선명도 보장) | EXR 깊이 맵 (ZIP 압축)
               </span>
-              <small>기술문서 2.4절</small>
+              <small>기술문서 2.4절 준수</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- 경로 설정 -->
+        <div class="settings-card">
+          <h3>📁 합성 데이터셋 경로 설정</h3>
+          <div class="settings-controls">
+            <div class="setting-item">
+              <label class="setting-label">합성 데이터셋 루트 경로</label>
+              <div class="path-input-group">
+                <input 
+                  type="text" 
+                  v-model="syntheticRootPath" 
+                  placeholder="예: ./output/synthetic 또는 E:/BrickBox/synthetic"
+                  class="form-input path-input"
+                  @keyup.enter="updatePathSetting"
+                >
+                <button 
+                  @click="updatePathSetting" 
+                  :disabled="isUpdatingPath || !syntheticRootPath || syntheticRootPath.trim() === ''"
+                  class="btn btn-primary btn-sm"
+                >
+                  {{ isUpdatingPath ? '저장 중...' : '저장' }}
+                </button>
+              </div>
+              <div class="path-info">
+                <p class="info-text">
+                  <strong>현재 경로:</strong> {{ currentPath || '로딩 중...' }}
+                </p>
+                <p class="info-text">
+                  <strong>dataset_synthetic:</strong> {{ currentDatasetPath || '로딩 중...' }}
+                </p>
+                <small class="path-help">
+                  절대 경로 권장 (예: E:/BrickBox/synthetic) | 상대 경로도 가능 (예: ./output/synthetic)
+                  <br>
+                  변경 후 서버 재시작이 필요합니다
+                </small>
+              </div>
             </div>
           </div>
         </div>
@@ -286,108 +325,394 @@
 
         <!-- 검증 결과 -->
         <div v-if="validationResults" class="validation-results">
-          <h3>📊 검증 결과</h3>
-          <div class="result-stats">
-            <div class="stat-item">
-              <span class="stat-label">총 부품:</span>
-              <span class="stat-value">{{ validationResults.stats?.totalParts || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">유효 부품:</span>
-              <span class="stat-value success">{{ validationResults.stats?.validParts || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">무효 부품:</span>
-              <span class="stat-value error">{{ validationResults.stats?.invalidParts || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">총 이미지:</span>
-              <span class="stat-value">{{ validationResults.stats?.totalImages || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">총 라벨:</span>
-              <span class="stat-value">{{ validationResults.stats?.totalLabels || 0 }}</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-label">총 메타데이터:</span>
-              <span class="stat-value">{{ validationResults.stats?.totalMetadata || 0 }}</span>
-            </div>
-          </div>
-          
-          <!-- 버킷 동기화 결과 -->
-          <div v-if="validationResults.bucketSync" class="bucket-sync-results">
-            <h4>☁️ 버킷 동기화 상태</h4>
-            <div class="bucket-stats">
-              <div class="stat-item">
-                <span class="stat-label">총 파일:</span>
-                <span class="stat-value">{{ validationResults.bucketSync.totalFiles || 0 }}</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">업로드된 파일:</span>
-                <span class="stat-value success">{{ validationResults.bucketSync.uploadedFiles || 0 }}</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">누락된 파일:</span>
-                <span class="stat-value error">{{ validationResults.bucketSync.missingFiles || 0 }}</span>
-              </div>
-              <div class="stat-item">
-                <span class="stat-label">버킷 객체 수:</span>
-                <span class="stat-value">{{ validationResults.bucketSync.bucketStats?.totalObjects || 0 }}</span>
-              </div>
-            </div>
-            
-            <!-- 데이터베이스 통계 -->
-            <div v-if="validationResults.bucketSync.databaseStats" class="database-stats">
-              <h5>🗄️ 데이터베이스 상태</h5>
-              <div class="bucket-stats">
-                <div class="stat-item">
-                  <span class="stat-label">총 레코드:</span>
-                  <span class="stat-value">{{ validationResults.bucketSync.databaseStats.totalRecords || 0 }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">업로드된 레코드:</span>
-                  <span class="stat-value success">{{ validationResults.bucketSync.databaseStats.uploadedRecords || 0 }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">누락된 레코드:</span>
-                  <span class="stat-value error">{{ validationResults.bucketSync.databaseStats.missingRecords || 0 }}</span>
+          <!-- 요약 카드 -->
+          <div class="validation-summary-cards">
+            <div class="summary-card" :class="{ 'card-success': validationResults.success, 'card-error': !validationResults.success }">
+              <div class="card-icon">{{ validationResults.success ? '✅' : '❌' }}</div>
+              <div class="card-content">
+                <div class="card-title">{{ validationResults.success ? '모든 검증 통과' : '검증 문제 발견' }}</div>
+                <div class="card-subtitle">
+                  {{ validationResults.errors?.length || 0 }}개 오류, {{ validationResults.warnings?.length || 0 }}개 경고
                 </div>
               </div>
             </div>
             
-            <div v-if="validationResults.bucketSync.syncErrors && validationResults.bucketSync.syncErrors.length > 0" class="sync-errors">
-              <h5>🔄 동기화 오류 ({{ validationResults.bucketSync.syncErrors.length }}개)</h5>
-              <div class="sync-error-list">
-                <div v-for="error in validationResults.bucketSync.syncErrors" :key="error" class="sync-error-item">
-                  {{ error }}
+            <div class="summary-card card-info">
+              <div class="card-icon">📊</div>
+              <div class="card-content">
+                <div class="card-title">부품 통계</div>
+                <div class="card-stats">
+                  <span class="stat-badge">총 {{ validationResults.stats?.totalParts || 0 }}개</span>
+                  <span class="stat-badge success">유효 {{ validationResults.stats?.validParts || 0 }}개</span>
+                  <span class="stat-badge error">무효 {{ validationResults.stats?.invalidParts || 0 }}개</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="summary-card card-info">
+              <div class="card-icon">📁</div>
+              <div class="card-content">
+                <div class="card-title">파일 통계</div>
+                <div class="card-stats">
+                  <span class="stat-badge">이미지 {{ validationResults.stats?.totalImages || 0 }}개</span>
+                  <span class="stat-badge">라벨 {{ validationResults.stats?.totalLabels || 0 }}개</span>
+                  <span class="stat-badge">메타 {{ validationResults.stats?.totalMetadata || 0 }}개</span>
                 </div>
               </div>
             </div>
           </div>
           
-          <div class="validation-summary">
-            <div class="summary-item" :class="{ 'success': validationResults.success, 'error': !validationResults.success }">
-              <span class="summary-icon">{{ validationResults.success ? '✅' : '❌' }}</span>
-              <span class="summary-text">
-                {{ validationResults.success ? '모든 검증이 통과되었습니다' : '검증에서 문제가 발견되었습니다' }}
-              </span>
-            </div>
-          </div>
-          
-          <div v-if="validationResults.errors && validationResults.errors.length > 0" class="validation-errors">
-            <h5>❌ 오류 ({{ validationResults.errors.length }}개)</h5>
-            <div class="error-list">
-              <div v-for="error in validationResults.errors" :key="error" class="error-item">
-                {{ error }}
+          <!-- 검증 카테고리별 섹션 -->
+          <div class="validation-categories">
+            <!-- 파일 매칭 검증 -->
+            <div class="validation-category" v-if="validationResults.fileMatching">
+              <div class="category-header" :class="{ 'has-issues': (validationResults.fileMatching.unmatchedImages?.length > 0 || validationResults.fileMatching.unmatchedLabels?.length > 0) }">
+                <div class="category-title">
+                  <span class="category-icon">🔗</span>
+                  <span>파일 매칭</span>
+                  <span class="category-count success">{{ validationResults.fileMatching.matched || 0 }}개 매칭</span>
+                </div>
+                <div v-if="validationResults.fileMatching.unmatchedImages?.length > 0 || validationResults.fileMatching.unmatchedLabels?.length > 0" class="category-status error">
+                  {{ (validationResults.fileMatching.unmatchedImages?.length || 0) + (validationResults.fileMatching.unmatchedLabels?.length || 0) }}개 문제
+                </div>
+              </div>
+              
+              <div v-if="validationResults.fileMatching.unmatchedImages?.length > 0 || validationResults.fileMatching.unmatchedLabels?.length > 0" class="category-content">
+                <!-- 라벨이 없는 이미지 목록 -->
+                <div v-if="validationResults.fileMatching.unmatchedImages && validationResults.fileMatching.unmatchedImages.length > 0" class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">📝</span>
+                    <span class="issue-title">라벨이 없는 이미지 ({{ validationResults.fileMatching.unmatchedImages.length }}개)</span>
+                  </div>
+                  <div class="issue-actions">
+                    <button 
+                      @click="generateMissingLabels('all')" 
+                      :disabled="isGeneratingLabels"
+                      class="btn-fix-all"
+                    >
+                      {{ isGeneratingLabels ? '생성 중...' : '모두 생성' }}
+                    </button>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(imagePath, index) in validationResults.fileMatching.unmatchedImages" :key="index" class="issue-item-action">
+                      <span class="issue-path">{{ imagePath }}</span>
+                      <button 
+                        @click="generateMissingLabels(imagePath)" 
+                        :disabled="isGeneratingLabels"
+                        class="btn-fix-single"
+                      >
+                        생성
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 이미지가 없는 라벨 목록 -->
+                <div v-if="validationResults.fileMatching.unmatchedLabels && validationResults.fileMatching.unmatchedLabels.length > 0" class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">🖼️</span>
+                    <span class="issue-title">이미지가 없는 라벨 ({{ validationResults.fileMatching.unmatchedLabels.length }}개)</span>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(labelPath, index) in validationResults.fileMatching.unmatchedLabels" :key="index" class="issue-item">
+                      <span class="issue-path">{{ labelPath }}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-          
-          <div v-if="validationResults.warnings && validationResults.warnings.length > 0" class="validation-warnings">
-            <h5>⚠️ 경고 ({{ validationResults.warnings.length }}개)</h5>
-            <div class="warning-list">
-              <div v-for="warning in validationResults.warnings" :key="warning" class="warning-item">
-                {{ warning }}
+            
+            <!-- 이미지 검증 -->
+            <div class="validation-category" v-if="validationResults.imageValidation">
+              <div class="category-header" :class="{ 'has-issues': validationResults.imageValidation.errors?.length > 0 }">
+                <div class="category-title">
+                  <span class="category-icon">🖼️</span>
+                  <span>이미지 파일 검증</span>
+                  <span class="category-count success">{{ validationResults.imageValidation.valid || 0 }}개 유효</span>
+                </div>
+                <div v-if="validationResults.imageValidation.errors?.length > 0" class="category-status error">
+                  {{ validationResults.imageValidation.errors.length }}개 오류
+                </div>
+              </div>
+              
+              <div v-if="validationResults.imageValidation.errors?.length > 0" class="category-content">
+                <div class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">⚠️</span>
+                    <span class="issue-title">이미지 파일 오류 ({{ validationResults.imageValidation.errors.length }}개)</span>
+                  </div>
+                  <div class="issue-actions">
+                    <button 
+                      @click="fixImageErrors('all')" 
+                      :disabled="isFixingImages"
+                      class="btn-fix-all"
+                    >
+                      {{ isFixingImages ? '수정 중...' : '모두 수정' }}
+                    </button>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(errorPath, index) in validationResults.imageValidation.errors" :key="index" class="issue-item-action">
+                      <span class="issue-path">{{ errorPath }}</span>
+                      <button 
+                        @click="fixImageErrors(errorPath)" 
+                        :disabled="isFixingImages"
+                        class="btn-fix-single"
+                      >
+                        수정
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 메타데이터 검증 -->
+            <div class="validation-category" v-if="validationResults.metadataValidation">
+              <div class="category-header" :class="{ 'has-issues': validationResults.metadataValidation.errors?.length > 0 }">
+                <div class="category-title">
+                  <span class="category-icon">📄</span>
+                  <span>메타데이터 JSON 검증</span>
+                  <span class="category-count success">{{ validationResults.metadataValidation.valid || 0 }}개 유효</span>
+                </div>
+                <div v-if="validationResults.metadataValidation.errors?.length > 0" class="category-status error">
+                  {{ validationResults.metadataValidation.errors.length }}개 오류
+                </div>
+              </div>
+              
+              <div v-if="validationResults.metadataValidation.errors?.length > 0" class="category-content">
+                <div class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">⚠️</span>
+                    <span class="issue-title">JSON 오류 ({{ validationResults.metadataValidation.errors.length }}개)</span>
+                  </div>
+                  <div class="issue-actions">
+                    <button 
+                      @click="fixMetadataErrors('all')" 
+                      :disabled="isFixingMetadata"
+                      class="btn-fix-all"
+                    >
+                      {{ isFixingMetadata ? '수정 중...' : '모두 수정' }}
+                    </button>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(errorPath, index) in validationResults.metadataValidation.errors" :key="index" class="issue-item-action">
+                      <span class="issue-path">{{ errorPath }}</span>
+                      <button 
+                        @click="fixMetadataErrors(errorPath)" 
+                        :disabled="isFixingMetadata"
+                        class="btn-fix-single"
+                      >
+                        수정
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 이미지 개수 검증 -->
+            <div class="validation-category" v-if="validationResults.insufficientImages && validationResults.insufficientImages.length > 0">
+              <div class="category-header has-issues">
+                <div class="category-title">
+                  <span class="category-icon">📊</span>
+                  <span>이미지 개수 검증</span>
+                  <span class="category-count error">{{ validationResults.insufficientImages.length }}개 부족</span>
+                </div>
+              </div>
+              
+              <div class="category-content">
+                <div class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">⚠️</span>
+                    <span class="issue-title">200개 미만 부품 ({{ validationResults.insufficientImages.length }}개)</span>
+                  </div>
+                  <div class="issue-actions">
+                    <button 
+                      @click="generateMissingImages('all')" 
+                      :disabled="isGeneratingImages"
+                      class="btn-fix-all"
+                    >
+                      {{ isGeneratingImages ? '생성 중...' : '모두 추가 렌더링' }}
+                    </button>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(item, index) in validationResults.insufficientImages" :key="index" class="issue-item-action">
+                      <div class="issue-path">{{ item.partId }}</div>
+                      <div class="split-grid">
+                        <div class="split-cell">
+                          <span class="split-label">train</span>
+                          <span class="split-value">{{ item.splits?.train?.current || 0 }}/{{ item.splits?.train?.expected || 0 }} (부족: {{ item.splits?.train?.missing || 0 }})</span>
+                        </div>
+                        <div class="split-cell">
+                          <span class="split-label">val</span>
+                          <span class="split-value">{{ item.splits?.val?.current || 0 }}/{{ item.splits?.val?.expected || 0 }} (부족: {{ item.splits?.val?.missing || 0 }})</span>
+                        </div>
+                        <div class="split-cell">
+                          <span class="split-label">test</span>
+                          <span class="split-value">{{ item.splits?.test?.current || 0 }}/{{ item.splits?.test?.expected || 0 }} (부족: {{ item.splits?.test?.missing || 0 }})</span>
+                        </div>
+                        <div class="split-total">
+                          <span class="split-label">총합</span>
+                          <span class="split-value">{{ item.total?.current || 0 }}/{{ item.total?.expected || 200 }} (부족: {{ item.total?.missing || 0 }})</span>
+                        </div>
+                      </div>
+                      <button 
+                        @click="generateMissingImages(item)" 
+                        :disabled="isGeneratingImages"
+                        class="btn-fix-single"
+                      >
+                        추가 렌더링
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 이미지 품질 검증 (WebP/PNG) -->
+            <div class="validation-category" v-if="validationResults.webpQuality && (validationResults.webpQuality.invalid > 0 || validationResults.webpQuality.valid > 0)">
+              <div class="category-header" :class="{ 'has-issues': validationResults.webpQuality.invalid > 0 }">
+                <div class="category-title">
+                  <span class="category-icon">🖼️</span>
+                  <span>이미지 품질 검증 (PNG/WebP)</span>
+                  <span class="category-count success">{{ validationResults.webpQuality.valid || 0 }}개 유효</span>
+                </div>
+                <div v-if="validationResults.webpQuality.invalid > 0" class="category-status error">
+                  {{ validationResults.webpQuality.invalid }}개 오류
+                </div>
+              </div>
+              
+              <div v-if="validationResults.webpQuality.details && validationResults.webpQuality.details.length > 0" class="category-content">
+                <div class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">📊</span>
+                    <span class="issue-title">이미지 품질 오류 ({{ validationResults.webpQuality.invalid }}개)</span>
+                  </div>
+                  <div class="webp-quality-details">
+                    <div v-for="(detail, index) in validationResults.webpQuality.details" :key="index" class="webp-quality-item">
+                      <div class="quality-path">{{ detail.path }}</div>
+                      
+                      <!-- 오류 메시지 표시 -->
+                      <div v-if="detail.error" class="quality-error-message">
+                        <span class="error-icon">❌</span>
+                        <span class="error-text">{{ detail.error }}</span>
+                      </div>
+                      
+                      <div v-if="detail.metrics" class="quality-metrics">
+                        <div class="metric-row">
+                          <span class="metric-label">해상도:</span>
+                          <span class="metric-value" :class="{ 'metric-error': detail.metrics.resolution && (detail.metrics.resolution.width < 768 || detail.metrics.resolution.height < 768) }">
+                            {{ detail.metrics.resolution?.width }}x{{ detail.metrics.resolution?.height }}
+                            <span v-if="detail.metrics.resolution && (detail.metrics.resolution.width < 768 || detail.metrics.resolution.height < 768)" class="metric-note">(최소 768x768 필요)</span>
+                          </span>
+                        </div>
+                        <div v-if="detail.metrics.sharpness !== undefined" class="metric-row">
+                          <span class="metric-label">선명도:</span>
+                          <span class="metric-value" :class="{ 'metric-warning': detail.metrics.sharpness < 50 }">
+                            {{ detail.metrics.sharpness.toFixed(2) }} (참고: 50)
+                          </span>
+                        </div>
+                        <div v-if="detail.metrics.snrEstimate !== undefined" class="metric-row">
+                          <span class="metric-label">SNR:</span>
+                          <span class="metric-value" :class="{ 'metric-warning': detail.metrics.snrEstimate < 30 }">
+                            {{ detail.metrics.snrEstimate.toFixed(2) }}dB (참고: 30dB)
+                          </span>
+                        </div>
+                        <div class="metric-row">
+                          <span class="metric-label">ICC:</span>
+                          <span class="metric-value" :class="{ 'metric-warning': !detail.metrics.hasIcc }">
+                            {{ detail.metrics.hasIcc ? '있음' : '없음' }}
+                            <span v-if="!detail.metrics.hasIcc" class="metric-note">(권장)</span>
+                          </span>
+                        </div>
+                        <div class="metric-row">
+                          <span class="metric-label">EXIF:</span>
+                          <span class="metric-value" :class="{ 'metric-warning': !detail.metrics.hasExif }">
+                            {{ detail.metrics.hasExif ? '있음' : '없음' }}
+                            <span v-if="!detail.metrics.hasExif" class="metric-note">(권장)</span>
+                          </span>
+                        </div>
+                        <div class="metric-row">
+                          <span class="metric-label">색상 깊이:</span>
+                          <span class="metric-value" :class="{ 'metric-warning': !detail.metrics.is8Bit }">
+                            {{ detail.metrics.colorDepth || 'unknown' }}
+                            <span v-if="!detail.metrics.is8Bit" class="metric-note">(권장: 8비트/uchar)</span>
+                          </span>
+                        </div>
+                        <div v-if="detail.metrics.format === 'webp' && detail.metrics.webpQuality !== null && detail.metrics.webpQuality !== undefined" class="metric-row">
+                          <span class="metric-label">WebP 품질(q):</span>
+                          <span class="metric-value" :class="{ 'metric-warning': detail.metrics.webpQuality < 90 }">
+                            {{ detail.metrics.webpQuality }} (권장: 90)
+                          </span>
+                        </div>
+                        <div v-if="detail.metrics.format === 'webp' && detail.metrics.webpMethod !== null && detail.metrics.webpMethod !== undefined" class="metric-row">
+                          <span class="metric-label">WebP 메서드(m):</span>
+                          <span class="metric-value" :class="{ 'metric-warning': detail.metrics.webpMethod < 6 }">
+                            {{ detail.metrics.webpMethod }} (권장: 6)
+                          </span>
+                        </div>
+                        <div v-if="detail.metrics.format === 'png' && detail.metrics.format" class="metric-row">
+                          <span class="metric-label">형식:</span>
+                          <span class="metric-value">PNG (무손실)</span>
+                        </div>
+                      </div>
+                      
+                      <!-- 이슈 목록 표시 -->
+                      <div v-if="detail.issues && detail.issues.length > 0" class="quality-issues">
+                        <div class="issue-title">필수 검증 실패:</div>
+                        <ul class="issue-list">
+                          <li v-for="(issue, issueIndex) in detail.issues" :key="issueIndex" class="issue-item error">{{ issue }}</li>
+                        </ul>
+                      </div>
+                      
+                      <!-- 경고 목록 표시 -->
+                      <div v-if="detail.warnings && detail.warnings.length > 0" class="quality-warnings">
+                        <div class="issue-title">권장 사항 (학습에는 문제 없음):</div>
+                        <ul class="issue-list">
+                          <li v-for="(warning, warningIndex) in detail.warnings" :key="warningIndex" class="issue-item warning">{{ warning }}</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 전체 오류 및 경고 -->
+            <div v-if="(validationResults.errors && validationResults.errors.length > 0) || (validationResults.warnings && validationResults.warnings.length > 0)" class="validation-category">
+              <div class="category-header has-issues">
+                <div class="category-title">
+                  <span class="category-icon">📋</span>
+                  <span>전체 오류 및 경고</span>
+                  <span class="category-count error" v-if="validationResults.errors?.length > 0">{{ validationResults.errors.length }}개 오류</span>
+                  <span class="category-count warning" v-if="validationResults.warnings?.length > 0">{{ validationResults.warnings.length }}개 경고</span>
+                </div>
+              </div>
+              
+              <div class="category-content">
+                <div v-if="validationResults.errors && validationResults.errors.length > 0" class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">❌</span>
+                    <span class="issue-title">오류 ({{ validationResults.errors.length }}개)</span>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(error, index) in validationResults.errors" :key="index" class="issue-item error">
+                      {{ error }}
+                    </div>
+                  </div>
+                </div>
+                
+                <div v-if="validationResults.warnings && validationResults.warnings.length > 0" class="issue-section">
+                  <div class="issue-header">
+                    <span class="issue-icon">⚠️</span>
+                    <span class="issue-title">경고 ({{ validationResults.warnings.length }}개)</span>
+                  </div>
+                  <div class="issue-list">
+                    <div v-for="(warning, index) in validationResults.warnings" :key="index" class="issue-item warning">
+                      {{ warning }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -561,10 +886,19 @@
             <div class="folder-item">
               📁 output/synthetic/dataset_synthetic/
               <div class="folder-children">
-                <div class="folder-item">📁 images/train/</div>
-                <div class="folder-item">📁 labels/train/</div>
-                <div class="folder-item">📁 meta/train/</div>
-                <div class="file-item">📄 data.yaml</div>
+                <div class="folder-item">
+                  📁 {element_id}/
+                  <div class="folder-children">
+                    <div class="folder-item">📁 images/ (PNG 파일)</div>
+                    <div class="folder-item">📁 labels/ (YOLO 형식)</div>
+                    <div class="folder-item">📁 meta/ (JSON 메타데이터)</div>
+                    <div class="folder-item">📁 meta-e/ (Essential JSON)</div>
+                    <div class="folder-item">📁 depth/ (EXR 깊이 맵)</div>
+                  </div>
+                </div>
+                <div class="folder-item">
+                  <small>train/val/test split은 학습 시점에 동적 생성</small>
+                </div>
               </div>
             </div>
           </div>
@@ -713,6 +1047,12 @@ const tabs = ref([
   { id: 'logs', icon: '📋', label: '에러 로그' },
 ])
 
+// 경로 설정
+const syntheticRootPath = ref('')
+const currentPath = ref('')
+const currentDatasetPath = ref('')
+const isUpdatingPath = ref(false)
+
 // 자동 학습 설정
 const autoTrainingEnabled = ref(false)
 
@@ -731,6 +1071,10 @@ const renderLogs = ref([])
 
 // 검증 관련
 const validationResults = ref(null)
+const isGeneratingLabels = ref(false)
+const isFixingImages = ref(false)
+const isFixingMetadata = ref(false)
+const isGeneratingImages = ref(false)
 
 // 데이터셋 관련
 const datasetMode = ref('incremental') // 'incremental' 또는 'rebuild'
@@ -1272,6 +1616,7 @@ const manualDataValidation = async () => {
         validateLabels: true,
         validateMetadata: true,
         checkFileIntegrity: true,
+        validateWebPQuality: true,
         validateBucketSync: true,
         bucketName: 'lego-synthetic'
       })
@@ -1324,7 +1669,7 @@ const manualDataValidation = async () => {
       
       // 검증 결과를 validationResults에 저장
       if (result.validationResults) {
-        const { errors, warnings, stats } = result.validationResults
+        const { errors, warnings, stats, fileMatching, imageValidation, metadataValidation, insufficientImages, webpQuality } = result.validationResults
         validationResults.value = {
           success: errors.length === 0,
           stats: {
@@ -1337,6 +1682,11 @@ const manualDataValidation = async () => {
           },
           errors: errors || [],
           warnings: warnings || [],
+          fileMatching: fileMatching || { matched: 0, unmatchedImages: [], unmatchedLabels: [] },
+          imageValidation: imageValidation || { valid: 0, invalid: 0, errors: [] },
+          metadataValidation: metadataValidation || { valid: 0, invalid: 0, errors: [] },
+          insufficientImages: insufficientImages || [],
+          webpQuality: webpQuality || { valid: 0, invalid: 0, errors: [], details: [] },
           bucketSync: result.validationResults?.bucketSync || null
         }
       }
@@ -1356,19 +1706,35 @@ const manualDataValidation = async () => {
 
 // 검증 진행률 모니터링
 const monitorValidationProgress = async (jobId) => {
-  const maxAttempts = 60 // 5분 타임아웃 (5초 간격) // 🔧 수정됨
+  const maxAttempts = 300 // 25분 타임아웃 (5초 간격)
   let attempts = 0
-  let lastProgress = -1 // 🔧 수정됨
-  let lastStep = '' // 🔧 수정됨
-  let stalledCount = 0 // 🔧 수정됨
-  const STALLED_THRESHOLD = 6 // 30초 정체 시 상세 조회 // 🔧 수정됨
+  let lastProgress = -1
+  let lastStep = ''
+  let stalledCount = 0
+  const STALLED_THRESHOLD = 6
+  let lastLogIndex = 0 // 마지막으로 받은 로그 인덱스
   
   while (attempts < maxAttempts) {
     try {
-      console.log(`[검증] 폴링 시도 ${attempts + 1}/${maxAttempts} (jobId=${jobId})`) // 🔧 수정됨
-      const response = await fetchWithPortDetection(`/api/synthetic/validate/status/${jobId}`)
+      console.log(`[검증] 폴링 시도 ${attempts + 1}/${maxAttempts} (jobId=${jobId})`)
+      // 마지막 로그 인덱스를 쿼리 파라미터로 전달
+      const response = await fetchWithPortDetection(`/api/synthetic/validate/status/${jobId}?lastLogIndex=${lastLogIndex}`)
       const data = await response.json()
-      console.debug('[검증] 폴링 응답 JSON', data) // 🔧 수정됨
+      console.debug('[검증] 폴링 응답 JSON', data)
+      
+      // 새로운 로그 추가
+      if (data.logs && Array.isArray(data.logs) && data.logs.length > 0) {
+        data.logs.forEach(log => {
+          renderLogs.value.push({ type: log.type || 'info', message: log.message })
+        })
+        lastLogIndex = data.logCount || lastLogIndex + data.logs.length
+      }
+      
+      // 진행률 업데이트
+      if (data.progress !== undefined && data.progress !== lastProgress) {
+        lastProgress = data.progress
+        updateProgress(data.progress, '검증 진행 중', `진행률: ${data.progress}%`)
+      }
       
       if (data.status === 'completed') {
         updateProgress(100, '완료', '데이터 검증이 완료되었습니다!')
@@ -1404,6 +1770,11 @@ const monitorValidationProgress = async (jobId) => {
             },
             errors: errors || [],
             warnings: warnings || [],
+            fileMatching: data.validationResults?.fileMatching || { matched: 0, unmatchedImages: [], unmatchedLabels: [] },
+            imageValidation: data.validationResults?.imageValidation || { valid: 0, invalid: 0, errors: [] },
+            metadataValidation: data.validationResults?.metadataValidation || { valid: 0, invalid: 0, errors: [] },
+            insufficientImages: data.validationResults?.insufficientImages || [],
+            webpQuality: data.validationResults?.webpQuality || { valid: 0, invalid: 0, errors: [], details: [] },
             bucketSync: data.validationResults?.bucketSync || null
           }
         }
@@ -1490,6 +1861,341 @@ const monitorValidationProgress = async (jobId) => {
       console.error('[검증] 타임아웃 후 상태 조회 실패:', e) // 🔧 수정됨
     }
     /* 타임아웃 후 수동 닫기 */ // 🔧 수정됨
+  }
+}
+
+// 라벨이 없는 이미지에 대한 라벨 생성
+const generateMissingLabels = async (imagePath) => {
+  try {
+    isGeneratingLabels.value = true
+    
+    if (imagePath === 'all') {
+      // 모든 라벨 생성
+      const unmatchedImages = validationResults.value?.fileMatching?.unmatchedImages || []
+      
+      if (unmatchedImages.length === 0) {
+        addNotification('info', '알림', '생성할 라벨이 없습니다.')
+        return
+      }
+      
+      addNotification('info', '라벨 생성 시작', `${unmatchedImages.length}개 이미지에 대한 라벨을 생성합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/generate-labels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          imagePaths: unmatchedImages
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`라벨 생성 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '라벨 생성 완료', `${result.generatedCount}개 라벨이 생성되었습니다.`)
+        
+        // 검증 결과 업데이트 (생성된 라벨 제거)
+        if (validationResults.value?.fileMatching) {
+          validationResults.value.fileMatching.unmatchedImages = []
+          validationResults.value.fileMatching.matched += result.generatedCount
+        }
+      } else {
+        throw new Error(result.error || '라벨 생성 실패')
+      }
+    } else {
+      // 단일 이미지 라벨 생성
+      addNotification('info', '라벨 생성 시작', `${imagePath}에 대한 라벨을 생성합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/generate-labels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          imagePaths: [imagePath]
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`라벨 생성 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '라벨 생성 완료', `${imagePath}에 대한 라벨이 생성되었습니다.`)
+        
+        // 검증 결과 업데이트 (생성된 라벨 제거)
+        if (validationResults.value?.fileMatching) {
+          const index = validationResults.value.fileMatching.unmatchedImages.indexOf(imagePath)
+          if (index > -1) {
+            validationResults.value.fileMatching.unmatchedImages.splice(index, 1)
+            validationResults.value.fileMatching.matched++
+          }
+        }
+      } else {
+        throw new Error(result.error || '라벨 생성 실패')
+      }
+    }
+  } catch (error) {
+    console.error('라벨 생성 오류:', error)
+    addNotification('error', '라벨 생성 실패', error.message)
+  } finally {
+    isGeneratingLabels.value = false
+  }
+}
+
+// 이미지 파일 오류 수정 (EXR 등)
+const fixImageErrors = async (errorPath) => {
+  try {
+    isFixingImages.value = true
+    
+    if (errorPath === 'all') {
+      const imageErrors = validationResults.value?.imageValidation?.errors || []
+      
+      if (imageErrors.length === 0) {
+        addNotification('info', '알림', '수정할 이미지 오류가 없습니다.')
+        return
+      }
+      
+      addNotification('info', '이미지 오류 확인 시작', `${imageErrors.length}개 이미지 오류를 확인합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/fix-image-errors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          errorPaths: imageErrors
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`이미지 오류 수정 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '이미지 오류 확인 완료', `${result.fixedCount}개 이미지가 수정되었습니다.`)
+        
+        // 검증 결과 업데이트
+        if (validationResults.value?.imageValidation) {
+          validationResults.value.imageValidation.errors = result.remainingErrors || []
+          validationResults.value.imageValidation.valid += result.fixedCount
+          validationResults.value.imageValidation.invalid -= result.fixedCount
+        }
+      } else {
+        throw new Error(result.error || '이미지 오류 수정 실패')
+      }
+    } else {
+      addNotification('info', '이미지 오류 확인 시작', `${errorPath} 오류를 확인합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/fix-image-errors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          errorPaths: [errorPath]
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`이미지 오류 수정 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '이미지 오류 확인 완료', `${errorPath} 오류가 수정되었습니다.`)
+        
+        // 검증 결과 업데이트
+        if (validationResults.value?.imageValidation) {
+          const index = validationResults.value.imageValidation.errors.indexOf(errorPath)
+          if (index > -1) {
+            validationResults.value.imageValidation.errors.splice(index, 1)
+            validationResults.value.imageValidation.valid++
+            validationResults.value.imageValidation.invalid--
+          }
+        }
+      } else {
+        throw new Error(result.error || '이미지 오류 수정 실패')
+      }
+    }
+  } catch (error) {
+    console.error('이미지 오류 수정 오류:', error)
+    addNotification('error', '이미지 오류 수정 실패', error.message)
+  } finally {
+    isFixingImages.value = false
+  }
+}
+
+// 메타데이터 JSON 오류 수정
+const fixMetadataErrors = async (errorPath) => {
+  try {
+    isFixingMetadata.value = true
+    
+    if (errorPath === 'all') {
+      const metadataErrors = validationResults.value?.metadataValidation?.errors || []
+      
+      if (metadataErrors.length === 0) {
+        addNotification('info', '알림', '수정할 메타데이터 오류가 없습니다.')
+        return
+      }
+      
+      addNotification('info', '메타데이터 수정 시작', `${metadataErrors.length}개 JSON 파일을 수정합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/fix-metadata-errors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          errorPaths: metadataErrors
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`메타데이터 수정 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '메타데이터 수정 완료', `${result.fixedCount}개 JSON 파일이 수정되었습니다.`)
+        
+        // 검증 결과 업데이트
+        if (validationResults.value?.metadataValidation) {
+          validationResults.value.metadataValidation.errors = result.remainingErrors || []
+          validationResults.value.metadataValidation.valid += result.fixedCount
+          validationResults.value.metadataValidation.invalid -= result.fixedCount
+        }
+      } else {
+        throw new Error(result.error || '메타데이터 수정 실패')
+      }
+    } else {
+      addNotification('info', '메타데이터 수정 시작', `${errorPath}를 수정합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/fix-metadata-errors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          errorPaths: [errorPath]
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`메타데이터 수정 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '메타데이터 수정 완료', `${errorPath}가 수정되었습니다.`)
+        
+        // 검증 결과 업데이트
+        if (validationResults.value?.metadataValidation) {
+          const index = validationResults.value.metadataValidation.errors.indexOf(errorPath)
+          if (index > -1) {
+            validationResults.value.metadataValidation.errors.splice(index, 1)
+            validationResults.value.metadataValidation.valid++
+            validationResults.value.metadataValidation.invalid--
+          }
+        }
+      } else {
+        throw new Error(result.error || '메타데이터 수정 실패')
+      }
+    }
+  } catch (error) {
+    console.error('메타데이터 수정 오류:', error)
+    addNotification('error', '메타데이터 수정 실패', error.message)
+  } finally {
+    isFixingMetadata.value = false
+  }
+}
+
+// 부족한 이미지 추가 렌더링
+const generateMissingImages = async (item) => {
+  try {
+    isGeneratingImages.value = true
+    
+    if (item === 'all') {
+      const insufficientImages = validationResults.value?.insufficientImages || []
+      
+      if (insufficientImages.length === 0) {
+        addNotification('info', '알림', '추가 렌더링이 필요한 부품이 없습니다.')
+        return
+      }
+      
+      addNotification('info', '추가 렌더링 시작', `${insufficientImages.length}개 부품에 대한 추가 렌더링을 시작합니다.`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/generate-missing-images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          partInfo: insufficientImages
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`추가 렌더링 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '추가 렌더링 작업 생성 완료', `${result.generatedJobs}개 작업이 생성되었습니다.`)
+        
+        renderLogs.value.push({ type: 'info', message: `추가 렌더링 작업 생성: ${result.generatedJobs}개` })
+        // 검증 재실행하여 업데이트된 결과 반영
+        await manualDataValidation()
+      } else {
+        throw new Error(result.error || '추가 렌더링 실패')
+      }
+    } else {
+      addNotification('info', '추가 렌더링 시작', `${item.split}/${item.partId}에 대한 추가 렌더링을 시작합니다. (부족: ${item.missingCount}개)`)
+      
+      const response = await fetchWithPortDetection('/api/synthetic/validate/generate-missing-images', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          partInfo: [item]
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`추가 렌더링 실패: ${response.status}`)
+      }
+      
+      const result = await response.json()
+      
+      if (result.success) {
+        addNotification('success', '추가 렌더링 작업 생성 완료', `${item.split}/${item.partId}에 대한 렌더링 작업이 생성되었습니다.`)
+        
+        renderLogs.value.push({ type: 'info', message: `추가 렌더링 작업 생성: ${item.split}/${item.partId}` })
+        // 검증 재실행하여 업데이트된 결과 반영
+        await manualDataValidation()
+      } else {
+        throw new Error(result.error || '추가 렌더링 실패')
+      }
+    }
+  } catch (error) {
+    console.error('추가 렌더링 오류:', error)
+    addNotification('error', '추가 렌더링 실패', error.message)
+  } finally {
+    isGeneratingImages.value = false
   }
 }
 
@@ -1912,11 +2618,68 @@ const monitorDatasetPreparation = async (jobId) => {
   }
 }
 
+// 경로 설정 로드
+const loadPathSetting = async () => {
+  try {
+    const response = await fetchWithPortDetection('/api/synthetic/config/path')
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success) {
+        syntheticRootPath.value = data.configuredPath || data.currentPath || ''
+        currentPath.value = data.currentPath || ''
+        currentDatasetPath.value = data.datasetPath || ''
+      }
+    }
+  } catch (error) {
+    console.error('경로 설정 로드 실패:', error)
+  }
+}
+
+// 경로 설정 업데이트
+const updatePathSetting = async () => {
+  if (!syntheticRootPath.value || isUpdatingPath.value) return
+  
+  try {
+    isUpdatingPath.value = true
+    const response = await fetchWithPortDetection('/api/synthetic/config/path', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        path: syntheticRootPath.value
+      })
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      if (data.success) {
+        currentPath.value = data.currentPath || ''
+        currentDatasetPath.value = data.datasetPath || ''
+        alert(`✅ 경로 설정이 업데이트되었습니다.\n\n새 경로: ${data.newPath}\n\n⚠️ 서버 재시작 후 모든 스크립트에 적용됩니다.`)
+      } else {
+        alert(`❌ 경로 설정 업데이트 실패: ${data.error || '알 수 없는 오류'}`)
+      }
+    } else {
+      const data = await response.json()
+      alert(`❌ 경로 설정 업데이트 실패: ${data.error || '서버 오류'}`)
+    }
+  } catch (error) {
+    console.error('경로 설정 업데이트 실패:', error)
+    alert(`❌ 경로 설정 업데이트 실패: ${error.message}`)
+  } finally {
+    isUpdatingPath.value = false
+  }
+}
+
 // 컴포넌트 마운트 시 초기화
 onMounted(async () => {
   try {
     // Synthetic API 포트 감지
     await detectSyntheticApiPort()
+    
+    // 경로 설정 로드
+    await loadPathSetting()
     
     // 자동 학습 설정 로드
     const { data, error } = await supabase
@@ -1929,7 +2692,7 @@ onMounted(async () => {
       autoTrainingEnabled.value = data.config_value === 'true'
     }
   } catch (error) {
-    console.error('자동 학습 설정 로드 실패:', error)
+    console.error('초기화 실패:', error)
   }
 })
 
@@ -2273,6 +3036,38 @@ onMounted(async () => {
 .form-input:focus {
   outline: none;
   border-color: #667eea;
+}
+
+.path-input {
+  flex: 1;
+}
+
+.path-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.path-info {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.path-help {
+  display: block;
+  margin-top: 8px;
+  color: #666;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.setting-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
 }
 
 /* 버튼 스타일 */
@@ -3322,6 +4117,393 @@ onMounted(async () => {
   }
 }
 
+/* 검증 탭 개선 스타일 */
+.validation-tab {
+  padding: 24px;
+}
+
+.validation-controls {
+  margin-bottom: 24px;
+  padding: 20px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.btn-validate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.btn-icon {
+  font-size: 18px;
+}
+
+.validation-info {
+  margin-top: 12px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+/* 요약 카드 */
+.validation-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.summary-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+  background: white;
+  border-radius: 12px;
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+}
+
+.summary-card:hover {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.summary-card.card-success {
+  border-color: #10b981;
+  background: linear-gradient(135deg, #ecfdf5 0%, #ffffff 100%);
+}
+
+.summary-card.card-error {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+}
+
+.summary-card.card-info {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+}
+
+.card-icon {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.card-content {
+  flex: 1;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 4px;
+}
+
+.card-subtitle {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.stat-badge {
+  padding: 4px 12px;
+  background: #f3f4f6;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #374151;
+}
+
+.stat-badge.success {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.stat-badge.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* 검증 카테고리 */
+.validation-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.validation-category {
+  background: white;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.category-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.category-header.has-issues {
+  background: #fef2f2;
+  border-bottom-color: #fecaca;
+}
+
+.category-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.category-icon {
+  font-size: 20px;
+}
+
+.category-count {
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.category-count.success {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.category-count.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.category-count.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.category-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.category-content {
+  padding: 20px;
+}
+
+/* 이슈 섹션 */
+.issue-section {
+  margin-bottom: 16px;
+}
+
+.issue-section:last-child {
+  margin-bottom: 0;
+}
+
+.issue-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.issue-icon {
+  font-size: 18px;
+}
+
+.issue-title {
+  flex: 1;
+}
+
+.issue-actions {
+  margin-bottom: 12px;
+}
+
+.btn-fix-all {
+  padding: 8px 16px;
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-fix-all:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.btn-fix-all:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+.issue-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.issue-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 13px;
+  color: #374151;
+  font-family: 'Courier New', monospace;
+}
+
+.issue-item:last-child {
+  border-bottom: none;
+}
+
+.issue-item.error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.issue-item.warning {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.issue-item-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.issue-item-action:last-child {
+  border-bottom: none;
+}
+
+.issue-path {
+  flex: 1;
+  font-size: 13px;
+  color: #374151;
+  font-family: 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.btn-fix-single {
+  padding: 4px 12px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+.btn-fix-single:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn-fix-single:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+.webp-quality-details {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bucket-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.stat-box {
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  text-align: center;
+}
+
+.stat-box.success {
+  background: #ecfdf5;
+  border-color: #10b981;
+}
+
+.stat-box.error {
+  background: #fef2f2;
+  border-color: #ef4444;
+}
+
+.stat-box .stat-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+}
+
+.stat-box .stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.stat-box.success .stat-value {
+  color: #065f46;
+}
+
+.stat-box.error .stat-value {
+  color: #991b1b;
+}
+
+.database-stats-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 12px;
+}
+
 /* 검증 결과 개선 스타일 */
 .validation-summary {
   margin: 16px 0;
@@ -3397,6 +4579,268 @@ onMounted(async () => {
 .error-item:last-child,
 .warning-item:last-child {
   border-bottom: none;
+}
+
+/* 라벨이 없는 이미지 섹션 */
+.missing-labels-section,
+.missing-images-section,
+.image-errors-section,
+.metadata-errors-section,
+.insufficient-images-section,
+.webp-quality-section {
+  margin-top: 20px;
+  padding: 16px;
+  background: #fffbeb;
+  border: 1px solid #fbbf24;
+  border-radius: 8px;
+}
+
+.webp-quality-section {
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+}
+
+.webp-quality-summary {
+  margin-bottom: 12px;
+}
+
+.quality-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+  color: #78350f;
+}
+
+.stat-valid {
+  color: #166534;
+  font-weight: 600;
+}
+
+.stat-invalid {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.webp-quality-item {
+  padding: 12px;
+  margin-bottom: 8px;
+  background: white;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+}
+
+.quality-path {
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.quality-metrics {
+  margin-bottom: 8px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #fef3c7;
+}
+
+.metric-row:last-child {
+  border-bottom: none;
+}
+
+.metric-label {
+  font-weight: 500;
+  color: #78350f;
+}
+
+.metric-value {
+  color: #166534;
+  font-family: 'Courier New', monospace;
+}
+
+.metric-value.metric-warning {
+  color: #d97706;
+}
+
+.metric-value.metric-error {
+  color: #dc2626;
+}
+
+.quality-error-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.error-icon {
+  font-size: 16px;
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.error-text {
+  color: #991b1b;
+  font-weight: 500;
+  flex: 1;
+}
+
+.metric-note {
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  margin-left: 4px;
+}
+
+.quality-issues {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #fde68a;
+}
+
+.quality-warnings {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #fde68a;
+}
+
+.issue-title {
+  font-weight: 600;
+  color: #dc2626;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.issue-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.issue-item {
+  font-size: 12px;
+  color: #991b1b;
+  margin-bottom: 2px;
+}
+
+/* 분할별 표기 */
+.split-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.split-cell, .split-total {
+  background: #fff;
+  border: 1px dashed #fde68a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.split-total {
+  grid-column: 1 / -1;
+  background: #fffbeb;
+}
+
+.split-label {
+  font-weight: 600;
+  color: #92400e;
+}
+
+.split-value {
+  font-family: 'Courier New', monospace;
+  color: #334155;
+}
+
+.missing-labels-section h5,
+.missing-images-section h5,
+.image-errors-section h5,
+.metadata-errors-section h5,
+.insufficient-images-section h5 {
+  margin: 0 0 12px 0;
+  color: #92400e;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.missing-labels-controls {
+  margin-bottom: 12px;
+}
+
+.btn-generate-all,
+.btn-generate-single {
+  padding: 8px 16px;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-generate-all:hover:not(:disabled),
+.btn-generate-single:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.btn-generate-all:disabled,
+.btn-generate-single:disabled {
+  background: #d1d5db;
+  cursor: not-allowed;
+}
+
+.btn-generate-all {
+  margin-bottom: 12px;
+}
+
+.missing-labels-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  background: white;
+}
+
+.missing-label-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #fef3c7;
+  font-size: 13px;
+}
+
+.missing-label-item:last-child {
+  border-bottom: none;
+}
+
+.missing-label-item .label-path {
+  flex: 1;
+  color: #78350f;
+  font-family: 'Courier New', monospace;
+}
+
+.btn-generate-single {
+  padding: 4px 12px;
+  font-size: 12px;
+  margin-left: 12px;
 }
 
 /* 버킷 동기화 결과 스타일 */

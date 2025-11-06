@@ -151,7 +151,7 @@ export function useYoloDetector() {
       try {
         let query = supabase
           .from('model_registry')
-          .select('model_url, model_path, model_name, model_stage')
+          .select('model_url, model_path, model_name, model_stage, training_metadata')
           .eq('status', 'active')
           .eq('is_active', true)
         
@@ -175,10 +175,25 @@ export function useYoloDetector() {
             activeModel = stage1Model || activeModels[0]
           }
           
+          // training_metadata에서 imgsz 추출하여 inputSize 설정
+          // [FIX] 수정됨: 모델 입력 크기를 training_metadata에서 자동 감지
+          if (activeModel.training_metadata && typeof activeModel.training_metadata === 'object') {
+            const imgsz = activeModel.training_metadata.imgsz
+            if (imgsz && typeof imgsz === 'number' && imgsz > 0) {
+              inputSize = imgsz
+              console.log(`📊 모델 입력 크기 자동 설정: ${inputSize}px (training_metadata.imgsz)`)
+            } else {
+              console.warn(`⚠️ training_metadata.imgsz가 유효하지 않음: ${imgsz}, 기본값 640 사용`)
+            }
+          } else {
+            console.warn(`⚠️ training_metadata가 없음, 기본값 640 사용`)
+          }
+          
           console.log('📊 model_registry 활성 모델 조회 성공:', activeModel.model_name, {
             model_url: activeModel.model_url,
             model_path: activeModel.model_path,
-            model_stage: activeModel.model_stage
+            model_stage: activeModel.model_stage,
+            inputSize: inputSize
           })
           
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
@@ -193,13 +208,18 @@ export function useYoloDetector() {
             console.log(`✅ ONNX model_path 사용: ${activeModelUrl}`)
           } else if (activeModel.model_path && activeModel.model_path.endsWith('.pt')) {
             // .pt 파일 경로에서 .onnx 파일 경로 추론
+            // [FIX] 수정됨: model_path가 .pt인 경우, ONNX 파일이 실제로 업로드되었는지 확인 필요
+            // 학습 스크립트에서 ONNX 변환 실패 시 model_path는 .pt로 저장되지만 ONNX 파일은 없을 수 있음
             const onnxPath = activeModel.model_path.replace(/\.pt$/, '.onnx')
             activeModelUrl = `${supabaseUrl}/storage/v1/object/public/models/${onnxPath}`
             console.log(`🔍 .pt 경로에서 .onnx 추론: ${activeModel.model_path} → ${onnxPath}`)
+            console.log(`⚠️ ONNX 파일이 없을 수 있습니다. 학습 스크립트에서 ONNX 변환이 실패했을 가능성이 있습니다.`)
           } else if (activeModel.model_url && activeModel.model_url.endsWith('.pt')) {
             // model_url이 .pt인 경우 .onnx로 변환하여 시도
+            // [FIX] 수정됨: model_url이 .pt인 경우도 ONNX 파일이 없을 수 있음
             activeModelUrl = activeModel.model_url.replace(/\.pt$/, '.onnx')
             console.log(`🔍 .pt URL에서 .onnx 추론: ${activeModelUrl}`)
+            console.log(`⚠️ ONNX 파일이 없을 수 있습니다. 학습 스크립트에서 ONNX 변환이 실패했을 가능성이 있습니다.`)
           }
         } else {
           console.log('⚠️ model_registry에 활성 모델이 없습니다')
@@ -275,18 +295,21 @@ export function useYoloDetector() {
       graphOptimizationLevel: 'basic'
     })
     const createTime = Date.now() - createStartTime
-    console.log(`✅ ONNX 세션 생성 완료: ${createTime}ms`)
+    
+    // [FIX] 수정됨: 세션에 inputSize 정보 저장 (letterbox에서 사용)
+    createdSession.inputSize = inputSize
+    console.log(`✅ ONNX 세션 생성 완료: ${createTime}ms (inputSize: ${inputSize})`)
     
     // Stage별 세션 저장 (동기적으로 설정하여 즉시 사용 가능)
     if (stage === 'stage1') {
       stage1Session = createdSession
-      console.log('✅ Stage1 모델 세션 저장 완료 및 사용 가능')
+      console.log(`✅ Stage1 모델 세션 저장 완료 및 사용 가능 (inputSize: ${inputSize})`)
     } else if (stage === 'stage2') {
       stage2Session = createdSession
-      console.log('✅ Stage2 모델 세션 저장 완료 및 사용 가능')
+      console.log(`✅ Stage2 모델 세션 저장 완료 및 사용 가능 (inputSize: ${inputSize})`)
     } else {
       session = createdSession
-      console.log('✅ 기본 모델 세션 저장 완료 및 사용 가능')
+      console.log(`✅ 기본 모델 세션 저장 완료 및 사용 가능 (inputSize: ${inputSize})`)
     }
     
     return createdSession
@@ -303,30 +326,38 @@ export function useYoloDetector() {
     }
     
     modelPath = options.modelPath || modelPath
-    inputSize = options.inputSize || inputSize
+    // [FIX] 수정됨: inputSize는 모델 로드 시 training_metadata에서 자동 설정되므로
+    // 명시적으로 options.inputSize가 제공되면 우선 사용, 아니면 모델 로드 시 설정된 값 사용
+    if (options.inputSize && typeof options.inputSize === 'number') {
+      inputSize = options.inputSize
+      console.log(`📊 입력 크기 옵션 사용: ${inputSize}`)
+    }
+    // options.inputSize가 없으면 모델 로드 시 training_metadata에서 설정된 값 사용
     
     return await initStage(stage, options)
   }
 
   // letterbox 리사이즈 (패딩 유지)
-  const letterbox = (img) => {
+  // [FIX] 수정됨: inputSize를 파라미터로 받아서 사용 (세션의 inputSize 지원)
+  const letterbox = (img, targetSize = null) => {
+    const size = targetSize || inputSize
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    canvas.width = inputSize
-    canvas.height = inputSize
+    canvas.width = size
+    canvas.height = size
 
-    const scale = Math.min(inputSize / img.width, inputSize / img.height)
+    const scale = Math.min(size / img.width, size / img.height)
     const newW = Math.round(img.width * scale)
     const newH = Math.round(img.height * scale)
-    const dx = Math.floor((inputSize - newW) / 2)
-    const dy = Math.floor((inputSize - newH) / 2)
+    const dx = Math.floor((size - newW) / 2)
+    const dy = Math.floor((size - newH) / 2)
 
     // 배경을 회색(114)로 채워 일반 YOLO 전처리와 유사하게 함
     ctx.fillStyle = 'rgb(114,114,114)'
-    ctx.fillRect(0, 0, inputSize, inputSize)
+    ctx.fillRect(0, 0, size, size)
     ctx.drawImage(img, dx, dy, newW, newH)
 
-    const imageData = ctx.getImageData(0, 0, inputSize, inputSize)
+    const imageData = ctx.getImageData(0, 0, size, size)
     return { imageData, scale, dx, dy }
   }
 
@@ -387,7 +418,7 @@ export function useYoloDetector() {
   }
 
   // YOLOv8 호환 후처리 (출력 형태 [1,84,8400] 또는 [1,25200,85])
-  const postprocess = (output, imgW, imgH, padDx, padDy, scale, confThreshold = 0.25) => {
+  const postprocess = (output, imgW, imgH, padDx, padDy, scale, confThreshold = 0.25, maxDetections = 50) => {
     const out = output
     const dims = out.dims
     const data = out.data
@@ -413,6 +444,10 @@ export function useYoloDetector() {
             Math.max(0, Math.min(imgH, y2))
           ], score, classId: Math.round(cls) })
         }
+      }
+      // 폐쇄 환경 최적화: maxDetections 제한 적용 // 🔧 수정됨
+      if (dets.length > maxDetections) {
+        return dets.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, maxDetections)
       }
       return dets
     }
@@ -483,7 +518,9 @@ export function useYoloDetector() {
       classes.push(maxCls)
     }
 
-    const keep = nms(boxes, scores, 0.45, 100) // IoU 임계값 0.45 유지
+    // 폐쇄 환경 최적화: topK를 줄여서 과도한 false positive 방지 // 🔧 수정됨
+    const topK = Math.min(maxDetections, 50) // 🔧 수정됨: 기본값 100 → 50
+    const keep = nms(boxes, scores, 0.45, topK) // IoU 임계값 0.45 유지
     return keep.map(i => ({
       box: boxes[i],
       score: scores[i],
@@ -556,8 +593,10 @@ export function useYoloDetector() {
       im.src = imageDataUrl
     })
 
-    const { imageData, scale, dx, dy } = letterbox(img)
-    console.log('🔧 Letterbox 완료:', { scale, dx, dy, size: inputSize })
+    // [FIX] 수정됨: 세션의 inputSize 우선 사용 (training_metadata에서 설정된 값)
+    const sessionInputSize = activeSession.inputSize || inputSize
+    const { imageData, scale, dx, dy } = letterbox(img, sessionInputSize)
+    console.log('🔧 Letterbox 완료:', { scale, dx, dy, size: sessionInputSize })
     
     // 입력 텐서: 항상 NCHW([1,3,H,W])로 생성
     const input = toNchw(imageData)
@@ -600,7 +639,12 @@ export function useYoloDetector() {
     
     console.log('🔧 선택된 출력 텐서:', { dims: output.dims, type: output.type, dataLength: output.data.length })
 
-    const dets = postprocess(output, img.width, img.height, dx, dy, scale, options.confThreshold || 0.15)
+    // 폐쇄 환경 최적화: confidence threshold를 높여서 false positive 감소 // 🔧 수정됨
+    // 기술문서 4.2: conf=0.15는 개방 환경용, 폐쇄 환경에서는 더 보수적으로
+    const confThreshold = options.confThreshold || 0.25 // 🔧 수정됨: 기본값 0.15 → 0.25
+    const maxDetections = options.maxDetections || 50 // 🔧 수정됨: 기본값 50
+    const dets = postprocess(output, img.width, img.height, dx, dy, scale, confThreshold, maxDetections)
+    
     console.log('🔍 YOLO 원시 검출:', dets?.length || 0)
     if (dets.length > 0) {
       console.log('🔍 검출 결과 샘플:', dets.slice(0, 3).map(d => ({ box: d.box, score: d.score, classId: d.classId })))

@@ -826,6 +826,18 @@ export default {
       try {
         console.log('🎯 폐쇄 환경 하이브리드 검출 시작 (FAISS Two-Stage 검색 통합)...')
         
+        // 🔧 디버깅: 전달된 detections 구조 확인
+        console.log(`🔧 전달된 detections 구조:`, {
+          count: detections.length,
+          sample: detections[0] ? {
+            hasFeatures: !!detections[0].features,
+            hasShapeVector: !!detections[0].features?.shape_vector,
+            hasClipEmbedding: !!detections[0].features?.clip_embedding,
+            confidence: detections[0].confidence,
+            featuresKeys: detections[0].features ? Object.keys(detections[0].features) : []
+          } : 'no detections'
+        })
+        
         // 혼동군 인덱스 구축 // 🔧 수정됨
         buildConfusionIndex(bomMetadata)
         resetFAISSStats()
@@ -850,6 +862,9 @@ export default {
         const uniqueParts = Array.from(new Map(
           bomMetadata.map(p => [`${p.part_id}/${p.color_id}`, p])
         ).values())
+        // 단일 BOM 후보 여부 기록 (기술문서 7.1: 고확신 즉시 할당 규칙 적용용) // 🔧 수정됨
+        if (!window.__closedWorldContext) window.__closedWorldContext = {} // 🔧 수정됨
+        window.__closedWorldContext.bomCount = uniqueParts.length // 🔧 수정됨
         
         // 로컬 캐시 일괄 조회 (getVectorFromLocal 직접 사용) // 🔧 수정됨
         const localCachePromises = uniqueParts.map(async (bomPart) => {
@@ -862,7 +877,8 @@ export default {
               if (embedding) {
                 bomEmbeddingsMap.set(partKey, {
                   embedding,
-                  source: 'local'
+                  source: 'local',
+                  metadata: vectorResult.metadata || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
                 })
                 return { partKey, source: 'local' }
               }
@@ -901,7 +917,7 @@ export default {
             // PostgREST 필터 사용 (더 정확한 조합 매칭)
             let query = supabase
               .from('parts_master_features')
-              .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+              .select('part_id, color_id, clip_text_emb, feature_json') // 🔧 수정됨: semantic_vector 제거 (CLIP 모델로 통일)
             
             // 작은 배치(100개 이하)는 개별 조회, 큰 배치는 OR 조건 사용
             if (partColorPairs.length <= 100) {
@@ -909,7 +925,7 @@ export default {
               const promises = partColorPairs.map(pair =>
                 supabase
                   .from('parts_master_features')
-                  .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                  .select('part_id, color_id, clip_text_emb, feature_json') // 🔧 수정됨: semantic_vector 제거 (CLIP 모델로 통일)
                   .eq('part_id', pair.part_id)
                   .eq('color_id', pair.color_id)
                   .maybeSingle()
@@ -925,8 +941,11 @@ export default {
               remoteVectors.forEach(remoteVector => {
                 const partKey = `${remoteVector.part_id}/${remoteVector.color_id}`
                 if (!bomEmbeddingsMap.has(partKey)) {
-                  // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
-                  let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                  // 🔧 수정됨: shape_vector 추출 우선순위 (근본 문제 해결)
+                  // 1. clip_text_emb (CLIP ViT-L/14, 실시간 검출과 동일 모델)
+                  // 2. feature_json.shape_vector (CLIP 기반)
+                  // 🔧 수정됨: semantic_vector 완전 제거 (CLIP 모델로 통일)
+                  let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || null
                   if (embedding) {
                     // 문자열 배열을 숫자 배열로 변환
                     if (Array.isArray(embedding)) {
@@ -935,7 +954,8 @@ export default {
                     if (embedding) {
                       bomEmbeddingsMap.set(partKey, {
                         embedding,
-                        source: 'remote'
+                        source: 'remote',
+                        metadata: remoteVector.feature_json || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
                       })
                     }
                   }
@@ -948,7 +968,7 @@ export default {
               
               const { data: remoteVectors, error: remoteError } = await supabase
                 .from('parts_master_features')
-                .select('part_id, color_id, clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                .select('part_id, color_id, clip_text_emb, feature_json') // 🔧 수정됨: semantic_vector 제거 (CLIP 모델로 통일)
                 .in('part_id', partIds)
                 .in('color_id', colorIds)
             
@@ -961,8 +981,8 @@ export default {
                 remoteVectors.forEach(remoteVector => {
                   const partKey = `${remoteVector.part_id}/${remoteVector.color_id}`
                   if (validPairs.has(partKey) && !bomEmbeddingsMap.has(partKey)) {
-                    // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
-                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                    // 🔧 수정됨: semantic_vector 완전 제거 (CLIP 모델로 통일)
+                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || null
                     if (embedding) {
                       // 문자열 배열을 숫자 배열로 변환
                       if (Array.isArray(embedding)) {
@@ -1072,40 +1092,48 @@ export default {
               .map((d, i) => ({ d, i }))
               .filter(c => !usedDetections.has(c.i))
             
+            // 🔧 수정됨: 후보 검출 객체 디버깅
+            if (q === 0) {
+              console.log(`🔍 후보 검출 객체: ${availableCandidates.length}개 (전체: ${detections.length}개, 사용됨: ${usedDetections.size}개)`)
+            }
+            
             // BOM 부품 후보 벡터 준비 (한 번만 로드)
             const bomPartEmbedding = await (async () => {
               try {
                 const localResult = await searchLocalCache(bomPart.part_id, bomPart.color_id)
                 if (localResult.found) {
                   // 🔧 수정됨: 로컬 벡터도 문자열 배열일 수 있으므로 변환
-                  let embedding = localResult.clip_embedding || localResult.shape_vector
+                  const vectorResult = await getVectorFromLocal(bomPart.part_id, bomPart.color_id)
+                  let embedding = vectorResult.clip_embedding || vectorResult.shape_vector
                   if (embedding && Array.isArray(embedding)) {
                     embedding = normalizeVector(embedding)
                   }
                   if (embedding) {
                     return {
                       embedding,
-                      source: 'local'
+                      source: 'local',
+                      metadata: vectorResult.metadata || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
                     }
                   }
                 } else {
                   const { data: remoteVector } = await supabase
                     .from('parts_master_features')
-                    .select('clip_text_emb, feature_json, semantic_vector') // 🔧 수정됨: semantic_vector 추가
+                    .select('clip_text_emb, feature_json') // 🔧 수정됨: semantic_vector 제거 (CLIP 모델로 통일)
                     .eq('part_id', bomPart.part_id)
                     .eq('color_id', bomPart.color_id)
                     .maybeSingle()
                   
                   if (remoteVector) {
-                    // 🔧 수정됨: semantic_vector 폴백 적용 및 숫자 배열 변환
-                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || remoteVector.semantic_vector
+                    // 🔧 수정됨: semantic_vector 완전 제거 (CLIP 모델로 통일)
+                    let embedding = remoteVector.clip_text_emb || remoteVector.feature_json?.shape_vector || null
                     if (embedding && Array.isArray(embedding)) {
                       embedding = normalizeVector(embedding)
                     }
                     if (embedding) {
                       return {
                         embedding,
-                        source: 'remote'
+                        source: 'remote',
+                        metadata: remoteVector.feature_json || null // 🔧 수정됨: Adaptive Feature Fusion을 위해 메타데이터 저장
                       }
                     }
                   }
@@ -1221,13 +1249,41 @@ export default {
               }
               
               const bomScore = await calculateBOMMatchScore(detection, bomPart)
-              const combinedScore = (hybridScore * 0.6) + (bomScore * 0.4)
+              let combinedScore = (hybridScore * 0.6) + (bomScore * 0.4)
+              // 단일 BOM 후보 + YOLO 고확신(≥0.80) 시 그리디 할당 허용 (기술문서 7.1) // 🔧 수정됨
+              const isSingleBom = (window.__closedWorldContext?.bomCount === 1)
+              if (isSingleBom && (detection?.confidence || 0) >= 0.85 && (hybridScore || 0) >= 0.20) {
+                // 🔧 수정됨: 단일 BOM에서도 최소 벡터 근거가 있을 때만 제한적 부스트
+                combinedScore = Math.max(combinedScore, detection.confidence * 0.90)
+              }
               return { i, detection, combinedScore, source, hybridScore, bomScore }
             })
 
+            // 🔧 수정됨: scored 배열 디버깅
+            console.log(`🔍 [Q=${q}] scored 배열 생성 완료: ${scored.length}개`)
+            if (scored.length > 0 && q === 0) {
+              console.log(`🔍 scored 샘플:`, scored.slice(0, 3).map(s => ({
+                i: s.i,
+                combinedScore: s.combinedScore?.toFixed(3),
+                yoloConf: s.detection?.confidence?.toFixed(3),
+                hybridScore: s.hybridScore?.toFixed(3),
+                bomScore: s.bomScore?.toFixed(3)
+              })))
+            }
+
             // 최고 점수 선택(정밀 검출 모드: 0.85 이상만 허용)
             for (const s of scored) {
-              if (s && s.combinedScore > bestScore && s.combinedScore > 0.85) {
+              const isSingleBom = (window.__closedWorldContext?.bomCount === 1) // 🔧 수정됨
+              const highConf = (s?.detection?.confidence || 0) >= 0.80          // 🔧 수정됨: 0.90 → 0.80 (단일 BOM 최적화)
+              // 🔧 수정됨: 단일 BOM 후보인 경우 임계값 완화 (0.80 이상 또는 combinedScore > 0.70)
+              const passThreshold = isSingleBom ? (highConf || s.combinedScore > 0.70) : (s.combinedScore > 0.85) // 🔧 수정됨
+              
+              // 🔧 수정됨: 매칭 시도 디버깅 (단일 BOM)
+              if (isSingleBom && q === 0) {
+                console.log(`🔍 매칭 시도: ${bomPart.part_id} - combinedScore: ${s.combinedScore.toFixed(3)}, highConf: ${highConf}, passThreshold: ${passThreshold}, bestScore: ${bestScore.toFixed(3)}`)
+              }
+              
+              if (s && s.combinedScore > bestScore && passThreshold) {
                 bestScore = s.combinedScore
                 bestMatch = {
                   ...bomPart,
@@ -1367,6 +1423,7 @@ export default {
       
       // 정밀 검출 모드: 수량 제한을 더 엄격하게 (최대 2개까지만 시도)
       const maxAttempts = Math.min(requiredQuantity, Math.min(availableDetections, 2))
+      const isSingleBom = (window.__closedWorldContext?.bomCount === 1) // 🔧 수정됨: 상위 스코프로 이동
       
       // 필요한 수량만큼 반복하여 매칭 시도
       for (let q = 0; q < maxAttempts; q++) {
@@ -1379,6 +1436,11 @@ export default {
         const availableCandidates = detections
           .map((d, i) => ({ d, i }))
           .filter(c => !usedDetections.has(c.i) && !usedIndices.has(c.i))
+        
+        // 🔧 수정됨: 후보 검출 객체 디버깅
+        if (q === 0) {
+          console.log(`🔍 [processBomPart Q=${q}] 후보 검출 객체: ${availableCandidates.length}개 (전체: ${detections.length}개, 사용됨: ${usedDetections.size}개, 로컬 사용됨: ${usedIndices.size}개)`)
+        }
         
         // 사전 로드된 벡터 사용
         const bomPartEmbedding = bomEmbeddingsMap.get(partKey)
@@ -1501,13 +1563,65 @@ export default {
           }
           
           const bomScore = await calculateBOMMatchScore(detection, bomPart)
-          const combinedScore = (hybridScore * 0.6) + (bomScore * 0.4)
+          // 🔧 수정됨: bomScore가 0일 때도 hybridScore를 활용 (단일 BOM 환경)
+          // isSingleBom은 상위 스코프에서 선언됨
+          let combinedScore = 0
+          if (bomScore > 0) {
+            // bomScore가 있으면 가중 평균 사용
+            combinedScore = (hybridScore * 0.4) + (bomScore * 0.6)
+          } else if (isSingleBom && hybridScore >= 0.20 && (detection?.confidence || 0) >= 0.85) {
+            // 🔧 수정됨: 단일 BOM에서도 최소 벡터 근거와 높은 YOLO가 동시에 있을 때만 보정
+            combinedScore = (hybridScore * 0.6) + ((detection?.confidence || 0) * 0.4)
+          } else {
+            // bomScore가 0이고 조건 미충족 시 hybridScore만 사용 (낮은 점수)
+            combinedScore = hybridScore * 0.3
+          }
+          // 🔧 수정됨: 단일 BOM 그리디 부스트 제거(오검출 억제)
           return { i, detection, combinedScore, source, hybridScore, bomScore }
         })
         
-        // 최고 점수 선택 (정밀 검출 모드: 0.85 이상만 허용)
+        // 🔧 수정됨: scored 배열 디버깅
+        console.log(`🔍 [processBomPart Q=${q}] scored 배열 생성 완료: ${scored.length}개`)
+        if (scored.length > 0 && q === 0) {
+          console.log(`🔍 scored 샘플:`, scored.slice(0, 3).map(s => ({
+            i: s.i,
+            combinedScore: s.combinedScore?.toFixed(3),
+            yoloConf: s.detection?.confidence?.toFixed(3),
+            hybridScore: s.hybridScore?.toFixed(3),
+            bomScore: s.bomScore?.toFixed(3)
+          })))
+        }
+        
+        // 최고 점수 선택 (동적 임계값 시스템 적용) // 🔧 수정됨: 근본 개선
+        // isSingleBom은 상위 스코프에서 선언됨
         for (const s of scored) {
-          if (s && s.combinedScore > bestScore && s.combinedScore > 0.85) {
+          // 🔧 수정됨: 동적 임계값 계산
+          const getDynamicPassThreshold = () => {
+            const baseThreshold = isSingleBom ? 0.70 : 0.85
+            const yoloConf = s?.detection?.confidence || 0
+            
+            // YOLO confidence 보정
+            const yoloAdjustment = yoloConf > 0.85 ? -0.05 : (yoloConf > 0.80 ? -0.03 : 0)
+            
+            // 벡터 유사도 보정
+            const vectorAdjustment = s.hybridScore > 0.20 ? -0.03 : (s.hybridScore > 0.15 ? 0 : 0.05)
+            
+            return baseThreshold + yoloAdjustment + vectorAdjustment
+          }
+          
+          const dynamicThreshold = getDynamicPassThreshold()
+          const highConf = (s?.detection?.confidence || 0) >= 0.80
+          // 🔧 수정됨: 단일 BOM에서는 YOLO 고확신만으로 통과 금지, 최소 벡터 유사도 요구
+          const passThreshold = isSingleBom
+            ? (highConf && s.combinedScore > dynamicThreshold && (s.hybridScore || 0) >= 0.20)
+            : (s.combinedScore > dynamicThreshold)
+          
+          // 🔧 수정됨: 매칭 시도 디버깅 (단일 BOM)
+          if (isSingleBom && q === 0) {
+            console.log(`🔍 [processBomPart] 매칭 시도: ${bomPart.part_id} - combinedScore: ${s.combinedScore.toFixed(3)}, highConf: ${highConf}, passThreshold: ${passThreshold}, bestScore: ${bestScore.toFixed(3)}`)
+          }
+          
+          if (s && s.combinedScore > bestScore && passThreshold) {
             bestScore = s.combinedScore
             bestMatch = {
               ...bomPart,
@@ -1640,10 +1754,22 @@ export default {
       try {
         let score = 0
         
-        // 1. YOLO 검출 신뢰도 확인 (정밀 검출 모드: 최소 0.85 이상)
+        // 🔧 디버깅: detection 구조 확인
+        console.log(`🔧 BOM 매칭 점수 계산: ${bomPart.part_id}`, {
+          hasFeatures: !!detection.features,
+          hasShapeVector: !!detection.features?.shape_vector,
+          hasClipEmbedding: !!detection.features?.clip_embedding,
+          confidence: detection.confidence,
+          featuresKeys: detection.features ? Object.keys(detection.features) : [],
+          shapeVectorType: detection.features?.shape_vector ? (Array.isArray(detection.features.shape_vector) ? `array[${detection.features.shape_vector.length}]` : typeof detection.features.shape_vector) : 'null',
+          clipEmbeddingType: detection.features?.clip_embedding ? (Array.isArray(detection.features.clip_embedding) ? `array[${detection.features.clip_embedding.length}]` : typeof detection.features.clip_embedding) : 'null'
+        })
+        
+        // 1. YOLO 검출 신뢰도 확인 (하이브리드 모드: 최소 0.5 이상) // 🔧 수정됨
         const yoloConfidence = detection.confidence || 0
-        if (yoloConfidence < 0.85) {
-          console.log(`🔧 BOM 매칭 실패: YOLO 신뢰도 부족 (${yoloConfidence.toFixed(3)} < 0.85, 정밀 모드)`)
+        const confThreshold = 0.5 // 🔧 수정됨: 0.85 → 0.5 (하이브리드 모드 최적화)
+        if (yoloConfidence < confThreshold) {
+          console.log(`🔧 BOM 매칭 실패: YOLO 신뢰도 부족 (${yoloConfidence.toFixed(3)} < ${confThreshold}, 하이브리드 모드)`)
           return 0
         }
         
@@ -1656,26 +1782,54 @@ export default {
           hybridScore = await compareRemoteVectors(detection, bomPart)
         }
         
-        // 3. 벡터 유사도 검증 (정밀 검출 모드: 최소 0.85 이상 필요)
-        if (hybridScore < 0.85) {
-          console.log(`🔧 BOM 매칭 실패: 벡터 유사도 부족 (${hybridScore.toFixed(3)} < 0.85, 정밀 모드)`)
+        // 3. 벡터 유사도 검증 (동적 임계값 시스템 적용) // 🔧 수정됨: 근본 개선
+        const isSingleBom = (window.__closedWorldContext?.bomCount === 1)
+        
+        // 🔧 수정됨: 동적 임계값 계산 (이미지 품질, 부품 종류, 환경 고려)
+        const getDynamicThreshold = () => {
+          const baseThreshold = 0.20
+          
+          // 단일 BOM 보정
+          const bomAdjustment = isSingleBom ? -0.05 : 0
+          
+          // YOLO confidence 보정
+          const yoloAdjustment = yoloConfidence > 0.85 ? -0.03 : (yoloConfidence > 0.80 ? -0.02 : 0)
+          
+          // 이미지 품질 보정 (크롭 크기 기반 추정)
+          const cropQuality = detection.boundingBox ? 
+            Math.min(1.0, (detection.boundingBox.width * detection.boundingBox.height) / 0.01) : 0.5
+          const qualityAdjustment = (1 - cropQuality) * 0.05
+          
+          return baseThreshold + bomAdjustment + yoloAdjustment + qualityAdjustment
+        }
+        
+        const dynamicThreshold = getDynamicThreshold()
+        
+        // 벡터 유사도가 동적 임계값 이상이면 정상 매칭
+        if (hybridScore >= dynamicThreshold) {
+          // 🔧 수정됨: 상황별 가중치 조정 (단일 BOM에서도 YOLO 가중 완화)
+          const yoloWeight = isSingleBom ? 0.4 : 0.4
+          const vectorWeight = 1 - yoloWeight
+          score = (yoloConfidence * yoloWeight) + (hybridScore * vectorWeight)
+        } else if (!isSingleBom && hybridScore >= 0.18 && yoloConfidence >= 0.85) {
+          // 🔧 수정됨: 다중 BOM 환경에서는 더 엄격한 조건 (벡터 유사도 0.18 이상 AND YOLO confidence 0.85 이상)
+          score = yoloConfidence * 0.85 // 페널티 적용
+          console.log(`🔧 BOM 매칭: 다중 BOM - 낮은 벡터 유사도(${hybridScore.toFixed(3)})지만 높은 YOLO confidence(${yoloConfidence.toFixed(3)})로 폴백`)
+        } else {
+          // 벡터 유사도가 너무 낮으면 매칭 실패 (잘못된 부품 방지)
+          console.log(`🔧 BOM 매칭 실패: 벡터 유사도(${hybridScore.toFixed(3)}) < 동적 임계값(${dynamicThreshold.toFixed(3)}) 및 YOLO confidence(${yoloConfidence.toFixed(3)}) 조건 미충족 (단일 BOM: ${isSingleBom})`)
           return 0
         }
         
-        // 4. 최종 점수: YOLO 신뢰도와 벡터 유사도의 가중 평균
-        score = (yoloConfidence * 0.3) + (hybridScore * 0.7)
-        
-        // 5. 최종 점수 검증 (정밀 검출 모드: 최소 0.80 이상 필요)
-        if (score < 0.80) {
-          console.log(`🔧 BOM 매칭 실패: 최종 점수 부족 (${score.toFixed(3)} < 0.80, 정밀 모드)`)
+        // 4. 최종 점수 검증 (하이브리드 모드: 최소 0.50 이상 필요) // 🔧 수정됨
+        const scoreThreshold = isSingleBom ? 0.55 : 0.50 // 🔧 수정됨: 단일 BOM에서 최종 임계 상향
+        if (score < scoreThreshold) {
+          console.log(`🔧 BOM 매칭 실패: 최종 점수 부족 (${score.toFixed(3)} < ${scoreThreshold}, 하이브리드 모드)`)
           return 0
         }
         
-        // 6. 추가 검증: YOLO 신뢰도와 벡터 유사도 모두 0.85 이상이어야 함
-        if (yoloConfidence < 0.85 || hybridScore < 0.85) {
-          console.log(`🔧 BOM 매칭 실패: 개별 검증 실패 (YOLO: ${yoloConfidence.toFixed(3)}, 벡터: ${hybridScore.toFixed(3)})`)
-          return 0
-        }
+        // 🔧 수정됨: 개별 검증 제거 (최종 점수만으로 판단)
+        console.log(`✅ BOM 매칭 성공: ${bomPart.part_id} (YOLO: ${yoloConfidence.toFixed(3)}, 벡터: ${hybridScore.toFixed(3)}, 최종: ${score.toFixed(3)})`)
         
         // 안전 클램프
         if (!Number.isFinite(score)) return 0
@@ -1689,6 +1843,23 @@ export default {
 
     // 벡터를 숫자 배열로 변환 (문자열 배열 처리) // 🔧 수정됨
     const normalizeVector = (vec) => {
+      // 🔧 수정됨: PostgreSQL vector 타입 문자열 처리 추가 (예: "[0.1,0.2,0.3]")
+      if (typeof vec === 'string') {
+        try {
+          // PostgreSQL vector 형식: "[0.1,0.2,0.3]" → 배열로 파싱
+          const parsed = JSON.parse(vec)
+          if (Array.isArray(parsed)) {
+            vec = parsed
+          } else {
+            console.warn('벡터 문자열 파싱 실패: JSON 배열이 아님', vec.substring(0, 50))
+            return null
+          }
+        } catch (err) {
+          console.warn('벡터 문자열 파싱 실패:', err.message, vec.substring(0, 50))
+          return null
+        }
+      }
+      
       if (!Array.isArray(vec)) return null
       // 이미 숫자 배열이면 그대로 반환
       if (vec.length > 0 && typeof vec[0] === 'number') return vec
@@ -1995,11 +2166,12 @@ export default {
         
         console.log(`📊 검출 방법: ${detectionMethod}, 검출된 객체: ${detections.length}개`)
         
-        // YOLO 검출 결과 필터링 (신뢰도가 높은 상위 5개만 사용, 정밀 검출 모드)
+        // YOLO 검출 결과 필터링 (신뢰도가 높은 상위 5개만 사용) // 🔧 수정됨
         if (detectionMethod === 'YOLO' && detections.length > 5) {
+          const confThreshold = 0.70 // 🔧 수정됨: 0.5 → 0.70 (잘못된 검출 방지)
           const filteredDetections = detections
-            .filter(d => d.confidence > 0.85) // 정밀 검출: 신뢰도 0.85 이상만
-            .slice(0, 5) // 최대 5개만
+            .filter(d => d.confidence > confThreshold) // 🔧 수정됨: 임계값 상향 (정확도 향상)
+            .slice(0, 10) // 🔧 수정됨: 최대 5개 → 10개 (더 많은 후보 허용)
             .map(d => ({
               ...d,
               x: d.boundingBox.x * srcW,
@@ -2007,8 +2179,10 @@ export default {
               width: d.boundingBox.width * srcW,
               height: d.boundingBox.height * srcH
             }))
+            // 🔧 수정됨: 지나치게 작은 bbox 제거 (오검출 억제)
+            .filter(d => (d.width * d.height) / (srcW * srcH) >= 0.01)
           
-          console.log(`🔍 YOLO 필터링: ${detections.length}개 → ${filteredDetections.length}개 (신뢰도 > 0.85, 정밀 모드)`)
+          console.log(`🔍 YOLO 필터링: ${detections.length}개 → ${filteredDetections.length}개 (신뢰도 > ${confThreshold}, 하이브리드 모드)`)
           detections = filteredDetections
         }
         
@@ -2036,66 +2210,109 @@ export default {
         
         // AI 메타데이터를 활용한 검출 결과 향상 (최적화: 상위 5개만 처리)
         console.log('🤖 AI 메타데이터 조회 시작...')
-        const topDetections = detections
-          .sort((a, b) => b.confidence - a.confidence)
-          .slice(0, 5) // 상위 5개만 처리하여 성능 최적화
-        
-        console.log(`🤖 상위 ${topDetections.length}개 검출에 대해 AI 메타데이터 조회`)
         
         // BOM 부품 목록을 한 번만 가져와서 재사용
         const bomPartIds = bomParts.value?.map(part => part.part_id) || []
         console.log(`🤖 BOM 부품 목록: ${bomPartIds.length}개 부품`)
         
-        const enhancedDetections = await Promise.all(topDetections.map(async (detection, index) => {
-          try {
-            console.log(`🤖 검출 ${index + 1}/${topDetections.length} AI 메타데이터 조회 중...`)
-            // AI 메타데이터 조회 (parts_master_features 테이블)
-            const aiMetadata = await getAIMetadataForDetection(detection, bomParts.value)
-            console.log(`🤖 검출 ${index + 1} AI 메타데이터:`, {
-              found: !!aiMetadata,
-              part_id: aiMetadata?.part_id,
-              confidence: aiMetadata?.confidence,
-              hasFeatures: !!aiMetadata?.feature_json
-            })
-            
-            // 🔧 수정됨: clip_text_emb를 숫자 배열로 변환하여 features에 저장
-            let clipEmbedding = null
-            if (aiMetadata?.clip_text_emb) {
-              clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
-            }
-            
-            return {
-              ...detection,
-              // 🔧 수정됨: 변환된 clip_embedding 사용
-              features: aiMetadata ? {
-                shape_vector: clipEmbedding || null, // semantic_vector 대신 clip_text_emb 사용 (일단)
-                color_lab: aiMetadata.feature_json?.color || null,
-                size_stud: aiMetadata.feature_json?.size || null,
-                clip_embedding: clipEmbedding // 🔧 수정됨: 숫자 배열로 변환된 값 사용
-              } : null,
-              ai_metadata: aiMetadata,
-              confidence_boost: aiMetadata?.detection_priority || aiMetadata?.similarity || 1.0
-            }
-          } catch (err) {
-            console.warn(`🤖 검출 ${index + 1} AI 메타데이터 조회 실패:`, err.message)
-            return {
-              ...detection,
-              features: null,
-              ai_metadata: null,
-              confidence_boost: 1.0
-            }
-          }
-        }))
+        // 🔧 수정됨: 300개 부품 누락 검출 최적화 - 모든 검출 객체에 대해 이미지 임베딩 생성
+        // 정확도 최대화를 위해 모든 검출 객체를 처리하되, 병렬 처리로 성능 최적화
+        const sortedDetections = detections.sort((a, b) => b.confidence - a.confidence)
         
-        // 나머지 검출들은 기본 처리
-        const remainingDetections = detections.slice(10).map(detection => ({
-          ...detection,
-          features: null,
-          ai_metadata: null,
-          confidence_boost: 1.0
-        }))
+        console.log(`🤖 이미지 임베딩 생성: 총 ${sortedDetections.length}개 검출 객체 모두 처리 (정확도 최대화)`)
+        console.log(`🤖 병렬 처리로 성능 최적화 (동시 처리: 10개)`)
         
-        const allEnhancedDetections = [...enhancedDetections, ...remainingDetections]
+        // 🔧 수정됨: 병렬 처리 제한으로 성능 최적화 (동시에 10개씩 처리)
+        const CONCURRENT_LIMIT = 10
+        const enhancedDetections = []
+        
+        for (let i = 0; i < sortedDetections.length; i += CONCURRENT_LIMIT) {
+          const batch = sortedDetections.slice(i, i + CONCURRENT_LIMIT)
+          const batchResults = await Promise.all(batch.map(async (detection, batchIndex) => {
+            const globalIndex = i + batchIndex
+            try {
+              // 진행률 로그 (100개마다)
+              if (globalIndex % 100 === 0 || globalIndex === sortedDetections.length - 1) {
+                console.log(`🤖 진행률: ${globalIndex + 1}/${sortedDetections.length} (${((globalIndex + 1) / sortedDetections.length * 100).toFixed(1)}%)`)
+              }
+              
+              // 🔧 수정됨: 기술문서 5.1에 따라 크롭된 이미지에서 CLIP 이미지 임베딩 생성
+              // 이미지 임베딩을 먼저 생성하여 features를 설정한 후 AI 메타데이터 조회
+              let imageEmbedding = null
+              if (detection.image) {
+                // 🔧 수정됨: 실시간 모드에서 원본 이미지인 경우 자동 크롭
+                const sourceImage = imageData // 하이브리드 검출 시 원본 이미지
+                imageEmbedding = await generateCLIPImageEmbedding(detection.image, detection, sourceImage)
+                if (imageEmbedding) {
+                  if (globalIndex < 5 || globalIndex % 50 === 0) {
+                    console.log(`✅ 검출 ${globalIndex + 1} CLIP 이미지 임베딩 생성 완료: ${imageEmbedding.length}차원`)
+                  }
+                } else {
+                  if (globalIndex < 5) {
+                    console.warn(`⚠️ 검출 ${globalIndex + 1} CLIP 이미지 임베딩 생성 실패`)
+                  }
+                }
+              }
+              
+              // 🔧 수정됨: 이미지 임베딩이 있으면 먼저 features 설정
+              if (imageEmbedding) {
+                detection.features = {
+                  shape_vector: imageEmbedding,
+                  clip_embedding: imageEmbedding
+                }
+              }
+              
+              // AI 메타데이터 조회 (parts_master_features 테이블)
+              // 🔧 수정됨: 이미지 임베딩이 설정된 detection을 전달하여 폴백 매칭 방지
+              const aiMetadata = await getAIMetadataForDetection(detection, bomParts.value)
+              
+              if (globalIndex < 5) {
+                console.log(`🤖 검출 ${globalIndex + 1} AI 메타데이터:`, {
+                  found: !!aiMetadata,
+                  part_id: aiMetadata?.part_id,
+                  confidence: aiMetadata?.confidence,
+                  hasFeatures: !!aiMetadata?.feature_json,
+                  hasImageEmbedding: !!imageEmbedding,
+                  hasDetectionFeatures: !!detection.features
+                })
+              }
+              
+              // 🔧 수정됨: 이미지 임베딩 우선 사용 (폴백 매칭 features 무시)
+              let clipEmbedding = imageEmbedding // 🔧 수정됨: 이미지 임베딩 우선
+              if (!clipEmbedding && aiMetadata?.clip_text_emb) {
+                clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
+              }
+              
+              // 🔧 수정됨: 이미지 임베딩이 있으면 항상 우선 사용 (폴백 매칭 features 덮어쓰기)
+              const finalFeatures = (imageEmbedding || clipEmbedding) ? {
+                shape_vector: imageEmbedding || clipEmbedding, // 🔧 수정됨: 이미지 임베딩 우선
+                color_lab: aiMetadata?.feature_json?.color || null,
+                size_stud: aiMetadata?.feature_json?.size || null,
+                clip_embedding: imageEmbedding || clipEmbedding // 🔧 수정됨: 이미지 임베딩 우선
+              } : (aiMetadata?.features || null) // 이미지 임베딩이 없을 때만 폴백 features 사용
+              
+              return {
+                ...detection,
+                features: finalFeatures,
+                ai_metadata: aiMetadata,
+                confidence_boost: aiMetadata?.detection_priority || aiMetadata?.similarity || 1.0
+              }
+            } catch (err) {
+              if (globalIndex < 5) {
+                console.warn(`🤖 검출 ${globalIndex + 1} AI 메타데이터 조회 실패:`, err.message)
+              }
+              return {
+                ...detection,
+                features: null,
+                ai_metadata: null,
+                confidence_boost: 1.0
+              }
+            }
+          }))
+          enhancedDetections.push(...batchResults)
+        }
+        
+        const allEnhancedDetections = enhancedDetections
         
         console.log('🤖 AI 메타데이터 처리 완료:', {
           totalCount: allEnhancedDetections.length,
@@ -2250,18 +2467,55 @@ export default {
         const { detectPartsWithYOLO } = useOptimizedRealtimeDetection()
         const detections = await detectPartsWithYOLO(imageData)
 
-        const enhancedDetections = await Promise.all(detections.map(async (detection) => {
+        // 🔧 수정됨: 성능 최적화 - 상위 검출 객체만 처리 (신뢰도 기준)
+        const sortedDetections = detections
+          .sort((a, b) => b.confidence - a.confidence)
+        const topDetections = sortedDetections.slice(0, 20) // 상위 20개만 처리
+        const remainingDetections = sortedDetections.slice(20) // 나머지는 기본 처리
+        
+        console.log(`🖼️ 업로드 검출: 총 ${detections.length}개 중 상위 ${topDetections.length}개만 이미지 임베딩 생성`)
+
+        const enhancedTopDetections = await Promise.all(topDetections.map(async (detection, index) => {
+          // 🔧 수정됨: 기술문서 5.1에 따라 크롭된 이미지에서 CLIP 이미지 임베딩 생성
+          let imageEmbedding = null
+          if (detection.image) {
+            console.log(`🖼️ 업로드 검출 ${index + 1}/${topDetections.length} 크롭 이미지에서 CLIP 이미지 임베딩 생성 중...`)
+            imageEmbedding = await generateCLIPImageEmbedding(detection.image, detection, imageData)
+            if (imageEmbedding) {
+              console.log(`✅ 업로드 검출 ${index + 1} CLIP 이미지 임베딩 생성 완료: ${imageEmbedding.length}차원`)
+            } else {
+              console.warn(`⚠️ 업로드 검출 ${index + 1} CLIP 이미지 임베딩 생성 실패`)
+            }
+          }
+          
           const aiMetadata = await getAIMetadataForDetection(detection, bomParts.value)
+          
+          // 이미지 임베딩 우선, 없으면 DB의 clip_text_emb 사용
+          let clipEmbedding = imageEmbedding
+          if (!clipEmbedding && aiMetadata?.clip_text_emb) {
+            clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
+          }
+          
           return {
             ...detection,
-            features: aiMetadata ? {
-              shape_vector: aiMetadata.clip_text_emb || null,
-              color_lab: aiMetadata.feature_json?.color || null,
-              size_stud: aiMetadata.feature_json?.size || null
+            features: (imageEmbedding || clipEmbedding) ? {
+              shape_vector: imageEmbedding || clipEmbedding,
+              color_lab: aiMetadata?.feature_json?.color || null,
+              size_stud: aiMetadata?.feature_json?.size || null,
+              clip_embedding: imageEmbedding || clipEmbedding
             } : null,
             ai_metadata: aiMetadata
           }
         }))
+        
+        // 나머지 검출들은 기본 처리 (이미지 임베딩 없이)
+        const enhancedRemainingDetections = remainingDetections.map(detection => ({
+          ...detection,
+          features: null,
+          ai_metadata: null
+        }))
+        
+        const enhancedDetections = [...enhancedTopDetections, ...enhancedRemainingDetections]
 
         const closedWorldMetadata = applyClosedWorldFilters(setMetadata.value.partsMetadata)
         const closedWorldResult = await performBOMBasedHybridDetection(enhancedDetections, closedWorldMetadata)
@@ -2567,9 +2821,28 @@ export default {
             console.log(`🤖 실시간 AI 메타데이터 매칭 시작: ${filteredDetections.length}개 검출, ${bomList.length}개 BOM 부품`)
             
             // 각 검출 결과에 대해 BOM 부품과 벡터 유사도 비교
-            for (const detection of filteredDetections.slice(0, 10)) { // 상위 10개만 처리 (성능)
+            for (let i = 0; i < Math.min(filteredDetections.length, 10); i++) { // 상위 10개만 처리 (성능)
+              const detection = filteredDetections[i]
               try {
+                // 🔧 수정됨: 기술문서 5.1에 따라 크롭된 이미지에서 CLIP 이미지 임베딩 생성
+                let imageEmbedding = null
+                if (detection.image) {
+                  console.log(`🖼️ 실시간 검출 ${i + 1} 크롭 이미지에서 CLIP 이미지 임베딩 생성 중...`)
+                  imageEmbedding = await generateCLIPImageEmbedding(detection.image, detection, imageData)
+                  if (imageEmbedding) {
+                    console.log(`✅ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 완료: ${imageEmbedding.length}차원`)
+                  } else {
+                    console.warn(`⚠️ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 실패`)
+                  }
+                }
+                
                 const aiMetadata = await getAIMetadataForDetection(detection, bomList)
+                
+                // 이미지 임베딩 우선, 없으면 DB의 clip_text_emb 사용
+                let clipEmbedding = imageEmbedding
+                if (!clipEmbedding && aiMetadata?.clip_text_emb) {
+                  clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
+                }
                 
                 if (aiMetadata && aiMetadata.part_id) {
                   // BOM 부품과 매칭된 경우만 추가
@@ -2578,6 +2851,12 @@ export default {
                     console.log(`✅ 실시간 매칭 성공: 검출 confidence=${detection.confidence.toFixed(3)}, part_id=${aiMetadata.part_id}, similarity=${aiMetadata.confidence?.toFixed(3) || 'N/A'}`)
                     enhancedDetections.push({
                       ...detection,
+                      features: (imageEmbedding || clipEmbedding) ? {
+                        shape_vector: imageEmbedding || clipEmbedding,
+                        color_lab: aiMetadata?.feature_json?.color || null,
+                        size_stud: aiMetadata?.feature_json?.size || null,
+                        clip_embedding: imageEmbedding || clipEmbedding
+                      } : null,
                       ai_metadata: aiMetadata,
                       polygon_uv: detection.polygon_uv || (() => {
                         const centerX = detection.x / srcW
@@ -2595,7 +2874,7 @@ export default {
                   }
                 }
               } catch (err) {
-                console.warn(`⚠️ 실시간 AI 메타데이터 매칭 실패 (검출 1개):`, err.message)
+                console.warn(`⚠️ 실시간 AI 메타데이터 매칭 실패 (검출 ${i + 1}):`, err.message)
               }
             }
             
@@ -3623,6 +3902,199 @@ export default {
       console.log('⏹️ 실시간 검출 중지')
     }
 
+    // 이미지 크롭 유틸리티 함수 (tight-crop 규칙 적용: 기술문서 5.1) // 🔧 수정됨: 근본 원인 해결
+    const cropToDataUrl = (imageDataUrl, boundingBox) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => {
+          try {
+            // 실제 이미지 크기 확인
+            const imgW = img.width || img.naturalWidth
+            const imgH = img.height || img.naturalHeight
+            
+            if (!imgW || !imgH) {
+              reject(new Error('이미지 크기를 확인할 수 없습니다'))
+              return
+            }
+            
+            // 정규화된 좌표를 픽셀 좌표로 변환
+            let x = Math.max(0, Math.round(boundingBox.x * imgW))
+            let y = Math.max(0, Math.round(boundingBox.y * imgH))
+            let width = Math.max(1, Math.round(boundingBox.width * imgW))
+            let height = Math.max(1, Math.round(boundingBox.height * imgH))
+            
+            // 🔧 수정됨: tight-crop 규칙 적용 (패딩 및 최소 크기 보장)
+            const MIN_CROP_SIZE = 128  // CLIP 입력 최적화를 위한 최소 크기
+            const PADDING_RATIO = 0.15  // 15% 패딩 (기술문서 5.1)
+            
+            // 패딩 적용
+            const paddingX = Math.max(0, Math.round(width * PADDING_RATIO))
+            const paddingY = Math.max(0, Math.round(height * PADDING_RATIO))
+            
+            x = Math.max(0, x - paddingX)
+            y = Math.max(0, y - paddingY)
+            width = Math.min(imgW - x, width + paddingX * 2)
+            height = Math.min(imgH - y, height + paddingY * 2)
+            
+            // 최소 크기 보장 (정사각형 유지)
+            if (width < MIN_CROP_SIZE || height < MIN_CROP_SIZE) {
+              const scale = Math.max(MIN_CROP_SIZE / width, MIN_CROP_SIZE / height)
+              const newW = Math.min(imgW, Math.round(width * scale))
+              const newH = Math.min(imgH, Math.round(height * scale))
+              
+              // 중앙 정렬
+              x = Math.max(0, Math.min(imgW - newW, x - (newW - width) / 2))
+              y = Math.max(0, Math.min(imgH - newH, y - (newH - height) / 2))
+              width = newW
+              height = newH
+            }
+            
+            // 경계 검사
+            const x1 = Math.min(x, imgW - 1)
+            const y1 = Math.min(y, imgH - 1)
+            const x2 = Math.min(x + width, imgW)
+            const y2 = Math.min(y + height, imgH)
+            const w = Math.max(MIN_CROP_SIZE, x2 - x1)
+            const h = Math.max(MIN_CROP_SIZE, y2 - y1)
+            
+            // 🔧 수정됨: 크롭 품질 로깅
+            if (w < 64 || h < 64) {
+              console.warn(`⚠️ 작은 크롭 이미지: ${w}x${h} (원본: ${imgW}x${imgH}, bbox: ${(boundingBox.width * 100).toFixed(1)}% x ${(boundingBox.height * 100).toFixed(1)}%)`)
+            }
+            
+            const canvas = document.createElement('canvas')
+            canvas.width = w
+            canvas.height = h
+            const ctx = canvas.getContext('2d')
+            ctx.drawImage(img, x1, y1, w, h, 0, 0, w, h)
+            resolve(canvas.toDataURL('image/png'))
+          } catch (err) {
+            reject(err)
+          }
+        }
+        img.onerror = () => reject(new Error('이미지 로드 실패'))
+        img.src = imageDataUrl
+      })
+    }
+
+    // CLIP 이미지 임베딩 생성 함수 (기술문서 5.1: 크롭된 이미지에서 임베딩 추출)
+    const generateCLIPImageEmbedding = async (imageDataUrl, detection = null, sourceImage = null) => {
+      try {
+        // 🔧 수정됨: 실시간 모드에서 원본 이미지인 경우 크롭 필요
+        let croppedImage = imageDataUrl
+        
+        if (detection && detection.boundingBox) {
+          // 이미지 크기 확인 (이미지가 원본인지 크롭된 것인지 판단)
+          const img = new Image()
+          await new Promise((resolve, reject) => {
+            img.onload = resolve
+            img.onerror = reject
+            img.src = imageDataUrl
+          })
+          
+          const imgW = img.width || img.naturalWidth
+          const imgH = img.height || img.naturalHeight
+          
+          if (!imgW || !imgH) {
+            throw new Error('이미지 크기를 확인할 수 없습니다')
+          }
+          
+          // boundingBox를 사용하여 예상 크롭 크기 계산
+          const bbox = detection.boundingBox
+          
+          // 🔧 수정됨: boundingBox 유효성 검사
+          if (!bbox || typeof bbox.width !== 'number' || typeof bbox.height !== 'number' || 
+              bbox.width <= 0 || bbox.height <= 0 || bbox.width > 1 || bbox.height > 1) {
+            console.warn('⚠️ 유효하지 않은 boundingBox, 원본 이미지 사용:', bbox)
+            croppedImage = imageDataUrl
+          } else {
+            const expectedCropW = Math.max(1, Math.round(bbox.width * imgW))
+            const expectedCropH = Math.max(1, Math.round(bbox.height * imgH))
+            
+            // 원본 이미지 크기 확인 (sourceImage가 제공된 경우)
+            let sourceW = imgW
+            let sourceH = imgH
+            if (sourceImage) {
+              const sourceImg = new Image()
+              await new Promise((resolve, reject) => {
+                sourceImg.onload = resolve
+                sourceImg.onerror = reject
+                sourceImg.src = sourceImage
+              })
+              sourceW = sourceImg.width || sourceImg.naturalWidth
+              sourceH = sourceImg.height || sourceImg.naturalHeight
+            }
+            
+            // 이미지가 원본 크기인지 확인
+            // 크롭된 이미지는 보통 boundingBox 영역과 비슷한 크기 (오차 20% 이내)
+            // 원본 이미지는 boundingBox 영역보다 훨씬 큼
+            const cropRatioW = expectedCropW / imgW
+            const cropRatioH = expectedCropH / imgH
+            
+            // 크롭 판단 기준:
+            // 1. boundingBox가 이미지의 80% 이상이면 이미 크롭된 것으로 간주
+            // 2. 또는 sourceImage가 제공되고, detection.image 크기가 sourceImage와 비슷하면 원본으로 간주
+            const isLikelyCropped = cropRatioW >= 0.8 && cropRatioH >= 0.8
+            const isLikelyOriginal = sourceImage && Math.abs(imgW - sourceW) < 50 && Math.abs(imgH - sourceH) < 50
+            
+            if (!isLikelyCropped && !isLikelyOriginal && expectedCropW > 0 && expectedCropH > 0) {
+              console.log(`🔧 원본 이미지 감지, 크롭 수행: ${imgW}x${imgH} → ${expectedCropW}x${expectedCropH} (비율: ${(cropRatioW * 100).toFixed(1)}% x ${(cropRatioH * 100).toFixed(1)}%)`)
+              croppedImage = await cropToDataUrl(imageDataUrl, bbox)
+            } else {
+              console.log(`✅ 이미 크롭된 이미지로 판단: ${imgW}x${imgH} (예상 크롭: ${expectedCropW}x${expectedCropH}, 비율: ${(cropRatioW * 100).toFixed(1)}% x ${(cropRatioH * 100).toFixed(1)}%)`)
+            }
+          }
+        }
+        
+        const clipServiceUrl = import.meta.env.VITE_CLIP_SERVICE_URL || 'http://localhost:3021'
+        
+        // 🔧 수정됨: base64 데이터 URL 처리
+        let imageBase64 = croppedImage
+        if (croppedImage.startsWith('data:image')) {
+          imageBase64 = croppedImage.split(',')[1]
+        }
+        
+        const response = await fetch(`${clipServiceUrl}/v1/image-embeddings`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            image_base64: imageBase64,
+            model: 'clip-vit-l/14',
+            dimensions: 768
+          })
+        })
+        
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => '')
+          // 🔧 수정됨: 404 오류 시 서비스 실행 여부 확인
+          if (response.status === 404) {
+            console.warn(`⚠️ CLIP 서비스 엔드포인트를 찾을 수 없습니다: ${clipServiceUrl}/v1/image-embeddings`)
+            console.warn(`⚠️ CLIP 서비스가 실행 중인지 확인하세요: python server/clip-embedding-service.py`)
+          }
+          throw new Error(`CLIP 이미지 임베딩 API 오류: ${response.status} ${errorText}`)
+        }
+        
+        const data = await response.json()
+        const embedding = data?.data?.[0]?.embedding || null
+        
+        if (!embedding || !Array.isArray(embedding)) {
+          throw new Error('CLIP 이미지 임베딩 응답 형식 오류')
+        }
+        
+        if (embedding.length !== 768) {
+          throw new Error(`CLIP 이미지 임베딩 차원 오류: 예상 768, 실제 ${embedding.length}`)
+        }
+        
+        console.log(`✅ CLIP 이미지 임베딩 생성 완료: ${embedding.length}차원`)
+        return embedding
+      } catch (err) {
+        console.warn('CLIP 이미지 임베딩 생성 실패:', err.message)
+        return null
+      }
+    }
+
     // AI 메타데이터 조회 함수 (최적화됨)
     const getAIMetadataForDetection = async (detection, bomData) => {
       try {
@@ -3646,7 +4118,6 @@ export default {
             part_name,
             feature_json,
             clip_text_emb,
-            semantic_vector,
             recognition_hints,
             confidence,
             usage_frequency
@@ -3664,20 +4135,45 @@ export default {
         
         // 검출된 객체와 가장 유사한 부품 찾기 (벡터 비교 기반)
         if (data && data.length > 0) {
+          // 🔧 수정됨: 이미지 임베딩이 이미 생성된 경우 폴백 매칭 건너뛰기
+          const hasImageEmbedding = detection.features?.shape_vector || detection.features?.clip_embedding
+          
           // 검출 객체에 features가 없으면 폴백 모드로 전환
-          if (!detection.features || !detection.features.clip_embedding) {
+          if (!hasImageEmbedding) {
             console.log(`🤖 검출 객체에 features 없음 - YOLO confidence 기반 폴백 매칭 시도`)
             
             // 폴백: BOM 부품이 1개이고 YOLO confidence가 높으면 매칭
-            if (data.length === 1 && detection.confidence >= 0.85) {
+            // 실시간 검출 모드에서는 features가 없으므로 더 낮은 임계값 사용 // 🔧 수정됨
+            const fallbackThreshold = 0.80 // 🔧 수정됨: 0.85 → 0.80 (실시간 검출 최적화)
+            if (data.length === 1 && detection.confidence >= fallbackThreshold) {
               const candidate = data[0]
-              console.log(`🤖 폴백 매칭 성공: ${candidate.part_id} (YOLO confidence: ${detection.confidence.toFixed(3)})`)
+              console.log(`🤖 폴백 매칭 성공: ${candidate.part_id} (YOLO confidence: ${detection.confidence.toFixed(3)}, 임계값: ${fallbackThreshold})`)
               
               // 🔧 수정됨: 폴백 매칭에서도 features 설정 (벡터 비교를 위해)
               let clipEmbedding = null
               if (candidate.clip_text_emb) {
                 clipEmbedding = normalizeVector(candidate.clip_text_emb)
+                console.log(`🔧 폴백 매칭 clipEmbedding 변환:`, {
+                  hasClipTextEmb: !!candidate.clip_text_emb,
+                  clipTextEmbType: Array.isArray(candidate.clip_text_emb) ? `array[${candidate.clip_text_emb.length}]` : typeof candidate.clip_text_emb,
+                  clipEmbeddingConverted: !!clipEmbedding,
+                  clipEmbeddingType: clipEmbedding ? (Array.isArray(clipEmbedding) ? `array[${clipEmbedding.length}]` : typeof clipEmbedding) : 'null'
+                })
               }
+              
+              // 🔧 수정됨: shape_vector 추출 우선순위 변경 (근본 문제 해결)
+              // 🔧 수정됨: semantic_vector 완전 제거 (CLIP 모델로 통일)
+              // 1. feature_json.shape_vector (CLIP 기반, 최우선)
+              // 2. clip_text_emb (CLIP ViT-L/14, 실시간 검출과 동일 모델)
+              // 3. semantic_vector는 사용 안 함 (FGC Encoder, CLIP과 호환 불가)
+              let shapeVector = null
+              if (candidate.feature_json?.shape_vector) {
+                shapeVector = normalizeVector(candidate.feature_json.shape_vector)
+              } else if (clipEmbedding) {
+                // clip_text_emb를 shape_vector로 사용 (동일 모델)
+                shapeVector = clipEmbedding
+              }
+              // semantic_vector는 제거됨 (근본 원인 해결)
               
               return {
                 ...candidate,
@@ -3686,9 +4182,9 @@ export default {
                 similarity: 0.8, // 폴백 매칭은 중간 유사도 부여
                 confidence: detection.confidence,
                 clip_text_emb: candidate.clip_text_emb || null, // 🔧 수정됨: 폴백 매칭에도 clip_text_emb 포함
-                // 🔧 수정됨: 폴백 매칭 결과에도 features 포함 (벡터 비교를 위해)
-                features: clipEmbedding ? {
-                  shape_vector: clipEmbedding,
+                // 🔧 수정됨: 폴백 매칭 결과에도 features 포함 (shape_vector와 clip_embedding 모두 설정)
+                features: (shapeVector || clipEmbedding) ? {
+                  shape_vector: shapeVector || clipEmbedding, // 🔧 수정됨: CLIP 모델로 통일 (semantic_vector 제거)
                   clip_embedding: clipEmbedding,
                   color_lab: candidate.feature_json?.color || null,
                   size_stud: candidate.feature_json?.size || null
@@ -3732,10 +4228,22 @@ export default {
             }
           }
           
-          // 정밀 검출 모드: 유사도 임계값 (디버깅용 완화 옵션)
-          const SIMILARITY_THRESHOLD = 0.75 // 🔧 수정됨: 0.85 → 0.75 (임계값 완화)
+          // 🔧 수정됨: 단일 BOM 후보인 경우 균형 조정 (정확도와 검출률 균형)
+          const isSingleBom = (bomData?.length === 1)
+          const SIMILARITY_THRESHOLD = isSingleBom ? 0.15 : 0.75 // 🔧 수정됨: 단일 BOM: 0.18 → 0.15 (검출률 향상)
+          
           if (!bestMatch || bestSimilarity < SIMILARITY_THRESHOLD) {
-            console.log(`🤖 AI 메타데이터 매칭 실패: 최고 유사도 ${bestSimilarity.toFixed(3)} < ${SIMILARITY_THRESHOLD} (정밀 모드)`)
+            console.log(`🤖 AI 메타데이터 매칭 실패: 최고 유사도 ${bestSimilarity.toFixed(3)} < ${SIMILARITY_THRESHOLD} (단일 BOM: ${isSingleBom})`)
+            // 🔧 수정됨: 단일 BOM 후보인 경우 유사도 0.15 이상 AND YOLO confidence 0.80 이상 요구
+            if (isSingleBom && bestMatch && bestSimilarity >= 0.15 && detection.confidence >= 0.80) {
+              console.log(`🤖 단일 BOM 후보: 유사도(${bestSimilarity.toFixed(3)}) 및 YOLO confidence(${detection.confidence.toFixed(3)}) 조건 충족`)
+              return {
+                ...bestMatch,
+                color_characteristics: bestMatch.feature_json?.color || null,
+                size_characteristics: bestMatch.feature_json?.size || null,
+                similarity: bestSimilarity
+              }
+            }
             return null
           }
           

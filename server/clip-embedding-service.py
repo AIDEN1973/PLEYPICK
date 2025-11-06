@@ -10,7 +10,7 @@ import os
 import sys
 import json
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +18,9 @@ import torch
 from transformers import CLIPProcessor, CLIPModel
 import numpy as np
 from pydantic import BaseModel
+from PIL import Image
+import base64
+from io import BytesIO
 
 # 모델 로드 (전역)
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -26,6 +29,11 @@ processor = None
 
 class EmbeddingRequest(BaseModel):
     input: str
+    model: str = "clip-vit-l/14"
+    dimensions: int = 768
+
+class ImageEmbeddingRequest(BaseModel):
+    image_base64: str
     model: str = "clip-vit-l/14"
     dimensions: int = 768
 
@@ -75,6 +83,75 @@ async def generate_clip_embedding(text: str) -> List[float]:
     except Exception as e:
         print(f"CLIP embedding generation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(e)}")
+
+async def generate_clip_image_embedding(image_base64: str) -> List[float]:
+    """CLIP 이미지 임베딩 생성 (768차원, L2 정규화)"""
+    if not model or not processor:
+        raise HTTPException(status_code=500, detail="CLIP model not loaded")
+    
+    try:
+        # base64 디코딩
+        if image_base64.startswith('data:image'):
+            # data:image/png;base64,xxx 형식 처리
+            image_base64 = image_base64.split(',')[1]
+        
+        image_data = base64.b64decode(image_base64)
+        image = Image.open(BytesIO(image_data)).convert('RGB')
+        
+        # 🔧 수정됨: 이미지 크기 검증 (너무 작은 이미지 방지)
+        width, height = image.size
+        if width < 1 or height < 1:
+            raise ValueError(f"Image size too small: {width}x{height}")
+        if width > 10000 or height > 10000:
+            raise ValueError(f"Image size too large: {width}x{height}")
+        
+        # 🔧 수정됨: 최소 크기 보장 (1x1 같은 경우 리사이즈) - 크롭 품질 개선
+        min_size = 128  # 64 → 128 (더 나은 임베딩 품질, 근본 원인 해결)
+        if width < min_size or height < min_size:
+            # 작은 이미지는 최소 크기로 리사이즈 (비율 유지)
+            if width < height:
+                new_width = min_size
+                new_height = int(height * (min_size / width))
+            else:
+                new_height = min_size
+                new_width = int(width * (min_size / height))
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            print(f"[WARNING] Image resized from {width}x{height} to {new_width}x{new_height} (min_size: {min_size})")
+        
+        # 이미지 전처리
+        # 🔧 수정됨: processor 호출 시 명시적으로 이미지 리스트 전달
+        try:
+            inputs = processor(images=[image], return_tensors="pt", padding=True).to(device)
+        except Exception as proc_error:
+            # 전처리 오류 시 상세 정보 출력
+            print(f"[ERROR] Image preprocessing failed: {proc_error}")
+            print(f"[ERROR] Image size: {image.size}, mode: {image.mode}")
+            raise ValueError(f"Image preprocessing failed: {str(proc_error)}")
+        
+        # 임베딩 생성
+        with torch.no_grad():
+            image_features = model.get_image_features(**inputs)
+            # L2 정규화 (OpenAI 스타일)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+        
+        # CPU로 이동 후 리스트 변환
+        embedding = image_features.cpu().numpy()[0].tolist()
+        
+        # 차원 검증
+        if len(embedding) != 768:
+            raise ValueError(f"Expected 768 dimensions, got {len(embedding)}")
+        
+        return embedding
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        print(f"CLIP image embedding generation failed: {error_msg}")
+        print(f"Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Image embedding generation failed: {error_msg}")
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -148,6 +225,42 @@ async def create_embeddings(request: EmbeddingRequest):
         print(f"Embedding request failed: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+@app.post("/v1/image-embeddings")
+async def create_image_embeddings(request: ImageEmbeddingRequest):
+    """이미지 임베딩 생성 엔드포인트"""
+    try:
+        # 입력 검증
+        if not request.image_base64 or not request.image_base64.strip():
+            raise HTTPException(status_code=400, detail="image_base64 is required")
+        
+        # 차원 검증 (CLIP ViT-L/14는 768차원 고정)
+        if request.dimensions != 768:
+            print(f"[WARNING] Requested {request.dimensions} dimensions, using 768 (CLIP ViT-L/14)")
+        
+        # 이미지 임베딩 생성
+        embedding = await generate_clip_image_embedding(request.image_base64.strip())
+        
+        # OpenAI API 형식으로 응답
+        return {
+            "object": "list",
+            "data": [{
+                "object": "embedding",
+                "index": 0,
+                "embedding": embedding
+            }],
+            "model": "clip-vit-l/14",
+            "usage": {
+                "prompt_tokens": 0,
+                "total_tokens": 0
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Image embedding request failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 @app.get("/")
 @app.head("/")
 async def root():
@@ -159,7 +272,8 @@ async def root():
         "dimensions": 768,
         "endpoints": {
             "health": "/health",
-            "embeddings": "/v1/embeddings"
+            "embeddings": "/v1/embeddings",
+            "image_embeddings": "/v1/image-embeddings"
         }
     }
 

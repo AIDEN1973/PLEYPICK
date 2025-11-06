@@ -131,10 +131,14 @@ export function useOptimizedRealtimeDetection() {
     const { detect, init } = useYoloDetector()
     
     try {
-      // 1단계: Stage1 모델로 빠른 전체 스캔 (낮은 임계값)
+      // 1단계: Stage1 모델로 빠른 전체 스캔 (모드별 최적화) // 🔧 수정됨
+      // [FIX] 수정됨: inputSize는 모델 로드 시 training_metadata에서 자동 설정되므로 전달하지 않음
       console.log('📊 1단계 검출: Stage1 모델 (빠른 전체 스캔)')
-      await init({ modelPath: null, inputSize: 640, stage: 'stage1' })
-      const stage1Dets = await detect(imageData, { confThreshold: 0.15, stage: 'stage1', realtime: isRealtime }) // 🔧 수정됨: 옵션에 따라 실시간 모드 결정
+      await init({ modelPath: null, stage: 'stage1' })
+      // 실시간 모드: 낮은 threshold로 더 많은 후보 검출, 하이브리드 모드: 높은 threshold로 정확도 우선 // 🔧 수정됨
+      const confThreshold = isRealtime ? 0.20 : 0.25 // 🔧 수정됨: 실시간은 0.20, 하이브리드는 0.25
+      const maxDet = isRealtime ? 100 : 50 // 🔧 수정됨: 실시간은 100개, 하이브리드는 50개
+      const stage1Dets = await detect(imageData, { confThreshold, maxDetections: maxDet, stage: 'stage1', realtime: isRealtime }) // 🔧 수정됨
       console.log(`✅ 1단계 검출 완료: ${stage1Dets.length}개 객체`)
       
       // 의심 영역 식별 (신뢰도 낮거나 크기 이상한 객체)
@@ -149,8 +153,12 @@ export function useOptimizedRealtimeDetection() {
       if (suspiciousRegions.length > 0) {
         try {
           console.log('📊 2단계 검출: Stage2 모델 (정밀 검증)')
-          await init({ modelPath: null, inputSize: 640, stage: 'stage2' })
-          const stage2Dets = await detect(imageData, { confThreshold: 0.5, stage: 'stage2', realtime: isRealtime }) // 🔧 수정됨: 옵션에 따라 실시간 모드 결정
+          // [FIX] 수정됨: inputSize는 모델 로드 시 training_metadata에서 자동 설정되므로 전달하지 않음
+          await init({ modelPath: null, stage: 'stage2' })
+          // 모드별 최적화: 실시간은 더 많은 후보, 하이브리드는 정확도 우선 // 🔧 수정됨
+          const stage2Conf = isRealtime ? 0.4 : 0.5 // 🔧 수정됨: 실시간은 0.4, 하이브리드는 0.5
+          const stage2Max = isRealtime ? 100 : 50 // 🔧 수정됨: 실시간은 100개, 하이브리드는 50개
+          const stage2Dets = await detect(imageData, { confThreshold: stage2Conf, maxDetections: stage2Max, stage: 'stage2', realtime: isRealtime }) // 🔧 수정됨
           console.log(`✅ 2단계 검증 완료: ${stage2Dets.length}개 객체`)
           
           // 결과 통합: Stage1에서 확실한 것 + Stage2에서 새로 찾은 것

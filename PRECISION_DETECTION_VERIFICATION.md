@@ -260,3 +260,5 @@ const maxAttempts = Math.min(requiredQuantity, Math.min(availableDetections, 2))
 
 
 
+
+

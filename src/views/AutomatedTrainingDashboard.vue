@@ -1509,18 +1509,85 @@ const loadPartInfo = async () => {
     
     const part = partData[0]
     
-    // 2. 부품 이미지 수 조회 (실제 part_id 사용)
-    const { data: imageData, error: imageError } = await supabase
-      .from('synthetic_dataset')
-      .select('id')
-      .eq('part_id', partId)
-      .eq('status', 'uploaded')
-    
-    if (imageError) {
-      console.warn('이미지 수 조회 실패:', imageError)
+    // 2. 부품 이미지 수 조회 (로컬 파일 시스템 기준)
+    // [FIX] 수정됨: 새 구조 지원 - dataset_synthetic/{element_id}/images/ 폴더에서 파일 개수 확인
+    let imageCount = 0
+    try {
+      // 엘리먼트 ID가 있으면 우선 사용, 없으면 part_id 사용
+      const elementId = part.element_id || (isElementId ? inputValue : null)
+      
+      if (elementId) {
+        // 새 구조: dataset_synthetic/{element_id}/images/ 폴더 확인
+        // [FIX] 수정됨: 직접 API 호출 (포트 범위에서 서버 찾기)
+        try {
+          // 포트 범위에서 서버 찾기 (3011, 3012, 3013, 3014, 3015)
+          const possiblePorts = [3011, 3012, 3013, 3014, 3015]
+          let response = null
+          let lastError = null
+          
+          for (const port of possiblePorts) {
+            try {
+              const testResponse = await fetch(`http://localhost:${port}/api/synthetic/dataset/files/${elementId}`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(2000) // 2초 타임아웃
+              })
+              if (testResponse.ok) {
+                response = testResponse
+                console.log(`[INFO] Synthetic API 포트 감지: ${port}`)
+                break
+              }
+            } catch (err) {
+              lastError = err
+              continue
+            }
+          }
+          
+          if (response && response.ok) {
+            const data = await response.json()
+            imageCount = data.images || 0
+            console.log(`[INFO] 로컬 파일 시스템에서 이미지 개수 조회: ${elementId} → ${imageCount}개`)
+          } else {
+            console.warn(`[WARN] 로컬 파일 시스템 조회 실패, 폴백: synthetic_dataset 테이블 조회`)
+            // 폴백: synthetic_dataset 테이블 조회
+            const { data: imageData, error: imageError } = await supabase
+              .from('synthetic_dataset')
+              .select('id')
+              .eq('part_id', partId)
+              .eq('status', 'uploaded')
+            if (!imageError) {
+              imageCount = imageData?.length || 0
+            }
+          }
+        } catch (apiError) {
+          console.warn('[WARN] API 호출 실패, 폴백: synthetic_dataset 테이블 조회', apiError)
+          // 폴백: synthetic_dataset 테이블 조회
+          const { data: imageData, error: imageError } = await supabase
+            .from('synthetic_dataset')
+            .select('id')
+            .eq('part_id', partId)
+            .eq('status', 'uploaded')
+          if (!imageError) {
+            imageCount = imageData?.length || 0
+          }
+        }
+      } else {
+        // 엘리먼트 ID가 없으면 기존 방식 사용 (synthetic_dataset 테이블)
+        const { data: imageData, error: imageError } = await supabase
+          .from('synthetic_dataset')
+          .select('id')
+          .eq('part_id', partId)
+          .eq('status', 'uploaded')
+        
+        if (imageError) {
+          console.warn('이미지 수 조회 실패:', imageError)
+        }
+        
+        imageCount = imageData?.length || 0
+      }
+    } catch (err) {
+      console.error('이미지 개수 조회 중 오류:', err)
+      imageCount = 0
     }
-    
-    const imageCount = imageData?.length || 0
     
     // 3. 부품 학습 상태 조회 (실제 part_id 사용)
     let trainingStatus = null

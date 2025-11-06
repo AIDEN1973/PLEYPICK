@@ -104,6 +104,7 @@ app.post('/api/training/execute', async (req, res) => {
   try {
     const { 
       partId, 
+      setNum,
       modelStage = 'stage1', 
       epochs = 50, 
       batchSize = 16, 
@@ -112,12 +113,12 @@ app.post('/api/training/execute', async (req, res) => {
       jobId
     } = req.body
 
-    console.log(`🚀 학습 실행 요청: 부품 ${partId}, 단계 ${modelStage}`)
+    console.log(`🚀 학습 실행 요청: 부품 ${partId || '없음'}, 세트 ${setNum || '없음'}, 단계 ${modelStage}`)
 
     // 학습 작업 생성/업데이트 (프론트에서 jobId를 전달한 경우 중복 생성 방지)
     let trainingJob = null
-    const jobName = `training_${partId}_${modelStage}_${Date.now()}`
-    const configPayload = { partId, modelStage, epochs, batchSize, imageSize, device }
+    const jobName = setNum ? `training_set_${setNum}_${modelStage}_${Date.now()}` : `training_${partId}_${modelStage}_${Date.now()}`
+    const configPayload = { partId, setNum, modelStage, epochs, batchSize, imageSize, device }
 
     if (jobId) {
       // 기존 작업 업데이트
@@ -156,34 +157,42 @@ app.post('/api/training/execute', async (req, res) => {
       trainingJob = insertedJob
     }
 
-    // parts_master에서 엘리먼트 ID 조회
-    let elementId = partId
-    try {
-      const { data: partData } = await supabase
-        .from('parts_master')
-        .select('element_id')
-        .eq('part_id', partId)
-        .limit(1)
-      
-      if (partData && partData.length > 0) {
-        elementId = partData[0].element_id
-        console.log(`🔄 부품 ID ${partId} → 엘리먼트 ID ${elementId} 매핑됨`)
-      }
-    } catch (error) {
-      console.warn('⚠️ 엘리먼트 ID 조회 실패, 부품 ID 사용:', error.message)
-    }
+    // 학습 스크립트 인자 구성
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'local_yolo_training.py')
+    const args = [
+      '--model_stage', modelStage,
+      '--epochs', epochs.toString(),
+      '--batch_size', batchSize.toString(),
+      '--imgsz', imageSize.toString(),
+      '--device', device,
+      '--job_id', trainingJob.id.toString()
+    ]
 
-            // 학습 스크립트 실행 (Python 3.11 사용)
-            const scriptPath = path.join(__dirname, '..', 'scripts', 'local_yolo_training.py')
-            const args = [
-              '--part_id', elementId, // 엘리먼트 ID 사용
-              '--model_stage', modelStage,
-              '--epochs', epochs.toString(),
-              '--batch_size', batchSize.toString(),
-              '--imgsz', imageSize.toString(),
-              '--device', device,
-              '--job_id', trainingJob.id.toString()
-            ]
+    // 세트 학습인 경우 set_num 추가
+    if (setNum) {
+      args.push('--set_num', setNum)
+      console.log(`📦 세트 학습 모드: 세트 ${setNum}`)
+    } else if (partId) {
+      // 부품 학습인 경우 엘리먼트 ID 조회 후 part_id 추가
+      let elementId = partId
+      try {
+        const { data: partData } = await supabase
+          .from('parts_master')
+          .select('element_id')
+          .eq('part_id', partId)
+          .limit(1)
+        
+        if (partData && partData.length > 0) {
+          elementId = partData[0].element_id
+          console.log(`🔄 부품 ID ${partId} → 엘리먼트 ID ${elementId} 매핑됨`)
+        }
+      } catch (error) {
+        console.warn('⚠️ 엘리먼트 ID 조회 실패, 부품 ID 사용:', error.message)
+      }
+      args.push('--part_id', elementId)
+    } else {
+      throw new Error('partId 또는 setNum 중 하나는 필수입니다.')
+    }
 
             console.log(`📝 실행 명령: py -3.11 ${scriptPath} ${args.join(' ')}`)
 
@@ -205,7 +214,8 @@ app.post('/api/training/execute', async (req, res) => {
     runningProcesses.set(trainingJob.id, {
       process: pythonProcess,
       startTime: new Date(),
-      partId,
+      partId: partId || null,
+      setNum: setNum || null,
       modelStage
     })
 

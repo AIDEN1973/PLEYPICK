@@ -843,6 +843,31 @@
 | public       | rendering_logs                  | gpu_memory_usage              | numeric                     | YES         | null                                                       |
 | public       | rendering_logs                  | cpu_usage                     | numeric                     | YES         | null                                                       |
 | public       | rendering_logs                  | notes                         | text                        | YES         | null                                                       |
+| public       | rendering_jobs                  | id                            | bigint                      | NO          | nextval('rendering_jobs_id_seq'::regclass)                 |
+| public       | rendering_jobs                  | element_id                    | character varying           | YES         | null                                                       |
+| public       | rendering_jobs                  | part_id                       | character varying           | NO          | null                                                       |
+| public       | rendering_jobs                  | part_name                     | character varying           | YES         | null                                                       |
+| public       | rendering_jobs                  | status                        | character varying           | YES         | 'pending'::character varying                               |
+| public       | rendering_jobs                  | priority                      | character varying           | YES         | 'normal'::character varying                                |
+| public       | rendering_jobs                  | image_count                   | integer                     | NO          | 200                                                        |
+| public       | rendering_jobs                  | split                         | character varying           | YES         | null                                                       |
+| public       | rendering_jobs                  | notes                         | text                        | YES         | null                                                       |
+| public       | rendering_jobs                  | config                        | jsonb                       | YES         | '{}'::jsonb                                                |
+| public       | rendering_jobs                  | progress                      | jsonb                       | YES         | '{}'::jsonb                                                |
+| public       | rendering_jobs                  | error_message                 | text                        | YES         | null                                                       |
+| public       | rendering_jobs                  | started_at                    | timestamp with time zone    | YES         | null                                                       |
+| public       | rendering_jobs                  | completed_at                  | timestamp with time zone    | YES         | null                                                       |
+| public       | rendering_jobs                  | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | rendering_jobs                  | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | validation_cache                | id                            | bigint                      | NO          | nextval('validation_cache_id_seq'::regclass)               |
+| public       | validation_cache                | dataset_path                  | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_path                     | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_hash                     | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_type                     | character varying           | YES         | null                                                       |
+| public       | validation_cache                | validation_result             | jsonb                       | NO          | '{}'::jsonb                                                |
+| public       | validation_cache                | is_valid                      | boolean                     | NO          | true                                                       |
+| public       | validation_cache                | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | validation_cache                | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
 | public       | set_images                      | id                            | bigint                      | NO          | nextval('set_images_id_seq'::regclass)                     |
 | public       | set_images                      | set_num                       | character varying           | NO          | null                                                       |
 | public       | set_images                      | original_url                  | text                        | YES         | null                                                       |

@@ -1,0 +1,199 @@
+{
+  "timestamp": "2025-11-06T15:47:21.636538",
+  "directory": "C:\\cursor\\brickbox\\temp_onnx_convert",
+  "models": [
+    {
+      "base_name": "brickbox_s_seg_stage1_20251106_132857",
+      "pt_path": "C:\\cursor\\brickbox\\temp_onnx_convert\\brickbox_s_seg_stage1_20251106_132857.pt",
+      "onnx_path": "C:\\cursor\\brickbox\\temp_onnx_convert\\brickbox_s_seg_stage1_20251106_132857.onnx",
+      "pt_result": {
+        "valid": true,
+        "file_exists": true,
+        "file_size": 6075480,
+        "loadable": true,
+        "metadata": {
+          "type": "yolo_checkpoint",
+          "model_class": "<class 'ultralytics.nn.tasks.SegmentationModel'>",
+          "keys": [
+            "date",
+            "version",
+            "license",
+            "docs",
+            "epoch",
+            "best_fitness",
+            "model",
+            "ema",
+            "updates",
+            "optimizer",
+            "scaler",
+            "train_args",
+            "train_metrics",
+            "train_results",
+            "git"
+          ],
+          "yolo_model_type": "SegmentationModel",
+          "class_names": {
+            "0": "lego_part"
+          },
+          "task": "segment"
+        },
+        "error": null
+      },
+      "onnx_result": {
+        "valid": true,
+        "file_exists": true,
+        "file_size": 11556143,
+        "parseable": true,
+        "input_info": [
+          {
+            "name": "images",
+            "shape": [
+              1,
+              3,
+              768,
+              768
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 3\n    }\n    dim {\n      dim_value: 768\n    }\n    dim {\n      dim_value: 768\n    }\n  }\n}\n"
+          }
+        ],
+        "output_info": [
+          {
+            "name": "output0",
+            "shape": [
+              1,
+              37,
+              12096
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 37\n    }\n    dim {\n      dim_value: 12096\n    }\n  }\n}\n"
+          },
+          {
+            "name": "output1",
+            "shape": [
+              1,
+              32,
+              192,
+              192
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 32\n    }\n    dim {\n      dim_value: 192\n    }\n    dim {\n      dim_value: 192\n    }\n  }\n}\n"
+          }
+        ],
+        "opset_version": 18,
+        "runtime_test": true,
+        "error": null,
+        "runtime_inputs": [
+          "images"
+        ],
+        "runtime_outputs": [
+          "output0",
+          "output1"
+        ],
+        "runtime_inference_test": true
+      },
+      "comparison": {
+        "consistent": true,
+        "issues": [],
+        "warnings": []
+      },
+      "overall_valid": true
+    },
+    {
+      "base_name": "brickbox_s_seg_stage2_20251106_132904",
+      "pt_path": "C:\\cursor\\brickbox\\temp_onnx_convert\\brickbox_s_seg_stage2_20251106_132904.pt",
+      "onnx_path": "C:\\cursor\\brickbox\\temp_onnx_convert\\brickbox_s_seg_stage2_20251106_132904.onnx",
+      "pt_result": {
+        "valid": true,
+        "file_exists": true,
+        "file_size": 20573016,
+        "loadable": true,
+        "metadata": {
+          "type": "yolo_checkpoint",
+          "model_class": "<class 'ultralytics.nn.tasks.SegmentationModel'>",
+          "keys": [
+            "date",
+            "version",
+            "license",
+            "docs",
+            "epoch",
+            "best_fitness",
+            "model",
+            "ema",
+            "updates",
+            "optimizer",
+            "scaler",
+            "train_args",
+            "train_metrics",
+            "train_results",
+            "git"
+          ],
+          "yolo_model_type": "SegmentationModel",
+          "class_names": {
+            "0": "lego_part"
+          },
+          "task": "segment"
+        },
+        "error": null
+      },
+      "onnx_result": {
+        "valid": true,
+        "file_exists": true,
+        "file_size": 40486342,
+        "parseable": true,
+        "input_info": [
+          {
+            "name": "images",
+            "shape": [
+              1,
+              3,
+              768,
+              768
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 3\n    }\n    dim {\n      dim_value: 768\n    }\n    dim {\n      dim_value: 768\n    }\n  }\n}\n"
+          }
+        ],
+        "output_info": [
+          {
+            "name": "output0",
+            "shape": [
+              1,
+              37,
+              12096
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 37\n    }\n    dim {\n      dim_value: 12096\n    }\n  }\n}\n"
+          },
+          {
+            "name": "output1",
+            "shape": [
+              1,
+              32,
+              192,
+              192
+            ],
+            "type": "tensor_type {\n  elem_type: 1\n  shape {\n    dim {\n      dim_value: 1\n    }\n    dim {\n      dim_value: 32\n    }\n    dim {\n      dim_value: 192\n    }\n    dim {\n      dim_value: 192\n    }\n  }\n}\n"
+          }
+        ],
+        "opset_version": 18,
+        "runtime_test": true,
+        "error": null,
+        "runtime_inputs": [
+          "images"
+        ],
+        "runtime_outputs": [
+          "output0",
+          "output1"
+        ],
+        "runtime_inference_test": true
+      },
+      "comparison": {
+        "consistent": true,
+        "issues": [],
+        "warnings": []
+      },
+      "overall_valid": true
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "valid": 2,
+    "invalid": 0
+  }
+}

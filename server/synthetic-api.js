@@ -2,12 +2,23 @@ import express from 'express'
 import cors from 'cors'
 import sharp from 'sharp'
 import { createClient } from '@supabase/supabase-js'
-import { spawn } from 'child_process'
+import { spawn, execSync, exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import dotenv from 'dotenv'
 import net from 'net'
+import { promisify } from 'util'
+import {
+  getSyntheticRoot,
+  getDatasetSyntheticPath,
+  getPartDatasetPath,
+  getPartImagesPath,
+  getPartLabelsPath,
+  getPartMetaPath,
+  getPartMetaEPath,
+  getPartDepthPath
+} from './utils/pathConfig.js'
 
 // 환경 변수 로드
 dotenv.config()
@@ -41,9 +52,2031 @@ app.use(cors({
 // 캐시 비활성화 (ETag로 304 반환 방지)
 app.set('etag', false)
 // 정적 파일 제공: 생성된 합성 이미지 제공 (프록시 경로 하위로 제공)
-app.use('/api/synthetic/static', express.static(path.join(__dirname, '..', 'output')))
+// [FIX] 수정됨: getSyntheticRoot()를 사용하여 환경 변수 기반 경로 사용
+app.use('/api/synthetic/static', express.static(getSyntheticRoot()))
 
-// 검증 라우터 추가는 startServer 함수 내부에서 처리
+// 검증 라우터 직접 구현 (비동기 import 문제 해결)
+const validateRouter = express.Router()
+const validationJobs = new Map()
+
+// 검증 캐시 (Supabase 데이터베이스 사용)
+let supabaseCacheClient = null
+
+// Supabase 클라이언트 초기화 (검증 캐시용)
+const initSupabaseCache = async () => {
+  if (supabaseCacheClient) return supabaseCacheClient
+  
+  try {
+    const { createClient } = await import('@supabase/supabase-js')
+    supabaseCacheClient = createClient(
+      process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+      process.env.VITE_SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    )
+    return supabaseCacheClient
+  } catch (error) {
+    console.warn('Supabase 캐시 클라이언트 초기화 실패:', error.message)
+    return null
+  }
+}
+
+// 검증 캐시 로드 (데이터베이스에서)
+const loadValidationCache = async (datasetPath) => {
+  try {
+    const supabase = await initSupabaseCache()
+    if (!supabase) {
+      console.warn('Supabase 클라이언트 없음, 캐시 로드 스킵')
+      return {}
+    }
+    
+    const { data, error } = await supabase
+      .from('validation_cache')
+      .select('file_path, file_hash, validation_result, is_valid')
+      .eq('dataset_path', datasetPath)
+    
+    if (error) {
+      console.warn('검증 캐시 로드 실패:', error.message)
+      return {}
+    }
+    
+    // 객체 형태로 변환
+    const cache = {}
+    if (data && Array.isArray(data)) {
+      for (const item of data) {
+        // validation_result가 이미 모든 검증 정보를 포함하므로, hash와 valid를 추가
+        cache[item.file_path] = {
+          hash: item.file_hash,
+          valid: item.is_valid,
+          ...(item.validation_result || {})
+        }
+      }
+    }
+    
+    return cache
+  } catch (error) {
+    console.warn('검증 캐시 로드 실패:', error.message)
+    return {}
+  }
+}
+
+// 검증 캐시 저장 (데이터베이스에)
+const saveValidationCache = async (datasetPath, cache) => {
+  try {
+    const supabase = await initSupabaseCache()
+    if (!supabase) {
+      console.warn('Supabase 클라이언트 없음, 캐시 저장 스킵')
+      return
+    }
+    
+    // 캐시 항목을 배열로 변환
+    const cacheEntries = []
+    for (const [filePath, cacheData] of Object.entries(cache)) {
+      if (!cacheData || !cacheData.hash) continue
+      
+      // 파일 타입 추론 (경로 우선, 확장자 보조)
+      let fileType = 'image'
+      if (filePath.includes('/labels/') || filePath.startsWith('labels/') || filePath.endsWith('.txt')) {
+        fileType = 'label'
+      } else if (filePath.includes('/meta-e/') || filePath.startsWith('meta-e/')) {
+        fileType = 'meta-e'
+      } else if (filePath.includes('/meta/') || filePath.startsWith('meta/') || filePath.endsWith('.json')) {
+        // 이미지 파일이 아닌 경우에만 metadata로 설정
+        if (!filePath.match(/\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i)) {
+          fileType = 'metadata'
+        }
+      }
+      
+      cacheEntries.push({
+        dataset_path: datasetPath,
+        file_path: filePath,
+        file_hash: cacheData.hash,
+        file_type: fileType,
+        validation_result: cacheData,
+        is_valid: cacheData.valid !== false
+      })
+    }
+    
+    if (cacheEntries.length === 0) return
+    
+    // UPSERT (중복 시 업데이트)
+    // Supabase는 복합 UNIQUE 제약조건의 경우 컬럼명을 쉼표로 구분한 문자열 사용
+    const { error } = await supabase
+      .from('validation_cache')
+      .upsert(cacheEntries, {
+        onConflict: 'dataset_path,file_path',
+        ignoreDuplicates: false
+      })
+    
+    if (error) {
+      console.warn('검증 캐시 저장 실패:', error.message)
+    }
+  } catch (error) {
+    console.warn('검증 캐시 저장 실패:', error.message)
+  }
+}
+
+// 파일 해시 계산 (간단한 버전: mtime + size)
+const getFileHash = (filePath) => {
+  try {
+    const stats = fs.statSync(filePath)
+    return `${stats.mtimeMs}_${stats.size}`
+  } catch (error) {
+    return null
+  }
+}
+
+// 검증 작업 수행 함수 (YOLO 데이터셋 구조 지원, 상세 파일 내용 검증, 증분 검증 지원)
+async function performValidation(sourcePath, options, logCallback = null) {
+  const logs = []
+  const addLog = (type, message) => {
+    const logEntry = { type, message, timestamp: new Date().toISOString() }
+    logs.push(logEntry)
+    if (logCallback) {
+      logCallback(logEntry)
+    }
+    console.log(`[검증] ${type}: ${message}`)
+  }
+  
+  const results = {
+    totalParts: 0,
+    validParts: 0,
+    invalidParts: 0,
+    totalImages: 0,
+    totalLabels: 0,
+    totalMetadata: 0,
+    errors: [],
+    warnings: [],
+    fileIntegrity: { valid: 0, invalid: 0, errors: [] },
+    imageValidation: { valid: 0, invalid: 0, errors: [] },
+    labelValidation: { valid: 0, invalid: 0, errors: [] },
+    metadataValidation: { valid: 0, invalid: 0, errors: [] },
+    fileMatching: { matched: 0, unmatchedImages: [], unmatchedLabels: [] },
+    insufficientImages: [],
+    webpQuality: { valid: 0, invalid: 0, errors: [], details: [] },
+    bucketSync: { totalFiles: 0, uploadedFiles: 0, missingFiles: 0, syncErrors: [], bucketStats: { totalObjects: 0, totalSize: 0 } },
+    logs: logs
+  }
+  
+  try {
+    const fullPath = path.isAbsolute(sourcePath) ? sourcePath : path.join(__dirname, '..', sourcePath)
+    
+    if (!fs.existsSync(fullPath)) {
+      const errorMsg = `경로가 존재하지 않습니다: ${fullPath}`
+      results.errors.push(errorMsg)
+      addLog('error', errorMsg)
+      return results
+    }
+    
+    addLog('info', `검증 시작: ${fullPath}`)
+    
+    const validateImages = options.validateImages !== false
+    const validateLabels = options.validateLabels !== false
+    const validateMetadata = options.validateMetadata !== false
+    const checkFileIntegrity = options.checkFileIntegrity !== false
+    const incrementalValidation = options.incrementalValidation !== false // 증분 검증 기본 활성화
+    
+    // YOLO 데이터셋 구조 확인: dataset_synthetic/images/train, dataset_synthetic/labels/train 등
+    const datasetPath = path.join(fullPath, 'dataset_synthetic')
+    
+    if (fs.existsSync(datasetPath)) {
+      // YOLO 형식 데이터셋 검증
+      addLog('info', `YOLO 데이터셋 구조 감지: ${datasetPath}`)
+      
+      // 검증 캐시 로드 (데이터베이스에서)
+      let validationCache = {}
+      if (incrementalValidation) {
+        addLog('info', '검증 캐시 로드 중...')
+        validationCache = await loadValidationCache(datasetPath)
+        const cachedFileCount = Object.keys(validationCache).length
+        if (cachedFileCount > 0) {
+          addLog('info', `증분 검증 모드: 캐시된 검증 결과 ${cachedFileCount}개 파일 발견`)
+        } else {
+          addLog('info', '전체 검증 모드: 캐시 없음, 모든 파일 검증')
+        }
+      } else {
+        addLog('info', '전체 검증 모드: 증분 검증 비활성화')
+      }
+      
+      const newCache = {}
+      
+      // [FIX] 수정됨: 새 구조 지원 (dataset_synthetic/{element_id}/images, labels, meta, meta-e, depth)
+      // 기존 구조도 호환성 유지 (dataset_synthetic/images/train/{element_id})
+      const imagePath = path.join(datasetPath, 'images')
+      const labelPath = path.join(datasetPath, 'labels')
+      const metaPath = path.join(datasetPath, 'meta')
+      const metaEPath = path.join(datasetPath, 'meta-e')
+      
+      // 분할별 카운트 누적을 위한 파트 집계 맵
+      const partAggregate = new Map()
+      const partSet = new Set() // 중복 카운트 방지
+
+      // 새 구조 확인: dataset_synthetic/{element_id}/images 구조
+      const partDirsNewStructure = fs.existsSync(datasetPath) ? fs.readdirSync(datasetPath).filter(item => {
+        const itemPath = path.join(datasetPath, item)
+        try {
+          const stats = fs.statSync(itemPath)
+          if (!stats.isDirectory()) return false
+          // 부품 폴더 내에 images 폴더가 있는지 확인
+          const imagesDir = path.join(itemPath, 'images')
+          return fs.existsSync(imagesDir) && fs.statSync(imagesDir).isDirectory()
+        } catch {
+          return false
+        }
+      }) : []
+
+      if (partDirsNewStructure.length > 0) {
+        // 새 구조 사용: dataset_synthetic/{element_id}/images, labels, meta, meta-e
+        addLog('info', `새 구조 감지: ${partDirsNewStructure.length}개 부품 폴더 발견`)
+        
+        for (const partDir of partDirsNewStructure) {
+          if (!partSet.has(partDir)) {
+            partSet.add(partDir)
+            results.totalParts++
+          }
+          
+          const partDirPath = path.join(datasetPath, partDir)
+          const partImagePath = path.join(partDirPath, 'images')
+          const partLabelPath = path.join(partDirPath, 'labels')
+          const partMetaPath = path.join(partDirPath, 'meta')
+          const partMetaEPath = path.join(partDirPath, 'meta-e')
+          
+          let partValid = true
+          const partErrors = []
+          
+          // 이미지 파일 검증
+          if (fs.existsSync(partImagePath)) {
+            const imageFiles = fs.readdirSync(partImagePath).filter(f => /\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i.test(f))
+            const imageCount = imageFiles.length
+            results.totalImages += imageCount
+            
+            // 집계 맵 업데이트 (새 구조는 split이 없으므로 train으로 집계)
+            if (!partAggregate.has(partDir)) {
+              partAggregate.set(partDir, { train: 0, val: 0, test: 0 })
+            }
+            partAggregate.get(partDir).train += imageCount
+            
+            addLog('info', `${partDir}: ${imageCount}개 이미지 발견`)
+            
+            // 상세 이미지 파일 검증
+            if (validateImages && checkFileIntegrity) {
+              addLog('info', `${partDir}: 이미지 파일 검증 중... (${imageFiles.length}개)`)
+              let validatedCount = 0
+              let cachedCount = 0
+              
+              for (const imageFile of imageFiles) {
+                const imageFilePath = path.join(partImagePath, imageFile)
+                const relativePath = `${partDir}/images/${imageFile}`
+                const fileHash = getFileHash(imageFilePath)
+                
+                // 증분 검증: 캐시 확인
+                let shouldValidate = true
+                if (incrementalValidation && validationCache[relativePath]) {
+                  const cached = validationCache[relativePath]
+                  if (cached.hash === fileHash && cached.valid === true && cached.timestamp) {
+                    shouldValidate = false
+                    cachedCount++
+                    results.imageValidation.valid++
+                    results.fileIntegrity.valid++
+                    if (cached.webpQuality) {
+                      if (cached.webpQuality.valid) {
+                        results.webpQuality.valid++
+                        if (cached.webpQuality.warnings && cached.webpQuality.warnings.length > 0) {
+                          results.webpQuality.details.push({
+                            path: relativePath,
+                            metrics: cached.webpQuality.metrics || null,
+                            warnings: cached.webpQuality.warnings
+                          })
+                        }
+                      } else {
+                        results.webpQuality.invalid++
+                        results.webpQuality.errors.push(cached.webpQuality.error)
+                        results.webpQuality.details.push(cached.webpQuality.details)
+                      }
+                    }
+                    newCache[relativePath] = cached
+                  }
+                }
+                
+                // 검증 필요 시 실행
+                if (shouldValidate) {
+                  try {
+                    const imageValidation = await validateImageFile(imageFilePath)
+                    if (imageValidation.valid) {
+                      results.imageValidation.valid++
+                      results.fileIntegrity.valid++
+                      
+                      const cacheEntry = {
+                        hash: fileHash,
+                        valid: true,
+                        timestamp: new Date().toISOString(),
+                        imageValidation: { valid: true }
+                      }
+                      
+                      // WebP 품질 검증 (WebP 파일인 경우만)
+                      if (imageFilePath.toLowerCase().endsWith('.webp')) {
+                        const webpQuality = await validateWebPQuality(imageFilePath, options.validateWebPQuality !== false)
+                        if (webpQuality.valid) {
+                          results.webpQuality.valid++
+                          if (webpQuality.warnings && webpQuality.warnings.length > 0) {
+                            results.webpQuality.details.push({
+                              path: relativePath,
+                              metrics: webpQuality.metrics || null,
+                              warnings: webpQuality.warnings
+                            })
+                          }
+                          cacheEntry.webpQuality = { valid: true, metrics: webpQuality.metrics, warnings: webpQuality.warnings }
+                        } else {
+                          results.webpQuality.invalid++
+                          results.webpQuality.errors.push(webpQuality.error || 'WebP 품질 검증 실패')
+                          results.webpQuality.details.push({
+                            path: relativePath,
+                            error: webpQuality.error,
+                            metrics: webpQuality.metrics || null,
+                            issues: webpQuality.issues || [],
+                            warnings: webpQuality.warnings || []
+                          })
+                          cacheEntry.webpQuality = { valid: false, error: webpQuality.error, metrics: webpQuality.metrics, issues: webpQuality.issues, warnings: webpQuality.warnings }
+                        }
+                      }
+                      
+                      newCache[relativePath] = cacheEntry
+                      validatedCount++
+                    } else {
+                      results.imageValidation.invalid++
+                      results.fileIntegrity.invalid++
+                      partValid = false
+                      partErrors.push(`이미지 ${imageFile}: ${imageValidation.error}`)
+                      newCache[relativePath] = {
+                        hash: fileHash,
+                        valid: false,
+                        timestamp: new Date().toISOString(),
+                        imageValidation: { valid: false, error: imageValidation.error }
+                      }
+                    }
+                  } catch (error) {
+                    results.imageValidation.invalid++
+                    results.fileIntegrity.invalid++
+                    partValid = false
+                    partErrors.push(`이미지 ${imageFile}: ${error.message}`)
+                  }
+                }
+              }
+              
+              addLog('info', `${partDir}: 이미지 검증 완료 (신규: ${validatedCount}, 캐시: ${cachedCount})`)
+            }
+          } else {
+            partValid = false
+            partErrors.push('이미지 폴더 없음')
+          }
+          
+          // 라벨 파일 검증
+          if (validateLabels && fs.existsSync(partLabelPath)) {
+            const labelFiles = fs.readdirSync(partLabelPath).filter(f => f.endsWith('.txt'))
+            results.totalLabels += labelFiles.length
+            
+            addLog('info', `${partDir}: 라벨 파일 검증 중... (${labelFiles.length}개)`)
+            
+            for (const labelFile of labelFiles) {
+              const labelFilePath = path.join(partLabelPath, labelFile)
+              const relativePath = `${partDir}/labels/${labelFile}`
+              const fileHash = getFileHash(labelFilePath)
+              
+              let shouldValidate = true
+              if (incrementalValidation && validationCache[relativePath]) {
+                const cached = validationCache[relativePath]
+                if (cached.hash === fileHash && cached.valid === true) {
+                  shouldValidate = false
+                  results.labelValidation.valid++
+                  newCache[relativePath] = cached
+                }
+              }
+              
+              if (shouldValidate) {
+                try {
+                  const labelValidation = await validateLabelFile(labelFilePath)
+                  if (labelValidation.valid) {
+                    results.labelValidation.valid++
+                    newCache[relativePath] = {
+                      hash: fileHash,
+                      valid: true,
+                      timestamp: new Date().toISOString(),
+                      labelValidation: { valid: true }
+                    }
+                  } else {
+                    results.labelValidation.invalid++
+                    partValid = false
+                    partErrors.push(`라벨 ${labelFile}: ${labelValidation.error}`)
+                    newCache[relativePath] = {
+                      hash: fileHash,
+                      valid: false,
+                      timestamp: new Date().toISOString(),
+                      labelValidation: { valid: false, error: labelValidation.error }
+                    }
+                  }
+                } catch (error) {
+                  results.labelValidation.invalid++
+                  partValid = false
+                  partErrors.push(`라벨 ${labelFile}: ${error.message}`)
+                }
+              }
+            }
+          }
+          
+          // 메타데이터 파일 검증
+          if (validateMetadata) {
+            const metaFiles = []
+            if (fs.existsSync(partMetaPath)) {
+              const files = fs.readdirSync(partMetaPath).filter(f => f.endsWith('.json'))
+              metaFiles.push(...files.map(f => ({ file: f, path: path.join(partMetaPath, f), type: 'meta' })))
+            }
+            if (fs.existsSync(partMetaEPath)) {
+              const files = fs.readdirSync(partMetaEPath).filter(f => f.endsWith('.json'))
+              metaFiles.push(...files.map(f => ({ file: f, path: path.join(partMetaEPath, f), type: 'meta-e' })))
+            }
+            
+            results.totalMetadata += metaFiles.length
+            
+            addLog('info', `${partDir}: 메타데이터 파일 검증 중... (${metaFiles.length}개)`)
+            
+            for (const metaFile of metaFiles) {
+              const relativePath = `${partDir}/${metaFile.type}/${metaFile.file}`
+              const fileHash = getFileHash(metaFile.path)
+              
+              let shouldValidate = true
+              if (incrementalValidation && validationCache[relativePath]) {
+                const cached = validationCache[relativePath]
+                if (cached.hash === fileHash && cached.valid === true) {
+                  shouldValidate = false
+                  results.metadataValidation.valid++
+                  newCache[relativePath] = cached
+                }
+              }
+              
+              if (shouldValidate) {
+                try {
+                  const metadataValidation = await validateMetadataFile(metaFile.path)
+                  if (metadataValidation.valid) {
+                    results.metadataValidation.valid++
+                    newCache[relativePath] = {
+                      hash: fileHash,
+                      valid: true,
+                      timestamp: new Date().toISOString(),
+                      metadataValidation: { valid: true }
+                    }
+                  } else {
+                    results.metadataValidation.invalid++
+                    partValid = false
+                    partErrors.push(`메타데이터 ${metaFile.file}: ${metadataValidation.error}`)
+                    newCache[relativePath] = {
+                      hash: fileHash,
+                      valid: false,
+                      timestamp: new Date().toISOString(),
+                      metadataValidation: { valid: false, error: metadataValidation.error }
+                    }
+                  }
+                } catch (error) {
+                  results.metadataValidation.invalid++
+                  partValid = false
+                  partErrors.push(`메타데이터 ${metaFile.file}: ${error.message}`)
+                }
+              }
+            }
+          }
+          
+          // 파일 매칭 검증
+          if (fs.existsSync(partImagePath) && fs.existsSync(partLabelPath)) {
+            const imageFiles = fs.readdirSync(partImagePath).filter(f => /\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i.test(f))
+            const labelFiles = fs.readdirSync(partLabelPath).filter(f => f.endsWith('.txt'))
+            
+            for (const imageFile of imageFiles) {
+              const baseName = imageFile.replace(/\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i, '')
+              const labelFile = `${baseName}.txt`
+              if (labelFiles.includes(labelFile)) {
+                results.fileMatching.matched++
+              } else {
+                results.fileMatching.unmatchedImages.push(`${partDir}/images/${imageFile}`)
+              }
+            }
+          }
+          
+          if (partValid) {
+            results.validParts++
+          } else {
+            results.invalidParts++
+            results.errors.push(`부품 ${partDir}: ${partErrors.join(', ')}`)
+          }
+        }
+      } else {
+        // 기존 구조 지원 (호환성): dataset_synthetic/images/train/{element_id}
+        addLog('info', '기존 구조 감지: train/val/test 분할 폴더 검증 시작...')
+        
+        // train, val, test 폴더 확인
+        for (const split of ['train', 'val', 'test']) {
+          addLog('info', `${split} 분할 검증 중...`)
+          const splitImageDir = path.join(imagePath, split)
+          const splitLabelDir = path.join(labelPath, split)
+          
+          if (fs.existsSync(splitImageDir)) {
+            const partDirs = fs.readdirSync(splitImageDir).filter(item => {
+              const itemPath = path.join(splitImageDir, item)
+              return fs.statSync(itemPath).isDirectory()
+            })
+            
+            // 중복 카운트 방지: 부품 ID는 모든 split에서 공통
+            for (const partDir of partDirs) {
+              if (!partSet.has(partDir)) {
+                partSet.add(partDir)
+                results.totalParts++
+              }
+            }
+            
+            for (const partDir of partDirs) {
+              const partImagePath = path.join(splitImageDir, partDir)
+              const partLabelPath = path.join(splitLabelDir, partDir)
+            
+            let partValid = true
+            const partErrors = []
+            
+            // 이미지 파일 검증
+            if (fs.existsSync(partImagePath)) {
+              const imageFiles = fs.readdirSync(partImagePath).filter(f => /\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i.test(f))
+              const imageCount = imageFiles.length
+              results.totalImages += imageCount
+              // 집계 맵 업데이트
+              if (!partAggregate.has(partDir)) {
+                partAggregate.set(partDir, { train: 0, val: 0, test: 0 })
+              }
+              partAggregate.get(partDir)[split] += imageCount
+              
+              addLog('info', `${split}/${partDir}: ${imageCount}개 이미지 발견`)
+
+              // 단건 즉시 경고는 집계 후 생성하므로 여기서는 푸시하지 않음
+              
+              // 상세 이미지 파일 검증
+              if (validateImages && checkFileIntegrity) {
+                addLog('info', `${split}/${partDir}: 이미지 파일 검증 중... (${imageFiles.length}개)`)
+                let validatedCount = 0
+                let cachedCount = 0
+                
+                for (const imageFile of imageFiles) {
+                  const imageFilePath = path.join(partImagePath, imageFile)
+                  const relativePath = `${split}/${partDir}/${imageFile}`
+                  const fileHash = getFileHash(imageFilePath)
+                  
+                  // 증분 검증: 캐시 확인
+                  let shouldValidate = true
+                  if (incrementalValidation && validationCache[relativePath]) {
+                    const cached = validationCache[relativePath]
+                    if (cached.hash === fileHash && cached.valid === true && cached.timestamp) {
+                      // 캐시된 검증 결과 사용
+                      shouldValidate = false
+                      cachedCount++
+                      results.imageValidation.valid++
+                      results.fileIntegrity.valid++
+                      if (cached.webpQuality) {
+                        if (cached.webpQuality.valid) {
+                          results.webpQuality.valid++
+                          if (cached.webpQuality.warnings && cached.webpQuality.warnings.length > 0) {
+                            results.webpQuality.details.push({
+                              path: relativePath,
+                              metrics: cached.webpQuality.metrics || null,
+                              warnings: cached.webpQuality.warnings
+                            })
+                          }
+                        } else {
+                          results.webpQuality.invalid++
+                          results.webpQuality.errors.push(cached.webpQuality.error)
+                          results.webpQuality.details.push(cached.webpQuality.details)
+                        }
+                      }
+                      // 캐시 결과를 새 캐시에 복사
+                      newCache[relativePath] = cached
+                    }
+                  }
+                  
+                  // 검증 필요 시 실행
+                  if (shouldValidate) {
+                    try {
+                      const imageValidation = await validateImageFile(imageFilePath)
+                      if (imageValidation.valid) {
+                        results.imageValidation.valid++
+                        results.fileIntegrity.valid++
+                        
+                        const cacheEntry = {
+                          hash: fileHash,
+                          valid: true,
+                          timestamp: new Date().toISOString(),
+                          imageValidation: { valid: true }
+                        }
+                        
+                        // WebP 품질 검증 (WebP 파일인 경우만, PNG는 무손실이므로 검증 불필요)
+                        if (imageFilePath.toLowerCase().endsWith('.webp')) {
+                          const webpQuality = await validateWebPQuality(imageFilePath, options.validateWebPQuality !== false)
+                          if (webpQuality.valid) {
+                            results.webpQuality.valid++
+                            // 유효하더라도 경고가 있으면 경고 목록에 추가
+                            if (webpQuality.warnings && webpQuality.warnings.length > 0) {
+                              results.webpQuality.details.push({
+                                path: relativePath,
+                                metrics: webpQuality.metrics || null,
+                                warnings: webpQuality.warnings
+                              })
+                            }
+                            cacheEntry.webpQuality = { valid: true, metrics: webpQuality.metrics, warnings: webpQuality.warnings }
+                          } else {
+                            results.webpQuality.invalid++
+                            const errorMsg = `${relativePath}: ${webpQuality.error}`
+                            results.webpQuality.errors.push(errorMsg)
+                            results.webpQuality.details.push({
+                              path: relativePath,
+                              error: webpQuality.error,
+                              metrics: webpQuality.metrics || null,
+                              issues: webpQuality.issues || [],
+                              warnings: webpQuality.warnings || []
+                            })
+                            if (webpQuality.issues && webpQuality.issues.length > 0) {
+                              results.warnings.push(`${relativePath}: ${webpQuality.issues.join(', ')}`)
+                            }
+                            cacheEntry.webpQuality = { valid: false, error: webpQuality.error, details: results.webpQuality.details[results.webpQuality.details.length - 1] }
+                          }
+                        }
+                        
+                        // 캐시 저장
+                        newCache[relativePath] = cacheEntry
+                        validatedCount++
+                      } else {
+                        results.imageValidation.invalid++
+                        results.fileIntegrity.invalid++
+                        partValid = false
+                        const errorMsg = `${relativePath}: ${imageValidation.error}`
+                        results.imageValidation.errors.push(errorMsg)
+                        partErrors.push(errorMsg)
+                        
+                        // 오류도 캐시에 저장 (재검증 방지)
+                        newCache[relativePath] = {
+                          hash: fileHash,
+                          valid: false,
+                          timestamp: new Date().toISOString(),
+                          imageValidation: { valid: false, error: imageValidation.error }
+                        }
+                        validatedCount++
+                      }
+                    } catch (error) {
+                      results.imageValidation.invalid++
+                      results.fileIntegrity.invalid++
+                      partValid = false
+                      const errorMsg = `${relativePath}: 검증 오류 - ${error.message}`
+                      results.imageValidation.errors.push(errorMsg)
+                      partErrors.push(errorMsg)
+                      
+                      // 오류도 캐시에 저장
+                      newCache[relativePath] = {
+                        hash: fileHash,
+                        valid: false,
+                        timestamp: new Date().toISOString(),
+                        error: error.message
+                      }
+                      validatedCount++
+                    }
+                  }
+                }
+                
+                if (incrementalValidation && cachedCount > 0) {
+                  addLog('info', `${split}/${partDir}: 캐시 사용 ${cachedCount}개, 새로 검증 ${validatedCount}개`)
+                }
+              } else {
+                // 파일 개수만 확인
+                results.imageValidation.valid += imageFiles.length
+                results.fileIntegrity.valid += imageFiles.length
+                addLog('info', `${split}/${partDir}: 이미지 파일 개수 확인 완료 (${imageFiles.length}개)`)
+              }
+              
+              // 이미지-라벨 파일명 매칭 확인
+              if (imageFiles.length > 0) {
+                addLog('info', `${split}/${partDir}: 이미지-라벨 매칭 확인 중...`)
+              }
+              if (fs.existsSync(partLabelPath)) {
+                const labelFiles = fs.readdirSync(partLabelPath).filter(f => f.endsWith('.txt'))
+                const imageBaseNames = new Set(imageFiles.map(f => path.parse(f).name))
+                const labelBaseNames = new Set(labelFiles.map(f => path.parse(f).name))
+                
+                // 라벨이 없는 이미지
+                for (const imgBase of imageBaseNames) {
+                  if (!labelBaseNames.has(imgBase)) {
+                    results.fileMatching.unmatchedImages.push(`${split}/${partDir}/${imgBase}`)
+                    results.warnings.push(`라벨이 없는 이미지: ${split}/${partDir}/${imgBase}`)
+                  }
+                }
+                
+                // 이미지가 없는 라벨
+                for (const lblBase of labelBaseNames) {
+                  if (!imageBaseNames.has(lblBase)) {
+                    results.fileMatching.unmatchedLabels.push(`${split}/${partDir}/${lblBase}`)
+                    results.warnings.push(`이미지가 없는 라벨: ${split}/${partDir}/${lblBase}`)
+                  } else {
+                    results.fileMatching.matched++
+                  }
+                }
+              }
+            }
+            
+            // 라벨 파일 검증
+            if (fs.existsSync(partLabelPath)) {
+              const labelFiles = fs.readdirSync(partLabelPath).filter(f => f.endsWith('.txt'))
+              results.totalLabels += labelFiles.length
+              if (labelFiles.length > 0 && validateLabels) {
+                addLog('info', `${split}/${partDir}: 라벨 파일 검증 중... (${labelFiles.length}개)`)
+              }
+              
+              // 상세 라벨 파일 검증
+              if (validateLabels && checkFileIntegrity) {
+                let labelValidatedCount = 0
+                let labelCachedCount = 0
+                
+                for (const labelFile of labelFiles) {
+                  const labelFilePath = path.join(partLabelPath, labelFile)
+                  const relativePath = `labels/${split}/${partDir}/${labelFile}`
+                  const fileHash = getFileHash(labelFilePath)
+                  
+                  // 증분 검증: 캐시 확인
+                  let shouldValidate = true
+                  if (incrementalValidation && validationCache[relativePath]) {
+                    const cached = validationCache[relativePath]
+                    if (cached.hash === fileHash && cached.valid === true) {
+                      shouldValidate = false
+                      labelCachedCount++
+                      results.labelValidation.valid++
+                      newCache[relativePath] = cached
+                    }
+                  }
+                  
+                  if (shouldValidate) {
+                    try {
+                      const labelValidation = await validateLabelFile(labelFilePath)
+                      if (labelValidation.valid) {
+                        results.labelValidation.valid++
+                        if (labelValidation.warning) {
+                          results.warnings.push(`${split}/${partDir}/${labelFile}: ${labelValidation.warning}`)
+                        }
+                        newCache[relativePath] = {
+                          hash: fileHash,
+                          valid: true,
+                          timestamp: new Date().toISOString(),
+                          labelValidation: { valid: true, warning: labelValidation.warning || null }
+                        }
+                        labelValidatedCount++
+                      } else {
+                        results.labelValidation.invalid++
+                        partValid = false
+                        const errorMsg = `${split}/${partDir}/${labelFile}: ${labelValidation.error}`
+                        results.labelValidation.errors.push(errorMsg)
+                        partErrors.push(errorMsg)
+                        newCache[relativePath] = {
+                          hash: fileHash,
+                          valid: false,
+                          timestamp: new Date().toISOString(),
+                          labelValidation: { valid: false, error: labelValidation.error }
+                        }
+                        labelValidatedCount++
+                      }
+                    } catch (error) {
+                      results.labelValidation.invalid++
+                      partValid = false
+                      const errorMsg = `${split}/${partDir}/${labelFile}: 검증 오류 - ${error.message}`
+                      results.labelValidation.errors.push(errorMsg)
+                      partErrors.push(errorMsg)
+                      newCache[relativePath] = {
+                        hash: fileHash,
+                        valid: false,
+                        timestamp: new Date().toISOString(),
+                        error: error.message
+                      }
+                      labelValidatedCount++
+                    }
+                  }
+                }
+                
+                if (incrementalValidation && labelCachedCount > 0) {
+                  addLog('info', `${split}/${partDir}: 라벨 캐시 사용 ${labelCachedCount}개, 새로 검증 ${labelValidatedCount}개`)
+                }
+              } else {
+                // 파일 개수만 확인
+                results.labelValidation.valid += labelFiles.length
+              }
+            }
+            
+            if (partValid) {
+              results.validParts++
+            } else {
+              results.invalidParts++
+              results.errors.push(`부품 ${split}/${partDir}: ${partErrors.join('; ')}`)
+            }
+          }
+        }
+      }
+
+      // [FIX] 수정됨: 새 구조 지원 - 집계 결과로 비율(80/10/10) 기준 기대/부족 계산
+      try {
+        const targetPerPart = 200
+        const ratio = { train: 0.8, val: 0.1, test: 0.1 }
+        
+        // 디버깅: 집계 맵 확인
+        if (partAggregate.size === 0) {
+          addLog('warning', '집계 맵이 비어있습니다. 이미지 파일이 없거나 집계 로직에 문제가 있을 수 있습니다.')
+        } else {
+          addLog('info', `집계 맵 크기: ${partAggregate.size}개 부품`)
+        }
+        
+        for (const [partId, counts] of partAggregate.entries()) {
+          // 새 구조에서는 split이 없으므로 모든 이미지를 train으로 집계
+          // 기존 구조에서는 train/val/test 분리되어 있음
+          const totalCurrent = counts.train + counts.val + counts.test
+          
+          // 기대치 계산 (라운딩 보정으로 합계 200 보장)
+          let expectedTrain = Math.round(targetPerPart * ratio.train)
+          let expectedVal = Math.round(targetPerPart * ratio.val)
+          let expectedTest = targetPerPart - expectedTrain - expectedVal
+          const totalExpected = targetPerPart
+          
+          // 새 구조: 모든 이미지가 하나의 폴더에 있으므로 train으로만 집계
+          // 기존 구조: train/val/test 분리
+          const splits = ['train', 'val', 'test']
+          const details = {}
+          let anyMissing = false
+          let totalMissing = 0
+          
+          for (const s of splits) {
+            const expected = s === 'train' ? expectedTrain : (s === 'val' ? expectedVal : expectedTest)
+            const current = counts[s] || 0
+            const missing = Math.max(0, expected - current)
+            const percent = expected > 0 ? Math.min(100, Math.round((current / expected) * 100)) : 0
+            details[s] = { current, expected, missing, percent }
+            totalMissing += missing
+            if (missing > 0) anyMissing = true
+          }
+          
+          // 디버깅: 각 부품별 집계 결과 확인
+          if (anyMissing || totalCurrent < totalExpected) {
+            addLog('warning', `${partId}: train=${counts.train || 0}/${details.train.expected}, val=${counts.val || 0}/${details.val.expected}, test=${counts.test || 0}/${details.test.expected}, 총=${totalCurrent}/${totalExpected} (부족: ${totalMissing})`)
+            
+            results.insufficientImages.push({
+              partId,
+              total: { current: totalCurrent, expected: totalExpected, missing: totalMissing, percent: totalExpected > 0 ? Math.min(100, Math.round((totalCurrent / totalExpected) * 100)) : 0 },
+              splits: details
+            })
+            // 경고 메시지는 요약 형태로 1건만
+            results.warnings.push(`${partId}: 이미지 부족 (train ${details.train.current}/${details.train.expected}, val ${details.val.current}/${details.val.expected}, test ${details.test.current}/${details.test.expected})`)
+          }
+        }
+      } catch (e) {
+        console.error('❌ 부족 이미지 집계 처리 중 오류:', e)
+        console.error('스택:', e.stack)
+      }
+      
+      // 검증 캐시 저장 (데이터베이스에)
+      if (incrementalValidation) {
+        // 기존 캐시와 병합 (검증하지 않은 파일은 유지)
+        // 단, 실제 존재하는 파일만 유지 (삭제된 파일의 캐시는 제거)
+        const allValidatedPaths = new Set(Object.keys(newCache))
+        for (const [key, value] of Object.entries(validationCache)) {
+          // 실제 검증된 파일이 아니고, 캐시에만 있는 경우
+          if (!allValidatedPaths.has(key)) {
+            // 파일 존재 여부 확인 (경로 변환 필요)
+            // key는 상대 경로 (새 구조: {partDir}/images/{imageFile}, 기존 구조: train/{partDir}/{imageFile})
+            // 실제 파일 경로 변환
+            let fileExists = false
+            if (key.startsWith('labels/')) {
+              // labels/train/... 또는 {partDir}/labels/... -> labels/train/... 또는 {partDir}/labels/...
+              const actualPath = path.join(datasetPath, key)
+              fileExists = fs.existsSync(actualPath)
+            } else if (key.includes('/meta-e/') || key.startsWith('meta-e/')) {
+              // {partDir}/meta-e/... 또는 meta-e/... -> {partDir}/meta-e/... 또는 meta-e/...
+              const actualPath = path.join(datasetPath, key)
+              fileExists = fs.existsSync(actualPath)
+            } else if (key.includes('/meta/') || key.startsWith('meta/')) {
+              // {partDir}/meta/... 또는 meta/... -> {partDir}/meta/... 또는 meta/...
+              const actualPath = path.join(datasetPath, key)
+              fileExists = fs.existsSync(actualPath)
+            } else if (key.includes('/images/')) {
+              // 새 구조: {partDir}/images/{imageFile} -> {partDir}/images/{imageFile}
+              const actualPath = path.join(datasetPath, key)
+              fileExists = fs.existsSync(actualPath)
+            } else {
+              // 기존 구조: train/{partDir}/{imageFile} -> images/train/{partDir}/{imageFile}
+              const imagePath = path.join(datasetPath, 'images', key)
+              fileExists = fs.existsSync(imagePath)
+            }
+            
+            if (fileExists) {
+              // 파일이 존재하면 유지 (검증하지 않았지만 존재하는 파일)
+              newCache[key] = value
+            }
+          }
+        }
+        addLog('info', '검증 캐시 저장 중...')
+        await saveValidationCache(datasetPath, newCache)
+        const totalCached = Object.keys(newCache).length
+        const newlyValidated = Object.keys(newCache).filter(k => !validationCache[k] || validationCache[k].hash !== newCache[k]?.hash).length
+        addLog('info', `검증 캐시 저장 완료: 총 ${totalCached}개 파일 (새로 검증: ${newlyValidated}개)`)
+      }
+      
+      // 메타데이터 검증 (부품별 디렉토리 구조 지원)
+      if (fs.existsSync(metaPath)) {
+        // 부품별 디렉토리 구조 확인
+        const metaItems = fs.readdirSync(metaPath)
+        let metaFiles = []
+        
+        for (const item of metaItems) {
+          const itemPath = path.join(metaPath, item)
+          const stat = fs.statSync(itemPath)
+          
+          if (stat.isDirectory()) {
+            // 부품별 디렉토리 내의 JSON 파일 찾기
+            const partMetaFiles = fs.readdirSync(itemPath).filter(f => f.endsWith('.json'))
+            metaFiles.push(...partMetaFiles.map(f => ({ file: f, partId: item, dir: 'meta' })))
+          } else if (stat.isFile() && item.endsWith('.json')) {
+            // 직접 파일인 경우
+            metaFiles.push({ file: item, partId: null, dir: 'meta' })
+          }
+        }
+        
+        results.totalMetadata += metaFiles.length
+        
+        // 상세 메타데이터 검증
+        if (validateMetadata && checkFileIntegrity) {
+          let metaValidatedCount = 0
+          let metaCachedCount = 0
+          
+          for (const metaInfo of metaFiles) {
+            const metaFilePath = metaInfo.partId 
+              ? path.join(metaPath, metaInfo.partId, metaInfo.file)
+              : path.join(metaPath, metaInfo.file)
+            const relativePath = metaInfo.partId 
+              ? `meta/${metaInfo.partId}/${metaInfo.file}`
+              : `meta/${metaInfo.file}`
+            const fileHash = getFileHash(metaFilePath)
+            
+            // 증분 검증: 캐시 확인
+            let shouldValidate = true
+            if (incrementalValidation && validationCache[relativePath]) {
+              const cached = validationCache[relativePath]
+              if (cached.hash === fileHash && cached.valid === true) {
+                shouldValidate = false
+                metaCachedCount++
+                results.metadataValidation.valid++
+                newCache[relativePath] = cached
+              }
+            }
+            
+            if (shouldValidate) {
+              try {
+                const metaValidation = await validateMetadataFile(metaFilePath)
+                if (metaValidation.valid) {
+                  results.metadataValidation.valid++
+                  newCache[relativePath] = {
+                    hash: fileHash,
+                    valid: true,
+                    timestamp: new Date().toISOString(),
+                    metadataValidation: { valid: true }
+                  }
+                  metaValidatedCount++
+                } else {
+                  results.metadataValidation.invalid++
+                  const errorMsg = `${relativePath}: ${metaValidation.error}`
+                  results.metadataValidation.errors.push(errorMsg)
+                  results.warnings.push(errorMsg)
+                  newCache[relativePath] = {
+                    hash: fileHash,
+                    valid: false,
+                    timestamp: new Date().toISOString(),
+                    metadataValidation: { valid: false, error: metaValidation.error }
+                  }
+                  metaValidatedCount++
+                }
+              } catch (error) {
+                results.metadataValidation.invalid++
+                const errorMsg = `${relativePath}: 검증 오류 - ${error.message}`
+                results.metadataValidation.errors.push(errorMsg)
+                results.warnings.push(errorMsg)
+                newCache[relativePath] = {
+                  hash: fileHash,
+                  valid: false,
+                  timestamp: new Date().toISOString(),
+                  error: error.message
+                }
+                metaValidatedCount++
+              }
+            }
+          }
+          
+          if (incrementalValidation && metaCachedCount > 0) {
+            addLog('info', `메타데이터 캐시 사용 ${metaCachedCount}개, 새로 검증 ${metaValidatedCount}개`)
+          }
+        } else {
+          results.metadataValidation.valid += metaFiles.length
+        }
+      }
+      
+      if (fs.existsSync(metaEPath)) {
+        // 부품별 디렉토리 구조 확인
+        const metaEItems = fs.readdirSync(metaEPath)
+        let metaEFiles = []
+        
+        for (const item of metaEItems) {
+          const itemPath = path.join(metaEPath, item)
+          const stat = fs.statSync(itemPath)
+          
+          if (stat.isDirectory()) {
+            // 부품별 디렉토리 내의 JSON 파일 찾기
+            const partMetaEFiles = fs.readdirSync(itemPath).filter(f => f.endsWith('.json'))
+            metaEFiles.push(...partMetaEFiles.map(f => ({ file: f, partId: item, dir: 'meta-e' })))
+          } else if (stat.isFile() && item.endsWith('.json')) {
+            // 직접 파일인 경우
+            metaEFiles.push({ file: item, partId: null, dir: 'meta-e' })
+          }
+        }
+        
+        results.totalMetadata += metaEFiles.length
+        
+        // 상세 메타데이터 검증 (meta-e)
+        if (validateMetadata && checkFileIntegrity) {
+          let metaEValidatedCount = 0
+          let metaECachedCount = 0
+          
+          for (const metaEInfo of metaEFiles) {
+            const metaEFilePath = metaEInfo.partId 
+              ? path.join(metaEPath, metaEInfo.partId, metaEInfo.file)
+              : path.join(metaEPath, metaEInfo.file)
+            const relativePath = metaEInfo.partId 
+              ? `meta-e/${metaEInfo.partId}/${metaEInfo.file}`
+              : `meta-e/${metaEInfo.file}`
+            const fileHash = getFileHash(metaEFilePath)
+            
+            // 증분 검증: 캐시 확인
+            let shouldValidate = true
+            if (incrementalValidation && validationCache[relativePath]) {
+              const cached = validationCache[relativePath]
+              if (cached.hash === fileHash && cached.valid === true) {
+                shouldValidate = false
+                metaECachedCount++
+                results.metadataValidation.valid++
+                newCache[relativePath] = cached
+              }
+            }
+            
+            if (shouldValidate) {
+              try {
+                const metaEValidation = await validateMetadataFile(metaEFilePath)
+                if (metaEValidation.valid) {
+                  results.metadataValidation.valid++
+                  newCache[relativePath] = {
+                    hash: fileHash,
+                    valid: true,
+                    timestamp: new Date().toISOString(),
+                    metadataValidation: { valid: true }
+                  }
+                  metaEValidatedCount++
+                } else {
+                  results.metadataValidation.invalid++
+                  const errorMsg = `${relativePath}: ${metaEValidation.error}`
+                  results.metadataValidation.errors.push(errorMsg)
+                  results.warnings.push(errorMsg)
+                  newCache[relativePath] = {
+                    hash: fileHash,
+                    valid: false,
+                    timestamp: new Date().toISOString(),
+                    metadataValidation: { valid: false, error: metaEValidation.error }
+                  }
+                  metaEValidatedCount++
+                }
+              } catch (error) {
+                results.metadataValidation.invalid++
+                const errorMsg = `${relativePath}: 검증 오류 - ${error.message}`
+                results.metadataValidation.errors.push(errorMsg)
+                results.warnings.push(errorMsg)
+                newCache[relativePath] = {
+                  hash: fileHash,
+                  valid: false,
+                  timestamp: new Date().toISOString(),
+                  error: error.message
+                }
+                metaEValidatedCount++
+              }
+            }
+          }
+          
+          if (incrementalValidation && metaECachedCount > 0) {
+            addLog('info', `메타데이터-e 캐시 사용 ${metaECachedCount}개, 새로 검증 ${metaEValidatedCount}개`)
+          }
+        } else {
+          results.metadataValidation.valid += metaEFiles.length
+        }
+      }
+    }  // 새 구조 블록 종료 (275번째 줄의 if 블록)
+      
+    } else {
+      // 구 형식: 부품별 개별 폴더 (images/, labels/, meta/, meta-e/)
+      const items = fs.readdirSync(fullPath)
+      
+      for (const item of items) {
+        const itemPath = path.join(fullPath, item)
+        const stats = fs.statSync(itemPath)
+        
+        if (stats.isDirectory() && item !== 'dataset_synthetic') {
+          results.totalParts++
+          
+          const imagesDir = path.join(itemPath, 'images')
+          const labelsDir = path.join(itemPath, 'labels')
+          const metaDir = path.join(itemPath, 'meta')
+          const metaEDir = path.join(itemPath, 'meta-e')
+          
+          let partValid = true
+          const partErrors = []
+          
+          // 이미지 파일 검증
+          if (fs.existsSync(imagesDir)) {
+            const imageFiles = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|bmp|tiff|webp|exr)$/i.test(f))
+            const imageCount = imageFiles.length
+            results.totalImages += imageCount
+            
+            // 이미지 개수 200개 미만 확인
+            if (imageCount < 200) {
+              const insufficientInfo = {
+                partId: item,
+                split: 'unknown', // 구 형식에서는 split 정보 없음
+                currentCount: imageCount,
+                requiredCount: 200,
+                missingCount: 200 - imageCount
+              }
+              results.insufficientImages.push(insufficientInfo)
+              results.warnings.push(`${item}: 이미지 개수가 부족합니다 (현재: ${imageCount}개, 필요: 200개)`)
+            }
+            
+            if (validateImages && checkFileIntegrity) {
+              for (const imageFile of imageFiles) {
+                const imageFilePath = path.join(imagesDir, imageFile)
+                try {
+                  const imageValidation = await validateImageFile(imageFilePath)
+                  if (imageValidation.valid) {
+                    results.imageValidation.valid++
+                    results.fileIntegrity.valid++
+                  } else {
+                    results.imageValidation.invalid++
+                    results.fileIntegrity.invalid++
+                    partValid = false
+                    const errorMsg = `${item}/${imageFile}: ${imageValidation.error}`
+                    results.imageValidation.errors.push(errorMsg)
+                    partErrors.push(errorMsg)
+                  }
+                } catch (error) {
+                  results.imageValidation.invalid++
+                  results.fileIntegrity.invalid++
+                  partValid = false
+                  const errorMsg = `${item}/${imageFile}: 검증 오류 - ${error.message}`
+                  results.imageValidation.errors.push(errorMsg)
+                  partErrors.push(errorMsg)
+                }
+              }
+            } else {
+              results.imageValidation.valid += imageFiles.length
+              results.fileIntegrity.valid += imageFiles.length
+            }
+            
+            // 이미지-라벨 파일명 매칭 확인
+            if (fs.existsSync(labelsDir)) {
+              const labelFiles = fs.readdirSync(labelsDir).filter(f => f.endsWith('.txt'))
+              const imageBaseNames = new Set(imageFiles.map(f => path.parse(f).name))
+              const labelBaseNames = new Set(labelFiles.map(f => path.parse(f).name))
+              
+              for (const imgBase of imageBaseNames) {
+                if (!labelBaseNames.has(imgBase)) {
+                  results.fileMatching.unmatchedImages.push(`${item}/${imgBase}`)
+                  results.warnings.push(`라벨이 없는 이미지: ${item}/${imgBase}`)
+                }
+              }
+              
+              for (const lblBase of labelBaseNames) {
+                if (!imageBaseNames.has(lblBase)) {
+                  results.fileMatching.unmatchedLabels.push(`${item}/${lblBase}`)
+                  results.warnings.push(`이미지가 없는 라벨: ${item}/${lblBase}`)
+                } else {
+                  results.fileMatching.matched++
+                }
+              }
+            }
+          }
+          
+          // 라벨 파일 검증
+          if (fs.existsSync(labelsDir)) {
+            const labelFiles = fs.readdirSync(labelsDir)
+            results.totalLabels += labelFiles.length
+            
+            if (validateLabels && checkFileIntegrity) {
+              for (const labelFile of labelFiles) {
+                const labelFilePath = path.join(labelsDir, labelFile)
+                try {
+                  const labelValidation = await validateLabelFile(labelFilePath)
+                  if (labelValidation.valid) {
+                    results.labelValidation.valid++
+                    if (labelValidation.warning) {
+                      results.warnings.push(`${item}/${labelFile}: ${labelValidation.warning}`)
+                    }
+                  } else {
+                    results.labelValidation.invalid++
+                    partValid = false
+                    const errorMsg = `${item}/${labelFile}: ${labelValidation.error}`
+                    results.labelValidation.errors.push(errorMsg)
+                    partErrors.push(errorMsg)
+                  }
+                } catch (error) {
+                  results.labelValidation.invalid++
+                  partValid = false
+                  const errorMsg = `${item}/${labelFile}: 검증 오류 - ${error.message}`
+                  results.labelValidation.errors.push(errorMsg)
+                  partErrors.push(errorMsg)
+                }
+              }
+            } else {
+              results.labelValidation.valid += labelFiles.length
+            }
+          }
+          
+          // 메타데이터 검증
+          if (fs.existsSync(metaDir)) {
+            const metaFiles = fs.readdirSync(metaDir).filter(f => f.endsWith('.json'))
+            results.totalMetadata += metaFiles.length
+            
+            if (validateMetadata && checkFileIntegrity) {
+              for (const metaFile of metaFiles) {
+                const metaFilePath = path.join(metaDir, metaFile)
+                try {
+                  const metaValidation = await validateMetadataFile(metaFilePath)
+                  if (metaValidation.valid) {
+                    results.metadataValidation.valid++
+                  } else {
+                    results.metadataValidation.invalid++
+                    const errorMsg = `${item}/meta/${metaFile}: ${metaValidation.error}`
+                    results.metadataValidation.errors.push(errorMsg)
+                    results.warnings.push(errorMsg)
+                  }
+                } catch (error) {
+                  results.metadataValidation.invalid++
+                  const errorMsg = `${item}/meta/${metaFile}: 검증 오류 - ${error.message}`
+                  results.metadataValidation.errors.push(errorMsg)
+                  results.warnings.push(errorMsg)
+                }
+              }
+            } else {
+              results.metadataValidation.valid += metaFiles.length
+            }
+          }
+          
+          if (fs.existsSync(metaEDir)) {
+            const metaEFiles = fs.readdirSync(metaEDir).filter(f => f.endsWith('.json'))
+            results.totalMetadata += metaEFiles.length
+            
+            if (validateMetadata && checkFileIntegrity) {
+              for (const metaEFile of metaEFiles) {
+                const metaEFilePath = path.join(metaEDir, metaEFile)
+                try {
+                  const metaValidation = await validateMetadataFile(metaEFilePath)
+                  if (metaValidation.valid) {
+                    results.metadataValidation.valid++
+                  } else {
+                    results.metadataValidation.invalid++
+                    const errorMsg = `${item}/meta-e/${metaEFile}: ${metaValidation.error}`
+                    results.metadataValidation.errors.push(errorMsg)
+                    results.warnings.push(errorMsg)
+                  }
+                } catch (error) {
+                  results.metadataValidation.invalid++
+                  const errorMsg = `${item}/meta-e/${metaEFile}: 검증 오류 - ${error.message}`
+                  results.metadataValidation.errors.push(errorMsg)
+                  results.warnings.push(errorMsg)
+                }
+              }
+            } else {
+              results.metadataValidation.valid += metaEFiles.length
+            }
+          }
+          
+          if (partValid) {
+            results.validParts++
+          } else {
+            results.invalidParts++
+            results.errors.push(`부품 ${item}: ${partErrors.join('; ')}`)
+          }
+        }
+      }
+    }
+  } catch (error) {
+    results.errors.push(`검증 중 오류 발생: ${error.message}`)
+    console.error('검증 오류:', error)
+  }
+  
+  return results
+}
+
+// 검증 API 엔드포인트
+validateRouter.post('/', async (req, res) => {
+  try {
+    const { sourcePath, validateImages, validateLabels, validateMetadata, checkFileIntegrity, validateWebPQuality, validateBucketSync, bucketName } = req.body
+    
+    if (!sourcePath) {
+      return res.status(400).json({ error: 'sourcePath가 필요합니다' })
+    }
+    
+    const jobId = `validation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    
+    // 비동기 검증 시작
+    const validationPromise = performValidation(sourcePath, {
+      validateImages,
+      validateLabels,
+      validateMetadata,
+      checkFileIntegrity,
+      validateWebPQuality: validateWebPQuality !== false, // 기본값: true
+      validateBucketSync: validateBucketSync || false,
+      bucketName: bucketName || 'lego-synthetic'
+    })
+    
+    validationJobs.set(jobId, {
+      status: 'processing',
+      progress: 0,
+      startTime: Date.now(),
+      logs: [],
+      promise: validationPromise
+    })
+    
+    // 실시간 로그 콜백
+    const logCallback = (logEntry) => {
+      const job = validationJobs.get(jobId)
+      if (job) {
+        job.logs.push(logEntry)
+        // 진행률 추정 (로그 수 기반)
+        const estimatedProgress = Math.min(90, job.logs.length * 2)
+        job.progress = estimatedProgress
+      }
+    }
+    
+    // 로그 콜백을 포함하여 검증 실행
+    const validationPromiseWithLogs = performValidation(sourcePath, {
+      validateImages,
+      validateLabels,
+      validateMetadata,
+      checkFileIntegrity,
+      validateWebPQuality: validateWebPQuality !== false,
+      validateBucketSync: validateBucketSync || false,
+      bucketName: bucketName || 'lego-synthetic'
+    }, logCallback)
+    
+    validationPromiseWithLogs.then(results => {
+      const job = validationJobs.get(jobId)
+      if (job) {
+        job.logs.push({ type: 'success', message: '검증 완료', timestamp: new Date().toISOString() })
+        job.status = 'completed'
+        job.progress = 100
+        job.results = results
+        job.endTime = Date.now()
+      }
+    }).catch(error => {
+      const job = validationJobs.get(jobId)
+      if (job) {
+        job.logs.push({ type: 'error', message: `검증 실패: ${error.message}`, timestamp: new Date().toISOString() })
+        job.status = 'failed'
+        job.progress = 0
+        job.error = error.message
+        job.endTime = Date.now()
+      }
+    })
+    
+    res.json({
+      jobId,
+      status: 'processing',
+      message: '검증 작업이 시작되었습니다'
+    })
+  } catch (error) {
+    console.error('검증 API 오류:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 검증 상태 확인 API
+validateRouter.get('/status/:jobId', async (req, res) => {
+  try {
+    const { jobId } = req.params
+    const { lastLogIndex = 0 } = req.query
+    const job = validationJobs.get(jobId)
+    
+    if (!job) {
+      return res.status(404).json({ error: '검증 작업을 찾을 수 없습니다' })
+    }
+    
+    // 새로운 로그만 반환 (lastLogIndex 이후)
+    const newLogs = job.logs ? job.logs.slice(Number(lastLogIndex)) : []
+    
+    const responseData = {
+      status: job.status,
+      progress: job.progress || 0,
+      logs: newLogs,
+      logCount: job.logs ? job.logs.length : 0
+    }
+    
+    if (job.status === 'completed') {
+      Object.assign(responseData, {
+        progress: 100,
+        imageCount: job.results.totalImages,
+        labelCount: job.results.totalLabels,
+        metadataCount: job.results.totalMetadata,
+        validationResults: {
+          errors: job.results.errors,
+          warnings: job.results.warnings,
+          stats: {
+                totalParts: job.results.totalParts,
+                validParts: job.results.validParts,
+                invalidParts: job.results.invalidParts,
+                totalImages: job.results.totalImages,
+                totalLabels: job.results.totalLabels,
+                totalMetadata: job.results.totalMetadata
+              },
+              fileIntegrity: job.results.fileIntegrity,
+              imageValidation: job.results.imageValidation,
+              labelValidation: job.results.labelValidation,
+              metadataValidation: job.results.metadataValidation,
+              fileMatching: job.results.fileMatching,
+              insufficientImages: job.results.insufficientImages || [],
+              webpQuality: job.results.webpQuality || { valid: 0, invalid: 0, errors: [], details: [] },
+              bucketSync: job.results.bucketSync
+            }
+          })
+      res.json(responseData)
+    } else if (job.status === 'failed') {
+      Object.assign(responseData, {
+        progress: 0,
+        error: job.error
+      })
+      res.status(500).json(responseData)
+    } else {
+      res.json(responseData)
+    }
+  } catch (error) {
+    console.error('검증 상태 확인 오류:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 라벨 생성 API
+validateRouter.post('/generate-labels', async (req, res) => {
+  try {
+    const { imagePaths } = req.body
+    
+    if (!imagePaths || !Array.isArray(imagePaths) || imagePaths.length === 0) {
+      return res.status(400).json({ success: false, error: 'imagePaths 배열이 필요합니다' })
+    }
+    
+    const basePath = getDatasetSyntheticPath()
+    let generatedCount = 0
+    const errors = []
+    
+    for (const imagePath of imagePaths) {
+      try {
+        // [FIX] 수정됨: 새 구조와 기존 구조 모두 지원
+        // 새 구조: {partDir}/images/{imageFile} (예: 371024/images/371024_001.png)
+        // 기존 구조: train/407026/407026_110 (예: train/407026/407026_110.webp)
+        const parts = imagePath.split('/')
+        let split, partId, fileName, imageDir, labelDir
+        
+        if (parts.length === 3 && parts[1] === 'images') {
+          // 새 구조: {partDir}/images/{imageFile}
+          const partDir = parts[0]
+          fileName = parts[2]
+          imageDir = path.join(basePath, partDir, 'images')
+          labelDir = path.join(basePath, partDir, 'labels')
+          split = null // 새 구조는 split 없음
+          partId = partDir // partDir이 element_id
+        } else if (parts.length === 3 && ['train', 'val', 'test'].includes(parts[0])) {
+          // 기존 구조: train/407026/407026_110
+          split = parts[0]
+          partId = parts[1]
+          fileName = parts[2]
+          imageDir = path.join(basePath, 'images', split, partId)
+          labelDir = path.join(basePath, 'labels', split, partId)
+        } else {
+          errors.push(`${imagePath}: 경로 형식이 올바르지 않습니다 (새 구조: {partDir}/images/{fileName}, 기존 구조: split/partId/fileName)`)
+          continue
+        }
+        const possibleExtensions = ['.webp', '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.exr']
+        let imageFilePath = null
+        
+        for (const ext of possibleExtensions) {
+          const testPath = path.join(imageDir, `${fileName}${ext}`)
+          if (fs.existsSync(testPath)) {
+            imageFilePath = testPath
+            break
+          }
+        }
+        
+        if (!imageFilePath) {
+          errors.push(`${imagePath}: 이미지 파일을 찾을 수 없습니다`)
+          continue
+        }
+        
+        // 라벨 파일 경로 (이미 위에서 설정됨)
+        // 새 구조: labelDir = path.join(basePath, partDir, 'labels')
+        // 기존 구조: labelDir = path.join(basePath, 'labels', split, partId)
+        const labelFilePath = path.join(labelDir, `${fileName.replace(/\.(png|webp|jpg|jpeg)$/i, '')}.txt`)
+        
+        // 라벨 디렉토리 생성
+        if (!fs.existsSync(labelDir)) {
+          fs.mkdirSync(labelDir, { recursive: true })
+        }
+        
+        // 이미 라벨 파일이 있으면 스킵
+        if (fs.existsSync(labelFilePath)) {
+          console.log(`⏭️ 라벨이 이미 존재함: ${labelFilePath}`)
+          continue
+        }
+        
+        // YOLO 형식 라벨 생성 (전체 이미지 바운딩 박스: class 0, center 0.5 0.5, size 1.0 1.0)
+        const labelContent = '0 0.5 0.5 1.0 1.0\n'
+        fs.writeFileSync(labelFilePath, labelContent, 'utf8')
+        
+        generatedCount++
+        console.log(`✅ 라벨 생성: ${labelFilePath}`)
+      } catch (error) {
+        errors.push(`${imagePath}: ${error.message}`)
+        console.error(`❌ 라벨 생성 실패 (${imagePath}):`, error)
+      }
+    }
+    
+    res.json({
+      success: true,
+      generatedCount,
+      totalRequested: imagePaths.length,
+      errors: errors.length > 0 ? errors : undefined
+    })
+  } catch (error) {
+    console.error('라벨 생성 API 오류:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// 이미지 파일 오류 수정 API
+validateRouter.post('/fix-image-errors', async (req, res) => {
+  try {
+    const { errorPaths } = req.body
+    
+    if (!errorPaths || !Array.isArray(errorPaths) || errorPaths.length === 0) {
+      return res.status(400).json({ success: false, error: 'errorPaths 배열이 필요합니다' })
+    }
+    
+    const basePath = getDatasetSyntheticPath()
+    let fixedCount = 0
+    const errors = []
+    const remainingErrors = []
+    
+    for (const errorPath of errorPaths) {
+      try {
+        // [FIX] 수정됨: 새 구조와 기존 구조 모두 지원
+        // 경로 파싱: train/407026/407026_110: EXR 파일 헤더가 올바르지 않습니다
+        // 또는: {partDir}/images/{imageFile}: 오류
+        const pathMatch = errorPath.match(/^([^:]+):/)
+        if (!pathMatch) {
+          errors.push(`${errorPath}: 경로 형식이 올바르지 않습니다`)
+          remainingErrors.push(errorPath)
+          continue
+        }
+        
+        const fullPath = pathMatch[1]
+        const parts = fullPath.split('/')
+        let imageDir
+        let fileName
+        
+        if (parts.length === 3 && parts[1] === 'images') {
+          // 새 구조: {partDir}/images/{imageFile}
+          const partDir = parts[0]
+          fileName = parts[2]
+          imageDir = path.join(basePath, partDir, 'images')
+        } else if (parts.length === 3 && ['train', 'val', 'test'].includes(parts[0])) {
+          // 기존 구조: train/407026/407026_110
+          const [split, partId, fileNamePart] = parts
+          fileName = fileNamePart
+          imageDir = path.join(basePath, 'images', split, partId)
+        } else {
+          errors.push(`${errorPath}: 경로 형식이 올바르지 않습니다 (새 구조: {partDir}/images/{fileName}, 기존 구조: split/partId/fileName)`)
+          remainingErrors.push(errorPath)
+          continue
+        }
+        const possibleExtensions = ['.exr', '.webp', '.jpg', '.jpeg', '.png', '.bmp', '.tiff']
+        let imageFilePath = null
+        
+        // 파일명에서 확장자 제거 (이미 포함된 경우)
+        const fileNameWithoutExt = fileName.replace(/\.(exr|webp|jpg|jpeg|png|bmp|tiff)$/i, '')
+        
+        for (const ext of possibleExtensions) {
+          const testPath = path.join(imageDir, `${fileNameWithoutExt}${ext}`)
+          if (fs.existsSync(testPath)) {
+            imageFilePath = testPath
+            break
+          }
+        }
+        
+        if (!imageFilePath) {
+          errors.push(`${errorPath}: 이미지 파일을 찾을 수 없습니다`)
+          remainingErrors.push(errorPath)
+          continue
+        }
+        
+        // 파일 재검증
+        const validation = await validateImageFile(imageFilePath)
+        if (validation.valid) {
+          fixedCount++
+          console.log(`✅ 이미지 오류 해결: ${imageFilePath}`)
+        } else {
+          // EXR 파일이 손상된 경우 - 파일 삭제 후 재렌더링 필요 알림
+          const errorMsg = errorPath.includes('EXR') 
+            ? 'EXR 파일이 손상되었습니다. 재렌더링이 필요합니다.'
+            : validation.error
+          errors.push(`${errorPath}: ${errorMsg}`)
+          remainingErrors.push(errorPath)
+        }
+      } catch (error) {
+        errors.push(`${errorPath}: ${error.message}`)
+        remainingErrors.push(errorPath)
+        console.error(`❌ 이미지 오류 수정 실패 (${errorPath}):`, error)
+      }
+    }
+    
+    res.json({
+      success: true,
+      fixedCount,
+      totalRequested: errorPaths.length,
+      remainingErrors: remainingErrors.length > 0 ? remainingErrors : undefined,
+      errors: errors.length > 0 ? errors : undefined
+    })
+  } catch (error) {
+    console.error('이미지 오류 수정 API 오류:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// 메타데이터 JSON 오류 수정 API
+validateRouter.post('/fix-metadata-errors', async (req, res) => {
+  try {
+    const { errorPaths } = req.body
+    
+    if (!errorPaths || !Array.isArray(errorPaths) || errorPaths.length === 0) {
+      return res.status(400).json({ success: false, error: 'errorPaths 배열이 필요합니다' })
+    }
+    
+    const basePath = getDatasetSyntheticPath()
+    let fixedCount = 0
+    const errors = []
+    const remainingErrors = []
+    
+    for (const errorPath of errorPaths) {
+      try {
+        // [FIX] 수정됨: 새 구조와 기존 구조 모두 지원
+        // 경로 파싱: meta/407026_001.json: 필수 필드 누락 또는 meta-e/407026_001_e2.json: JSON 파싱 오류
+        // 또는 train/407026/407026_001 -> meta/407026_001.json 형식
+        // 또는 {partDir}/meta/407026_001.json: 오류 또는 {partDir}/images/{imageFile}: 메타데이터 오류
+        let jsonFilePath = null
+        let metaDir = null
+        let fileName = null
+        
+        // 형식 1: meta/407026_001.json: 오류 또는 {partDir}/meta/407026_001.json: 오류
+        const metaPathMatch = errorPath.match(/^(?:([^\/]+)\/)?(meta(?:-e)?)\/([^:]+):/)
+        if (metaPathMatch) {
+          const [, partDir, metaDirName, fileNamePart] = metaPathMatch
+          metaDir = metaDirName
+          fileName = fileNamePart
+          if (partDir) {
+            // 새 구조: {partDir}/meta/{fileName}
+            jsonFilePath = path.join(basePath, partDir, metaDirName, fileNamePart)
+          } else {
+            // 기존 구조: meta/{fileName}
+            jsonFilePath = path.join(basePath, metaDirName, fileNamePart)
+          }
+        } else {
+          // 형식 2: train/407026/407026_001: 메타데이터 오류 또는 {partDir}/images/{imageFile}: 메타데이터 오류
+          const imagePathMatch = errorPath.match(/^([^:]+):/)
+          if (imagePathMatch) {
+            const fullPath = imagePathMatch[1]
+            const parts = fullPath.split('/')
+            if (parts.length === 3 && parts[1] === 'images') {
+              // 새 구조: {partDir}/images/{imageFile}
+              const partDir = parts[0]
+              const fileBase = parts[2].replace(/\.(png|webp|jpg|jpeg)$/i, '')
+              // meta 또는 meta-e 디렉토리 확인
+              const possibleMetaDirs = ['meta', 'meta-e']
+              for (const dir of possibleMetaDirs) {
+                const testFileName = fileBase + '.json'
+                const testPath = path.join(basePath, partDir, dir, testFileName)
+                if (fs.existsSync(testPath)) {
+                  jsonFilePath = testPath
+                  metaDir = dir
+                  fileName = testFileName
+                  break
+                }
+              }
+              // meta-e의 경우 _e2.json 형식도 확인
+              if (!jsonFilePath) {
+                for (const dir of possibleMetaDirs) {
+                  const testFileName = fileBase + '_e2.json'
+                  const testPath = path.join(basePath, partDir, dir, testFileName)
+                  if (fs.existsSync(testPath)) {
+                    jsonFilePath = testPath
+                    metaDir = dir
+                    fileName = testFileName
+                    break
+                  }
+                }
+              }
+            } else if (parts.length === 3 && ['train', 'val', 'test'].includes(parts[0])) {
+              // 기존 구조: train/407026/407026_001
+              const [, partId, fileBase] = parts
+              // meta 또는 meta-e 디렉토리 확인
+              const possibleMetaDirs = ['meta', 'meta-e']
+              for (const dir of possibleMetaDirs) {
+                const testFileName = fileBase + '.json'
+                const testPath = path.join(basePath, dir, testFileName)
+                if (fs.existsSync(testPath)) {
+                  jsonFilePath = testPath
+                  metaDir = dir
+                  fileName = testFileName
+                  break
+                }
+              }
+              // meta-e의 경우 _e2.json 형식도 확인
+              if (!jsonFilePath) {
+                for (const dir of possibleMetaDirs) {
+                  const testFileName = fileBase + '_e2.json'
+                  const testPath = path.join(basePath, dir, testFileName)
+                  if (fs.existsSync(testPath)) {
+                    jsonFilePath = testPath
+                    metaDir = dir
+                    fileName = testFileName
+                    break
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        if (!jsonFilePath || !fs.existsSync(jsonFilePath)) {
+          errors.push(`${errorPath}: JSON 파일을 찾을 수 없습니다`)
+          remainingErrors.push(errorPath)
+          continue
+        }
+        
+        // 파일 내용 읽기
+        let metadata = {}
+        try {
+          const content = await fs.promises.readFile(jsonFilePath, 'utf8')
+          metadata = JSON.parse(content)
+        } catch (parseError) {
+          // JSON 파싱 오류인 경우 기본 메타데이터 생성
+          const fileNameBase = fileName.replace('_e2.json', '').replace('.json', '')
+          const partIdMatch = fileNameBase.match(/^(\d+)/)
+          const partId = partIdMatch ? partIdMatch[1] : fileNameBase
+          
+          metadata = {
+            part_id: partId,
+            part_name: fileNameBase,
+            created_at: new Date().toISOString(),
+            ...(fileName.includes('_e2.json') ? { element_id: partId } : {})
+          }
+        }
+        
+        // 필수 필드 확인 및 추가
+        if (!metadata.part_id) {
+          const fileNameBase = fileName.replace('_e2.json', '').replace('.json', '')
+          const partIdMatch = fileNameBase.match(/^(\d+)/)
+          metadata.part_id = partIdMatch ? partIdMatch[1] : fileNameBase
+        }
+        
+        if (fileName.includes('_e2.json')) {
+          if (!metadata.element_id) {
+            metadata.element_id = metadata.part_id
+          }
+        } else {
+          if (!metadata.part_name) {
+            metadata.part_name = fileName.replace('.json', '')
+          }
+        }
+        
+        // 수정된 메타데이터 저장
+        await fs.promises.writeFile(jsonFilePath, JSON.stringify(metadata, null, 2), 'utf8')
+        
+        // 재검증
+        const validation = await validateMetadataFile(jsonFilePath)
+        if (validation.valid) {
+          fixedCount++
+          console.log(`✅ 메타데이터 수정 완료: ${jsonFilePath}`)
+        } else {
+          errors.push(`${errorPath}: ${validation.error}`)
+          remainingErrors.push(errorPath)
+        }
+      } catch (error) {
+        errors.push(`${errorPath}: ${error.message}`)
+        remainingErrors.push(errorPath)
+        console.error(`❌ 메타데이터 수정 실패 (${errorPath}):`, error)
+      }
+    }
+    
+    res.json({
+      success: true,
+      fixedCount,
+      totalRequested: errorPaths.length,
+      remainingErrors: remainingErrors.length > 0 ? remainingErrors : undefined,
+      errors: errors.length > 0 ? errors : undefined
+    })
+  } catch (error) {
+    console.error('메타데이터 수정 API 오류:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// 부족한 이미지 추가 렌더링 API
+validateRouter.post('/generate-missing-images', async (req, res) => {
+  try {
+    // 하위 호환: partInfo 또는 items 모두 허용
+    let { partInfo, items } = req.body
+    const inputArray = Array.isArray(partInfo) && partInfo.length > 0 ? partInfo : (Array.isArray(items) ? items : [])
+    
+    if (!inputArray || inputArray.length === 0) {
+      return res.status(400).json({ success: false, error: 'partInfo(items) 배열이 필요합니다' })
+    }
+    
+    console.log(`📦 추가 렌더링 요청: ${inputArray.length}개 항목`)
+    
+    // Supabase 클라이언트 설정 (렌더링 작업 생성용)
+    let supabase = null
+    try {
+      const { createClient } = await import('@supabase/supabase-js')
+      supabase = createClient(
+        process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+        process.env.VITE_SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1OTQ3NDk4NSwiZXhwIjoyMDc1MDUwOTg1fQ.pPWhWrb4QBC-DT4dd6Y1p-LlHNd9UTKef3SHEXUDp00'
+      )
+    } catch (error) {
+      console.warn('Supabase 클라이언트 생성 실패:', error.message)
+    }
+    
+    let generatedJobs = 0
+    const errors = []
+    
+    for (const rawItem of inputArray) {
+      try {
+        // 집계형 입력 지원: { partId, splits: {train:{missing,...}, ...} }
+        if (rawItem && rawItem.partId && rawItem.splits) {
+          const partId = rawItem.partId
+          for (const split of ['train','val','test']) {
+            const s = rawItem.splits[split]
+            if (!s) continue
+            const missingCount = s.missing || 0
+            const currentCount = s.current || 0
+            if (missingCount <= 0) continue
+            await createRenderingJobForSplit(partId, split, missingCount, currentCount)
+            generatedJobs++
+          }
+          continue
+        }
+        // 단건 입력 { partId, split, missingCount, currentCount }
+        const { partId, split, missingCount, currentCount } = rawItem
+        
+        if (!partId) {
+          errors.push(`부품 ID가 없습니다: ${JSON.stringify(rawItem)}`)
+          continue
+        }
+        
+        const requiredCount = missingCount || (200 - (currentCount || 0))
+        
+        if (requiredCount <= 0) {
+          console.log(`⏭️ ${partId}: 이미지가 충분합니다 (${currentCount}개)`)
+          continue
+        }
+        
+        console.log(`📸 ${split}/${partId}: 추가 ${requiredCount}개 렌더링 필요`)
+        await createRenderingJobForSplit(partId, split, requiredCount, currentCount)
+        generatedJobs++
+      } catch (error) {
+        console.error(`❌ 처리 실패 (${JSON.stringify(rawItem)}):`, error.message)
+        errors.push(`${rawItem.partId || 'unknown'}: ${error.message}`)
+      }
+    }
+    
+    res.json({
+      success: true,
+      generatedJobs,
+      totalRequested: partInfo.length,
+      errors: errors.length > 0 ? errors : undefined
+    })
+  } catch (error) {
+    console.error('추가 렌더링 API 오류:', error)
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+// 내부 유틸: 분할별 렌더링 작업 생성
+async function createRenderingJobForSplit(partId, split, requiredCount, currentCount) {
+  // Supabase 클라이언트 재사용을 위해 상단 스코프의 supabase 접근이 필요하지만
+  // 본 유틸에서는 매 호출마다 안전하게 생성한다.
+  let supabase = null
+  try {
+    const { createClient } = await import('@supabase/supabase-js')
+    supabase = createClient(
+      process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co',
+      process.env.VITE_SUPABASE_SERVICE_ROLE || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    )
+  } catch (e) {
+    console.warn('Supabase 클라이언트 생성 실패(내부):', e.message)
+  }
+
+  if (!supabase) {
+    console.log(`📝 로컬 렌더링 작업 큐에 추가: ${partId} (${requiredCount}개, split: ${split || 'unknown'})`)
+    return
+  }
+
+  // partId가 element_id일 수 있으므로 두 가지 방법으로 조회
+  let partData = null
+  let partError = null
+  const { data: elementData, error: elementError } = await supabase
+    .from('parts_master_features')
+    .select('element_id, part_id, part_name')
+    .eq('element_id', partId)
+    .limit(1)
+    .maybeSingle()
+  if (elementData && !elementError) {
+    partData = elementData
+  } else {
+    const { data: partIdData, error: partIdError } = await supabase
+      .from('parts_master_features')
+      .select('element_id, part_id, part_name')
+      .eq('part_id', partId)
+      .limit(1)
+      .maybeSingle()
+    if (partIdData && !partIdError) {
+      partData = partIdData
+    } else {
+      partError = elementError || partIdError
+    }
+  }
+
+  // 렌더링 작업 정보 구성
+  const elementId = partData ? partData.element_id : partId
+  const partName = partData ? partData.part_name : null
+  const finalPartId = partData ? (partData.part_id || partId) : partId
+  
+  const jobName = `rendering_${partId}_${split}_${Date.now()}`
+  const config = {
+    type: 'rendering',
+    element_id: elementId,
+    part_id: finalPartId,
+    part_name: partName,
+    split: split,
+    image_count: requiredCount,
+    current_count: currentCount || 0,
+    priority: 'high',
+    notes: `검증 결과: 이미지 부족 (${currentCount || 0}개 → ${currentCount ? currentCount + requiredCount : requiredCount}개, split: ${split || 'unknown'}) | 품질 요구사항: SNR≥30dB, 선명도≥50 (작은 부품 탐지 보장)`
+  }
+
+  // rendering_jobs 테이블에 렌더링 작업 저장
+  try {
+    const { error: jobError } = await supabase
+      .from('rendering_jobs')
+      .insert({
+        element_id: elementId,
+        part_id: finalPartId,
+        part_name: partName,
+        status: 'pending',
+        priority: 'high',
+        image_count: requiredCount,
+        split: split || null,
+        notes: config.notes,
+        config: config,
+        created_at: new Date().toISOString()
+      })
+    
+    if (jobError) {
+      // 테이블이 없거나 권한 오류인 경우 로컬 큐로 fallback
+      if (jobError.message.includes('table') || jobError.message.includes('schema cache')) {
+        console.warn(`⚠️ rendering_jobs 테이블 접근 실패, 로컬 큐 사용: ${partId} (${requiredCount}개, split: ${split || 'unknown'})`)
+        console.log(`📝 로컬 렌더링 작업 큐에 추가: ${partId} (${requiredCount}개, split: ${split || 'unknown'})`)
+        return
+      }
+      throw new Error(jobError.message)
+    }
+    
+    console.log(`✅ 렌더링 작업 생성 완료: ${partId} (${requiredCount}개, split: ${split || 'unknown'})`)
+  } catch (error) {
+    // 예외 발생 시에도 로컬 큐로 fallback
+    console.warn(`⚠️ 렌더링 작업 생성 실패, 로컬 큐 사용: ${error.message}`)
+    console.log(`📝 로컬 렌더링 작업 큐에 추가: ${partId} (${requiredCount}개, split: ${split || 'unknown'})`)
+  }
+}
+
+// 라우터 등록
+app.use('/api/synthetic/validate', validateRouter)
+console.log('✅ 검증 라우터 등록 완료: /api/synthetic/validate')
 
 // Health check 엔드포인트
 app.get('/api/synthetic/health', (req, res) => {
@@ -131,15 +2164,19 @@ process.on('unhandledRejection', (reason, promise) => {
   // 서버 종료하지 않고 계속 실행
 })
 
+// [FIX] 수정됨: 서버 종료는 사용자가 명시적으로 종료 신호를 보낼 때만 실행됨
+// 렌더링 프로세스 종료는 서버 종료를 트리거하지 않음
 // 서버 종료 시 작업 상태 저장
 process.on('SIGTERM', () => {
   console.log('⚠️ SIGTERM 신호 수신 - 작업 상태 저장 중...')
+  console.log('⚠️ 사용자에 의한 서버 종료 요청입니다 (렌더링 완료 자동 종료 아님)')
   saveActiveJobsState()
   process.exit(0)
 })
 
 process.on('SIGINT', () => {
   console.log('⚠️ SIGINT 신호 수신 - 작업 상태 저장 중...')
+  console.log('⚠️ 사용자에 의한 서버 종료 요청입니다 (렌더링 완료 자동 종료 아님)')
   saveActiveJobsState()
   process.exit(0)
 })
@@ -176,14 +2213,327 @@ const validateImageFile = async (filePath) => {
     return { valid: false, error: '파일이 손상되었거나 비어있습니다' }
   }
   
-  const validExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']
+  const validExtensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp', '.exr']
   const ext = path.extname(filePath).toLowerCase()
   
   if (!validExtensions.includes(ext)) {
     return { valid: false, error: `지원하지 않는 이미지 형식: ${ext}` }
   }
   
-  return { valid: true, size: integrity.size }
+  // 파일 크기 검증 (최소 1KB)
+  if (integrity.size < 1024) {
+    return { valid: false, error: `파일 크기가 너무 작습니다: ${integrity.size} bytes` }
+  }
+  
+  // EXR 파일 헤더 검증
+  if (ext === '.exr') {
+    try {
+      const fileBuffer = await fs.promises.readFile(filePath)
+      const header = fileBuffer.slice(0, 4)
+      
+      // EXR Magic Number: 0x76 0x2f 0x31 0x01
+      if (header[0] === 0x76 && header[1] === 0x2f && header[2] === 0x31 && header[3] === 0x01) {
+        return { valid: true, size: integrity.size, format: 'exr' }
+      } else {
+        return { valid: false, error: `EXR 파일 헤더가 올바르지 않습니다 (Magic Number 확인 실패)` }
+      }
+    } catch (error) {
+      return { valid: false, error: `EXR 파일 읽기 오류: ${error.message}` }
+    }
+  }
+  
+  // 이미지 파일 헤더 검증 (간단한 버전)
+  try {
+    const fileBuffer = await fs.promises.readFile(filePath)
+    const header = fileBuffer.slice(0, 12)
+    
+    // WebP: RIFF ... WEBP
+    if (ext === '.webp' && header.toString('ascii', 0, 4) === 'RIFF' && header.toString('ascii', 8, 12) === 'WEBP') {
+      return { valid: true, size: integrity.size, format: 'webp' }
+    }
+    
+    // JPEG: FF D8 FF
+    if ((ext === '.jpg' || ext === '.jpeg') && header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
+      return { valid: true, size: integrity.size, format: 'jpeg' }
+    }
+    
+    // PNG: 89 50 4E 47
+    if (ext === '.png' && header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
+      return { valid: true, size: integrity.size, format: 'png' }
+    }
+    
+    // BMP: BM
+    if (ext === '.bmp' && header[0] === 0x42 && header[1] === 0x4D) {
+      return { valid: true, size: integrity.size, format: 'bmp' }
+    }
+    
+    // TIFF: II 2A 00 또는 MM 00 2A
+    if (ext === '.tiff' && ((header[0] === 0x49 && header[1] === 0x49 && header[2] === 0x2A) || 
+        (header[0] === 0x4D && header[1] === 0x4D && header[2] === 0x00 && header[3] === 0x2A))) {
+      return { valid: true, size: integrity.size, format: 'tiff' }
+    }
+    
+    // 헤더 검증 실패 (파일이 손상되었거나 형식이 맞지 않음)
+    return { valid: false, error: `이미지 파일 헤더가 올바르지 않습니다 (${ext} 형식 확인 실패)` }
+  } catch (error) {
+    return { valid: false, error: `이미지 파일 읽기 오류: ${error.message}` }
+  }
+}
+
+// WebP 품질 검증 (학습 편입 가능 여부 중심)
+// 검증 목적: 학습 편입에 문제가 없는지 확인
+// 필수 검증: 파일 무결성, 해상도, WebP 형식
+// 권장 검증: ICC, EXIF (기술문서 준수, 학습에는 문제 없음)
+// 선택적 검증: 선명도, SNR (품질 지표, 학습에는 문제 없음)
+const validateWebPQuality = async (filePath, enabled = true) => {
+  if (!enabled) {
+    return { valid: true, skipped: true }
+  }
+  
+  try {
+    // sharp는 파일 상단에서 이미 import됨
+    const image = sharp(filePath)
+    const metadata = await image.metadata()
+    
+    // depth는 'uchar', 'ushort', 'float' 등의 문자열일 수 있음
+    const depthValue = metadata.depth
+    const is8Bit = depthValue === 'uchar' || depthValue === 8 || depthValue === '8'
+    
+    const metrics = {
+      resolution: { width: metadata.width || 0, height: metadata.height || 0 },
+      hasIcc: metadata.icc !== undefined && metadata.icc !== null,
+      hasExif: metadata.exif !== undefined && metadata.exif !== null,
+      colorDepth: depthValue,
+      is8Bit: is8Bit,
+      format: metadata.format,
+      webpQuality: metadata.quality || null,
+      webpMethod: metadata.method || null,
+      webpLossless: metadata.lossless || false
+    }
+    
+    // 학습 편입 필수 검증 항목 (오류로 처리)
+    const criticalIssues = []
+    // 학습 편입 권장 검증 항목 (경고로 처리)
+    const warnings = []
+    
+    const minResolution = 768 // 기술문서: YOLO 학습 입력 크기 imgsz=768
+    
+    // === 필수 검증: 학습 편입에 필수 ===
+    
+    // 1. 해상도 검증 (YOLO 학습 입력 크기 768x768 필수)
+    if (metrics.resolution.width < minResolution || metrics.resolution.height < minResolution) {
+      criticalIssues.push(`해상도 부족: ${metrics.resolution.width}x${metrics.resolution.height} (최소: ${minResolution}x${minResolution}, YOLO 학습 입력 크기)`)
+    }
+    
+    // 2. WebP 형식 검증 (이미 validateImageFile에서 확인하지만 재확인)
+    if (metadata.format !== 'webp') {
+      criticalIssues.push(`WebP 형식이 아님: ${metadata.format}`)
+    }
+    
+    // 3. 파일 읽기 가능 여부는 이미 validateImageFile에서 확인됨
+    
+    // === 권장 검증: 기술문서 준수 (성능에는 큰 영향 없음, 정보성 경고) ===
+    
+    // ICC 프로파일 검증 (기술문서: sRGB(ICC 유지))
+    if (!metrics.hasIcc) {
+      warnings.push('ICC 프로파일 없음 (기술문서 권장: sRGB ICC 유지)')
+    }
+    
+    // EXIF 메타데이터 검증 (렌더링 정보 포함 가능)
+    if (!metrics.hasExif) {
+      warnings.push('EXIF 메타데이터 없음 (렌더링 정보 포함 가능)')
+    }
+    
+    // 색상 깊이 검증 (8비트 권장)
+    if (!is8Bit) {
+      warnings.push(`색상 깊이: ${depthValue} (권장: 8비트/uchar)`)
+    }
+    
+    // WebP 품질 검증 (q=90 기준, 기술문서 권장)
+    // sharp의 metadata()는 WebP quality/method를 직접 제공하지 않을 수 있음
+    if (metrics.webpQuality !== null && metrics.webpQuality < 90) {
+      warnings.push(`WebP 품질 낮음: q=${metrics.webpQuality} (기술문서 권장: q=90)`)
+    }
+    
+    // WebP 메서드 검증 (-m 6 기준, 기술문서 권장)
+    if (metrics.webpMethod !== null && metrics.webpMethod < 6) {
+      warnings.push(`WebP 메서드 낮음: m=${metrics.webpMethod} (기술문서 권장: m=6)`)
+    }
+    
+    // === 성능 저하 가능 검증: SNR/선명도 (작은 부품 탐지에 영향 가능) ===
+    
+    // 이미지 데이터를 읽어서 선명도 및 SNR 계산
+    // 기술문서: 탐지 Recall(소형 포함) ≥ 0.95 목표
+    // 낮은 SNR/선명도는 작은 부품 탐지 실패 가능성 증가 → 성능 저하 가능
+    try {
+      const imageBuffer = await image.raw().toBuffer()
+      const { width, height } = metrics.resolution
+      const channels = metadata.channels || 3
+      
+      // Laplacian variance 계산 (선명도)
+      const sharpness = calculateLaplacianVariance(imageBuffer, width, height, channels)
+      metrics.sharpness = sharpness
+      
+      // 선명도 검증: 흐린 이미지는 정확한 바운딩 박스/마스크 생성 어려움
+      // 작은 부품 탐지에 영향 가능 (Recall 목표 달성 어려움)
+      const minSharpness = 50
+      if (sharpness < minSharpness) {
+        warnings.push(`선명도 낮음: ${sharpness.toFixed(2)} (권장: ${minSharpness}, 작은 부품 탐지에 영향 가능)`)
+        console.warn(`⚠️ 선명도 낮음 (${filePath}): ${sharpness.toFixed(2)} (권장: ${minSharpness}, 작은 부품 탐지에 영향 가능)`)
+      }
+      
+      // SNR 추정
+      const snrEstimate = estimateSNR(imageBuffer, width, height, channels)
+      metrics.snrEstimate = snrEstimate
+      
+      // SNR 검증: 노이즈가 많으면 작은 부품 탐지 실패 가능
+      // 기술문서: 탐지 Recall(소형 포함) ≥ 0.95 목표 달성 어려움
+      const minSNR = 30
+      if (snrEstimate < minSNR) {
+        warnings.push(`SNR 낮음: ${snrEstimate.toFixed(2)}dB (권장: ${minSNR}dB, 작은 부품 탐지에 영향 가능)`)
+        console.warn(`⚠️ SNR 낮음 (${filePath}): ${snrEstimate.toFixed(2)}dB (권장: ${minSNR}dB, 작은 부품 탐지에 영향 가능)`)
+      }
+    } catch (calcError) {
+      // 선명도/SNR 계산 실패는 검증 오류로 처리하지 않음 (파일은 정상)
+      console.warn(`선명도/SNR 계산 실패 (${filePath}):`, calcError.message)
+    }
+    
+    // === 검증 결과 반환 ===
+    
+    // 필수 검증 실패 시 학습 편입 불가 (오류)
+    if (criticalIssues.length > 0) {
+      return {
+        valid: false,
+        error: `학습 편입 불가: ${criticalIssues.join(', ')}`,
+        metrics,
+        issues: criticalIssues,
+        warnings: warnings.length > 0 ? warnings : undefined
+      }
+    }
+    
+    // 필수 검증 통과, 경고만 있는 경우 학습 편입 가능 (유효)
+    return {
+      valid: true,
+      metrics,
+      warnings: warnings.length > 0 ? warnings : undefined
+    }
+  } catch (error) {
+    // 파일 읽기 실패는 학습 편입 불가 (오류)
+    return {
+      valid: false,
+      error: `WebP 파일 읽기 실패: ${error.message}`,
+      metrics: null
+    }
+  }
+}
+
+// Laplacian variance 계산 (선명도)
+const calculateLaplacianVariance = (imageBuffer, width, height, channels) => {
+  try {
+    const laplacianKernel = [
+      [0, -1, 0],
+      [-1, 4, -1],
+      [0, -1, 0]
+    ]
+    
+    let sum = 0
+    let count = 0
+    
+    // 그레이스케일 변환 (RGB 평균)
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        let gray = 0
+        for (let c = 0; c < channels; c++) {
+          const idx = (y * width + x) * channels + c
+          gray += imageBuffer[idx]
+        }
+        gray /= channels
+        
+        // Laplacian 계산
+        let laplacian = 0
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const idx = ((y + ky) * width + (x + kx)) * channels
+            let neighborGray = 0
+            for (let c = 0; c < channels; c++) {
+              neighborGray += imageBuffer[idx + c]
+            }
+            neighborGray /= channels
+            laplacian += neighborGray * laplacianKernel[ky + 1][kx + 1]
+          }
+        }
+        
+        sum += laplacian * laplacian
+        count++
+      }
+    }
+    
+    return count > 0 ? sum / count : 0
+  } catch (error) {
+    console.warn('Laplacian variance 계산 실패:', error.message)
+    return 0
+  }
+}
+
+// SNR 추정 (Signal-to-Noise Ratio)
+const estimateSNR = (imageBuffer, width, height, channels) => {
+  try {
+    // 간단한 SNR 추정: 신호 강도 / 노이즈 추정
+    const blockSize = 32
+    let signalSum = 0
+    let signalSqSum = 0
+    let noiseSum = 0
+    
+    // 전체 이미지에서 신호 평균 계산
+    for (let y = 0; y < height; y += blockSize) {
+      for (let x = 0; x < width; x += blockSize) {
+        let blockSum = 0
+        let blockCount = 0
+        
+        for (let by = 0; by < blockSize && y + by < height; by++) {
+          for (let bx = 0; bx < blockSize && x + bx < width; bx++) {
+            const idx = ((y + by) * width + (x + bx)) * channels
+            let gray = 0
+            for (let c = 0; c < channels; c++) {
+              gray += imageBuffer[idx + c]
+            }
+            gray /= channels
+            blockSum += gray
+            blockCount++
+          }
+        }
+        
+        const blockMean = blockSum / blockCount
+        signalSum += blockMean
+        signalSqSum += blockMean * blockMean
+        
+        // 블록 내 노이즈 추정
+        for (let by = 0; by < blockSize && y + by < height; by++) {
+          for (let bx = 0; bx < blockSize && x + bx < width; bx++) {
+            const idx = ((y + by) * width + (x + bx)) * channels
+            let gray = 0
+            for (let c = 0; c < channels; c++) {
+              gray += imageBuffer[idx + c]
+            }
+            gray /= channels
+            noiseSum += Math.abs(gray - blockMean)
+          }
+        }
+      }
+    }
+    
+    const signalMean = signalSum / ((width / blockSize) * (height / blockSize))
+    const signalVariance = signalSqSum / ((width / blockSize) * (height / blockSize)) - signalMean * signalMean
+    const noiseMean = noiseSum / (width * height)
+    
+    if (noiseMean === 0) return 100 // 노이즈가 없으면 매우 높은 SNR
+    
+    const snr = 20 * Math.log10(signalMean / noiseMean)
+    return Math.max(0, snr)
+  } catch (error) {
+    console.warn('SNR 추정 실패:', error.message)
+    return 0
+  }
 }
 
 const validateLabelFile = async (filePath) => {
@@ -255,165 +2605,16 @@ const validateMetadataFile = async (filePath) => {
         return { valid: false, error: `E2 JSON 필수 필드 누락: element_id` }
       }
     } else {
-      // 일반 JSON 파일은 part_name 필수
-      if (!metadata.part_name) {
-        return { valid: false, error: `일반 JSON 필수 필드 누락: part_name` }
+      // 일반 JSON 파일은 element_id 또는 part_name 중 하나 필수
+      // (element_id가 있으면 통과, 없으면 part_name 필요)
+      if (!metadata.element_id && !metadata.part_name) {
+        return { valid: false, error: `일반 JSON 필수 필드 누락: element_id 또는 part_name` }
       }
     }
     
     return { valid: true, fields: Object.keys(metadata) }
   } catch (error) {
     return { valid: false, error: `JSON 파싱 오류: ${error.message}` }
-  }
-}
-
-const performValidation = async (sourcePath, options) => {
-  const results = {
-    totalParts: 0,
-    validParts: 0,
-    invalidParts: 0,
-    totalImages: 0,
-    totalLabels: 0,
-    totalMetadata: 0,
-    errors: [],
-    warnings: [],
-    fileIntegrity: {
-      valid: 0,
-      invalid: 0,
-      errors: []
-    },
-    bucketSync: {
-      totalFiles: 0,
-      uploadedFiles: 0,
-      missingFiles: 0,
-      syncErrors: [],
-      bucketStats: {
-        totalObjects: 0,
-        totalSize: 0
-      }
-    }
-  }
-  
-  try {
-    console.log(`🔍 검증 시작: ${sourcePath}`)
-    
-    // 폴더 존재 확인
-    try {
-      const stats = await fs.promises.stat(sourcePath)
-      if (!stats.isDirectory()) {
-        results.errors.push(`경로가 폴더가 아닙니다: ${sourcePath}`)
-        return results
-      }
-    } catch (error) {
-      results.errors.push(`폴더가 존재하지 않습니다: ${sourcePath} (${error.message})`)
-      return results
-    }
-    
-    // 부품별 검증
-    const items = await fs.promises.readdir(sourcePath)
-    console.log(`📁 발견된 항목: ${items.length}개`)
-    
-    // 제외할 폴더들 (실제 부품이 아닌 시스템 폴더)
-    const excludeFolders = ['dataset_synthetic', 'logs', 'temp', 'cache']
-    
-    for (const item of items) {
-      const itemPath = path.join(sourcePath, item)
-      const stats = await fs.promises.stat(itemPath)
-      
-      if (stats.isDirectory()) {
-        // 시스템 폴더는 제외
-        if (excludeFolders.includes(item)) {
-          console.log(`⏭️ 시스템 폴더 제외: ${item}`)
-          continue
-        }
-        
-        results.totalParts++
-        console.log(`🔍 부품 검증: ${item}`)
-        
-        const partItems = await fs.promises.readdir(itemPath)
-        let partValid = true
-        let partErrors = []
-        
-        // 이미지 파일 검증
-        const imageFiles = partItems.filter(file => /\.(jpg|jpeg|png|bmp|tiff|webp)$/i.test(file))
-        results.totalImages += imageFiles.length
-        
-        for (const imageFile of imageFiles) {
-          const imagePath = path.join(itemPath, imageFile)
-          const imageValidation = await validateImageFile(imagePath)
-          
-          if (!imageValidation.valid) {
-            partValid = false
-            partErrors.push(`이미지 ${imageFile}: ${imageValidation.error}`)
-            results.fileIntegrity.invalid++
-          } else {
-            results.fileIntegrity.valid++
-          }
-        }
-        
-        // 라벨 파일 검증
-        const labelFiles = partItems.filter(file => file.endsWith('.txt'))
-        results.totalLabels += labelFiles.length
-        
-        for (const labelFile of labelFiles) {
-          const labelPath = path.join(itemPath, labelFile)
-          const labelValidation = await validateLabelFile(labelPath)
-          
-          if (!labelValidation.valid) {
-            partValid = false
-            partErrors.push(`라벨 ${labelFile}: ${labelValidation.error}`)
-          }
-        }
-        
-        // 메타데이터 파일 검증
-        const metadataFiles = partItems.filter(file => file.endsWith('.json'))
-        results.totalMetadata += metadataFiles.length
-        
-        for (const metadataFile of metadataFiles) {
-          const metadataPath = path.join(itemPath, metadataFile)
-          const metadataValidation = await validateMetadataFile(metadataPath)
-          
-          if (!metadataValidation.valid) {
-            partValid = false
-            partErrors.push(`메타데이터 ${metadataFile}: ${metadataValidation.error}`)
-          }
-        }
-        
-        if (partValid) {
-          results.validParts++
-        } else {
-          results.invalidParts++
-          results.errors.push(`부품 ${item}: ${partErrors.join(', ')}`)
-        }
-      }
-    }
-    
-    // 버킷 동기화 검증
-    if (options.validateBucketSync && options.bucketName) {
-      console.log(`🔍 버킷 동기화 검증 시작: ${options.bucketName}`)
-      try {
-        const bucketSyncResult = await validateBucketSync(sourcePath, options.bucketName)
-        results.bucketSync = bucketSyncResult
-        console.log(`✅ 버킷 동기화 검증 완료: ${bucketSyncResult.uploadedFiles}/${bucketSyncResult.totalFiles} 파일 업로드됨`)
-      } catch (error) {
-        console.error('❌ 버킷 동기화 검증 실패:', error)
-        results.bucketSync = {
-          totalFiles: 0,
-          uploadedFiles: 0,
-          missingFiles: 0,
-          syncErrors: [`버킷 동기화 검증 실패: ${error.message}`],
-          bucketStats: { totalObjects: 0, totalSize: 0 }
-        }
-      }
-    }
-    
-    console.log(`✅ 검증 완료: 총 ${results.totalParts}개 부품, 유효 ${results.validParts}개`)
-    return results
-    
-  } catch (error) {
-    console.error('❌ 검증 중 오류:', error)
-    results.errors.push(`검증 중 오류 발생: ${error.message}`)
-    return results
   }
 }
 
@@ -508,7 +2709,6 @@ function validateActiveProcesses() {
     try {
       // Windows에서 프로세스 존재 확인
       if (process.platform === 'win32') {
-        const { execSync } = require('child_process')
         try {
           const result = execSync(`tasklist /FI "PID eq ${pid}" /NH`, { 
             timeout: 1000,
@@ -1400,8 +3600,8 @@ async function startBlenderRendering(job) {
   const background = job.config.background || 'white'
   // 정밀도 모드: 흰 배경일 때 Standard 강제, gray는 Filmic
   const colorManagement = 'standard'
-  // 해상도/화면점유율(기본 정밀 값)
-  const resolution = job.config.resolution || '1024x1024'
+  // 해상도/화면점유율(기술문서 2.4: 최소 768x768)
+  const resolution = job.config.resolution || '768x768'
   const targetFill = typeof job.config.targetFill === 'number' ? job.config.targetFill : 0.92
   let colorId = job.config.colorId
   let effectivePartId = partId
@@ -1558,6 +3758,18 @@ async function startBlenderRendering(job) {
           // 🔧 수정됨: 한 개씩 순차 렌더링 및 완료 대기
           await startBlenderRendering(partJob)
           
+          // [FIX] SKIP 감지 시 즉시 다음 부품으로 진행
+          if (partJob.status === 'completed') {
+            console.log(`[부품 ${i + 1}] SKIP으로 인해 즉시 완료 처리`)
+            results.completed++
+            job.logs.push({ 
+              timestamp: new Date(), 
+              type: 'success', 
+              message: `✅ 부품 ${i + 1}/${setPartsData.length} 완료 (SKIP): ${setPart.lego_parts?.name || partId}` 
+            })
+            continue // 다음 부품으로 즉시 진행
+          }
+          
           // [FIX] Blender 프로세스 종료 감지 개선
           // partJob.blenderProcess에 close 이벤트 핸들러 추가
           if (partJob.blenderProcess) {
@@ -1602,7 +3814,6 @@ async function startBlenderRendering(job) {
               // 프로세스가 kill되었는지 확인 (Windows)
               try {
                 if (process.platform === 'win32') {
-                  const { execSync } = require('child_process')
                   try {
                     const result = execSync(`tasklist /FI "PID eq ${partJob.blenderProcess.pid}" /NH`, { 
                       timeout: 1000,
@@ -1747,10 +3958,12 @@ async function startBlenderRendering(job) {
           type: 'info'
         })
         
+        // [FIX] 수정됨: 새 구조 지원 - dataset_synthetic 경로 직접 전달
+        const datasetSyntheticPath = getDatasetSyntheticPath()
         const prepareProcess = spawn('python', [
           path.join(__dirname, '..', 'scripts', 'prepare_training_dataset.py'),
-          '--source', path.join(__dirname, '..', 'output', 'synthetic'),
-          '--output', path.join(__dirname, '..', 'output', 'synthetic', 'dataset_synthetic')
+          '--source', datasetSyntheticPath,  // [FIX] dataset_synthetic 경로 직접 전달
+          '--output', datasetSyntheticPath
         ], {
           cwd: path.join(__dirname, '..'),
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -2015,7 +4228,7 @@ async function startBlenderRendering(job) {
     '--samples', String(samples),
     '--background', background,
     '--ldraw-path', ldrawPath,
-    '--output-dir', './output/synthetic',
+    '--output-dir', getSyntheticRoot(),
     '--output-subdir', job.config.elementId ? String(job.config.elementId) : String(displayPartId),
     ...(job.config.elementId ? ['--element-id', String(job.config.elementId)] : []),
     '--resolution', String(resolution),
@@ -2186,6 +4399,34 @@ async function startBlenderRendering(job) {
       }
     }
     
+    // [FIX] SKIP 메시지 감지 및 즉시 완료 처리
+    if (output.includes('SKIP:') || output.includes('로컬 기준으로 이미 렌더링 완료')) {
+      console.log('✅ SKIP 감지: 렌더링 완료로 처리')
+      job.status = 'completed'
+      job.progress = 100
+      job.logs.push({
+        timestamp: new Date(),
+        message: 'SKIP: 이미 렌더링 완료된 부품',
+        type: 'success'
+      })
+      
+      // [FIX] SKIP 시 Blender 프로세스 즉시 종료
+      if (blenderProcess && blenderProcess.pid) {
+        try {
+          console.log(`✅ SKIP 감지: Blender 프로세스 종료 시도 (PID: ${blenderProcess.pid})`)
+          blenderProcess.kill('SIGTERM')
+          setTimeout(() => {
+            if (blenderProcess && blenderProcess.exitCode === null) {
+              blenderProcess.kill('SIGKILL')
+              console.log(`✅ SKIP 감지: Blender 프로세스 강제 종료 (PID: ${blenderProcess.pid})`)
+            }
+          }, 1000)
+        } catch (killError) {
+          console.warn(`⚠️ SKIP 감지: Blender 프로세스 종료 실패:`, killError)
+        }
+      }
+    }
+    
     // 모든 출력을 로그에 추가 (디버깅용)
     job.logs.push({
       timestamp: new Date(),
@@ -2240,6 +4481,10 @@ async function startBlenderRendering(job) {
   
   blenderProcess.on('close', async (code) => {
     try {
+    // [FIX] 수정됨: 렌더링 완료 후에도 서버는 계속 실행되어야 함
+    // 서버 종료는 사용자가 명시적으로 종료 신호(SIGTERM/SIGINT)를 보낼 때만 실행됨
+    // 렌더링 프로세스 종료는 서버 종료를 트리거하지 않음
+    
     // 동시 렌더링 제어에서 제거
     if (blenderProcess.pid) {
       const wasRemoved = activeBlenderProcesses.delete(blenderProcess.pid)
@@ -2253,6 +4498,7 @@ async function startBlenderRendering(job) {
     }
     
     console.log(`🏁 Blender 프로세스 종료: 코드 ${code}`)
+    console.log(`🔄 서버는 계속 실행 중입니다 (다음 렌더링 작업 대기 중)`)
     
     if (code === 0) {
       console.log('✅ 렌더링 성공적으로 완료')
@@ -2282,9 +4528,11 @@ async function startBlenderRendering(job) {
       })
     }
     
+    // [FIX] 수정됨: 렌더링 완료 후에도 서버는 계속 실행됨
+    // 작업 정보만 삭제하고 서버는 종료하지 않음
     // 5분 후 작업 정보 삭제
     setTimeout(() => {
-      console.log(`🗑️ 작업 ${job.id} 정보 삭제`)
+      console.log(`🗑️ 작업 ${job.id} 정보 삭제 (서버는 계속 실행 중)`)
       activeJobs.delete(job.id)
     }, 5 * 60 * 1000)
     } catch (closeHandlerError) {
@@ -2335,7 +4583,7 @@ function isPortAvailable(port) {
 app.get('/api/synthetic/files/:partId', async (req, res) => {
   try {
     const { partId } = req.params
-    const baseDir = path.join(__dirname, '..', 'output', 'synthetic', partId)
+    const baseDir = getPartDatasetPath(partId)
     if (!fs.existsSync(baseDir)) {
       res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
       res.set('Pragma', 'no-cache')
@@ -2517,7 +4765,7 @@ app.get('/api/dataset/progress', (req, res) => {
 
 app.get('/api/dataset/source-count', async (req, res) => {
   try {
-    const outputDir = path.join(__dirname, '..', 'output', 'synthetic')
+    const outputDir = getSyntheticRoot()
     
     if (!fs.existsSync(outputDir)) {
       return res.json({ count: 0 })
@@ -2670,15 +4918,8 @@ const findAvailablePort = async (startPort = 3001, maxPort = 3010) => {
 // 서버 시작
 const startServer = async () => {
   try {
-    // 검증 라우터 추가
-    try {
-      const validateRouter = await import('../api/synthetic/validate.js')
-      app.use('/api/synthetic/validate', validateRouter.default)
-      console.log('✅ 검증 라우터 등록 완료: /api/synthetic/validate')
-    } catch (error) {
-      console.error('❌ 검증 라우터 등록 실패:', error.message)
-      console.log('🔧 직접 검증 엔드포인트 추가...')
-    }
+    // 검증 라우터는 이미 등록되어 있음 (파일 상단에서)
+    console.log('✅ 검증 라우터는 이미 등록되어 있습니다.')
     
     // 고정 포트 3011 사용 (근본 문제 해결)
     const PORT = 3011;
@@ -2690,8 +4931,6 @@ const startServer = async () => {
       
       // 포트 3011을 사용하는 프로세스 찾기 및 종료
       try {
-        const { exec } = require('child_process');
-        const { promisify } = require('util');
         const execAsync = promisify(exec);
         
         // Windows에서 포트 3011을 사용하는 프로세스 찾기
@@ -2714,7 +4953,7 @@ const startServer = async () => {
       }
     }
     
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`🚀 Synthetic API 서버가 포트 ${PORT}에서 실행 중입니다.`)
       console.log(`📡 API 엔드포인트: http://localhost:${PORT}`)
       console.log(`🖼️  정적 파일: http://localhost:${PORT}/api/synthetic/static`)
@@ -2734,6 +4973,27 @@ const startServer = async () => {
       } catch (fileError) {
         console.warn('포트 정보 파일 저장 실패:', fileError.message)
       }
+    })
+    
+    // [FIX] 수정됨: 포트 바인딩 에러 핸들러 추가
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ Synthetic API (포트 ${PORT}): 포트바인딩 실패`)
+        console.error(`포트 ${PORT}가 이미 사용 중입니다.`)
+        console.error('💡 해결 방법:')
+        console.error('   1. 기존 프로세스 확인: netstat -ano | findstr :3011')
+        console.error('   2. 프로세스 종료: taskkill /F /PID <PID>')
+        console.error('   3. 또는 다른 포트 사용: SYNTHETIC_API_PORT 환경 변수 설정')
+      } else {
+        console.error(`❌ Synthetic API (포트 ${PORT}): 포트바인딩 실패`)
+        console.error(`오류: ${error.message}`)
+        console.error('스택:', error.stack)
+      }
+      // 서버 시작 실패 시 프로세스 종료
+      setTimeout(() => {
+        console.error('⚠️ 5초 후 종료합니다...')
+        process.exit(1)
+      }, 5000)
     })
     
   } catch (error) {
@@ -3205,16 +5465,22 @@ app.post('/api/synthetic/dataset/prepare', async (req, res) => {
   try {
     console.log('📋 데이터셋 준비 요청 받음:', req.body)
     
-    const { sourcePath = 'output/synthetic', forceRebuild = false } = req.body
-    const fullPath = path.isAbsolute(sourcePath) ? sourcePath : path.join(process.cwd(), sourcePath)
+    const { sourcePath, forceRebuild = false } = req.body
+    // [FIX] 수정됨: sourcePath가 없으면 getDatasetSyntheticPath() 사용 (환경 변수 기반)
+    // sourcePath가 있으면 사용자가 지정한 경로 사용 (기존 동작 유지)
+    const datasetSyntheticPath = sourcePath 
+      ? (path.isAbsolute(sourcePath) 
+          ? path.join(sourcePath, 'dataset_synthetic') 
+          : path.join(process.cwd(), sourcePath, 'dataset_synthetic'))
+      : getDatasetSyntheticPath()
     
-    console.log(`📁 데이터셋 준비 시작: ${fullPath}`)
+    console.log(`📁 데이터셋 준비 시작: ${datasetSyntheticPath}`)
     console.log(`🔄 모드: ${forceRebuild ? '강제 재생성' : '증분 업데이트'}`)
     
     // 데이터셋 준비 스크립트 실행
     const scriptArgs = [
-      '--source', fullPath,
-      '--output', path.join(fullPath, 'dataset_synthetic')
+      '--source', datasetSyntheticPath,  // [FIX] dataset_synthetic 경로 직접 전달
+      '--output', datasetSyntheticPath
     ]
     
     if (forceRebuild) {
@@ -3273,14 +5539,112 @@ app.post('/api/synthetic/dataset/prepare', async (req, res) => {
           type: 'success'
         })
         
-        // 실제 파일 개수 계산
+        // [FIX] 수정됨: 실제 파일 개수 계산 (새 구조 지원)
         try {
-          const datasetPath = path.join(fullPath, 'dataset_synthetic')
-          const imageCount = await countFiles(path.join(datasetPath, 'images', 'train')) + 
-                           await countFiles(path.join(datasetPath, 'images', 'val'))
-          const labelCount = await countFiles(path.join(datasetPath, 'labels', 'train')) + 
-                           await countFiles(path.join(datasetPath, 'labels', 'val'))
-          const metadataCount = await countFiles(path.join(datasetPath, 'metadata'))
+          const datasetPath = getDatasetSyntheticPath()
+          console.log(`[DEBUG] 파일 개수 계산 시작: ${datasetPath}`)
+          
+          // 새 구조 확인: dataset_synthetic/{element_id}/images/train 구조
+          const partDirsNewStructure = fs.existsSync(datasetPath) ? fs.readdirSync(datasetPath).filter(item => {
+            const itemPath = path.join(datasetPath, item)
+            try {
+              const stats = fs.statSync(itemPath)
+              if (!stats.isDirectory()) return false
+              // 부품 폴더 내에 images/train 폴더가 있는지 확인
+              const imagesTrainDir = path.join(itemPath, 'images', 'train')
+              const hasTrainDir = fs.existsSync(imagesTrainDir) && fs.statSync(imagesTrainDir).isDirectory()
+              if (hasTrainDir) {
+                console.log(`[DEBUG] 새 구조 감지: ${itemPath} (images/train 존재)`)
+              }
+              return hasTrainDir
+            } catch (err) {
+              console.warn(`[DEBUG] 부품 폴더 확인 실패: ${itemPath}`, err.message)
+              return false
+            }
+          }) : []
+          
+          console.log(`[DEBUG] 새 구조 부품 폴더 수: ${partDirsNewStructure.length}개`)
+          
+          let imageCount = 0
+          let labelCount = 0
+          let metadataCount = 0
+          
+          if (partDirsNewStructure.length > 0) {
+            console.log(`[DEBUG] 새 구조 사용: 부품 폴더 목록: ${partDirsNewStructure.join(', ')}`)
+            // 새 구조: 각 부품 폴더 내 images/train, images/val, labels/train, labels/val, meta 카운트
+            for (const partDir of partDirsNewStructure) {
+              const partPath = path.join(datasetPath, partDir)
+              const imagesTrainDir = path.join(partPath, 'images', 'train')
+              const imagesValDir = path.join(partPath, 'images', 'val')
+              const imagesTestDir = path.join(partPath, 'images', 'test')
+              const labelsTrainDir = path.join(partPath, 'labels', 'train')
+              const labelsValDir = path.join(partPath, 'labels', 'val')
+              const labelsTestDir = path.join(partPath, 'labels', 'test')
+              const metaDir = path.join(partPath, 'meta')
+              const metaEDir = path.join(partPath, 'meta-e')
+              
+              if (fs.existsSync(imagesTrainDir)) {
+                imageCount += await countFiles(imagesTrainDir)
+              }
+              if (fs.existsSync(imagesValDir)) {
+                imageCount += await countFiles(imagesValDir)
+              }
+              if (fs.existsSync(imagesTestDir)) {
+                imageCount += await countFiles(imagesTestDir)
+              }
+              if (fs.existsSync(labelsTrainDir)) {
+                labelCount += await countFiles(labelsTrainDir)
+              }
+              if (fs.existsSync(labelsValDir)) {
+                labelCount += await countFiles(labelsValDir)
+              }
+              if (fs.existsSync(labelsTestDir)) {
+                labelCount += await countFiles(labelsTestDir)
+              }
+              if (fs.existsSync(metaDir)) {
+                metadataCount += await countFiles(metaDir)
+              }
+              if (fs.existsSync(metaEDir)) {
+                metadataCount += await countFiles(metaEDir)
+              }
+            }
+          } else {
+            // 기존 구조: dataset_synthetic/images/train, labels/train 등
+            console.log(`[DEBUG] 기존 구조 사용 시도`)
+            const imagesTrainPath = path.join(datasetPath, 'images', 'train')
+            const imagesValPath = path.join(datasetPath, 'images', 'val')
+            const labelsTrainPath = path.join(datasetPath, 'labels', 'train')
+            const labelsValPath = path.join(datasetPath, 'labels', 'val')
+            const metaPath = path.join(datasetPath, 'meta')
+            const metaEPath = path.join(datasetPath, 'meta-e')
+            
+            console.log(`[DEBUG] 기존 구조 경로 확인:`)
+            console.log(`  - images/train: ${fs.existsSync(imagesTrainPath)}`)
+            console.log(`  - images/val: ${fs.existsSync(imagesValPath)}`)
+            console.log(`  - labels/train: ${fs.existsSync(labelsTrainPath)}`)
+            console.log(`  - labels/val: ${fs.existsSync(labelsValPath)}`)
+            console.log(`  - meta: ${fs.existsSync(metaPath)}`)
+            console.log(`  - meta-e: ${fs.existsSync(metaEPath)}`)
+            
+            if (fs.existsSync(imagesTrainPath)) {
+              imageCount += await countFiles(imagesTrainPath)
+            }
+            if (fs.existsSync(imagesValPath)) {
+              imageCount += await countFiles(imagesValPath)
+            }
+            if (fs.existsSync(labelsTrainPath)) {
+              labelCount += await countFiles(labelsTrainPath)
+            }
+            if (fs.existsSync(labelsValPath)) {
+              labelCount += await countFiles(labelsValPath)
+            }
+            if (fs.existsSync(metaPath)) {
+              metadataCount += await countFiles(metaPath)
+            }
+            if (fs.existsSync(metaEPath)) {
+              metadataCount += await countFiles(metaEPath)
+            }
+          }
           
           logs.push({
             timestamp: new Date().toLocaleTimeString(),
@@ -3334,16 +5698,181 @@ app.get('/api/synthetic/dataset/prepare/status/:jobId', (req, res) => {
   })
 })
 
-// 데이터셋 파일 개수 조회
-app.get('/api/synthetic/dataset/files', async (req, res) => {
+// 데이터셋 파일 개수 조회 (전체 또는 특정 element_id)
+app.get('/api/synthetic/dataset/files/:elementId?', async (req, res) => {
   try {
-    const datasetPath = path.join(process.cwd(), 'output', 'dataset_synthetic')
+    // [FIX] 수정됨: 새 구조 지원 (dataset_synthetic/{element_id}/images, labels, meta, meta-e)
+    const datasetPath = getDatasetSyntheticPath()
+    const { elementId } = req.params
     
-    const imageCount = await countFiles(path.join(datasetPath, 'images', 'train')) + 
-                      await countFiles(path.join(datasetPath, 'images', 'val'))
-    const labelCount = await countFiles(path.join(datasetPath, 'labels', 'train')) + 
-                      await countFiles(path.join(datasetPath, 'labels', 'val'))
-    const metadataCount = await countFiles(path.join(datasetPath, 'metadata'))
+    let imageCount = 0
+    let labelCount = 0
+    let metadataCount = 0
+    
+    // 특정 element_id가 지정된 경우 해당 부품만 조회
+    if (elementId) {
+      const partPath = path.join(datasetPath, elementId)
+      if (fs.existsSync(partPath)) {
+        const imagesDir = path.join(partPath, 'images')
+        const labelsDir = path.join(partPath, 'labels')
+        const metaDir = path.join(partPath, 'meta')
+        const metaEDir = path.join(partPath, 'meta-e')
+        
+        // train/val/test 폴더가 있으면 모두 카운트, 없으면 images 폴더 직접 카운트
+        if (fs.existsSync(imagesDir)) {
+          const trainDir = path.join(imagesDir, 'train')
+          const valDir = path.join(imagesDir, 'val')
+          const testDir = path.join(imagesDir, 'test')
+          
+          if (fs.existsSync(trainDir)) {
+            imageCount += await countFiles(trainDir)
+          }
+          if (fs.existsSync(valDir)) {
+            imageCount += await countFiles(valDir)
+          }
+          if (fs.existsSync(testDir)) {
+            imageCount += await countFiles(testDir)
+          }
+          
+          // train/val/test 폴더가 없으면 images 폴더 직접 카운트
+          if (!fs.existsSync(trainDir) && !fs.existsSync(valDir) && !fs.existsSync(testDir)) {
+            imageCount += await countFiles(imagesDir)
+          }
+        }
+        
+        if (fs.existsSync(labelsDir)) {
+          const trainDir = path.join(labelsDir, 'train')
+          const valDir = path.join(labelsDir, 'val')
+          const testDir = path.join(labelsDir, 'test')
+          
+          if (fs.existsSync(trainDir)) {
+            labelCount += await countFiles(trainDir)
+          }
+          if (fs.existsSync(valDir)) {
+            labelCount += await countFiles(valDir)
+          }
+          if (fs.existsSync(testDir)) {
+            labelCount += await countFiles(testDir)
+          }
+          
+          // train/val/test 폴더가 없으면 labels 폴더 직접 카운트
+          if (!fs.existsSync(trainDir) && !fs.existsSync(valDir) && !fs.existsSync(testDir)) {
+            labelCount += await countFiles(labelsDir)
+          }
+        }
+        
+        if (fs.existsSync(metaDir)) {
+          metadataCount += await countFiles(metaDir)
+        }
+        if (fs.existsSync(metaEDir)) {
+          metadataCount += await countFiles(metaEDir)
+        }
+      }
+    } else {
+      // 전체 조회: 기존 로직 유지
+      // 새 구조 확인: dataset_synthetic/{element_id}/images 구조
+      if (fs.existsSync(datasetPath)) {
+        const partDirs = fs.readdirSync(datasetPath).filter(item => {
+          const itemPath = path.join(datasetPath, item)
+          try {
+            const stats = fs.statSync(itemPath)
+            if (!stats.isDirectory()) return false
+            // 부품 폴더 내에 images 폴더가 있는지 확인
+            const imagesDir = path.join(itemPath, 'images')
+            return fs.existsSync(imagesDir) && fs.statSync(imagesDir).isDirectory()
+          } catch {
+            return false
+          }
+        })
+        
+        if (partDirs.length > 0) {
+          // 새 구조: 각 부품 폴더 내 images, labels, meta, meta-e 카운트
+          for (const partDir of partDirs) {
+            const partPath = path.join(datasetPath, partDir)
+            const imagesDir = path.join(partPath, 'images')
+            const labelsDir = path.join(partPath, 'labels')
+            const metaDir = path.join(partPath, 'meta')
+            const metaEDir = path.join(partPath, 'meta-e')
+            
+            if (fs.existsSync(imagesDir)) {
+              // train/val/test 폴더가 있으면 모두 카운트
+              const trainDir = path.join(imagesDir, 'train')
+              const valDir = path.join(imagesDir, 'val')
+              const testDir = path.join(imagesDir, 'test')
+              
+              if (fs.existsSync(trainDir)) {
+                imageCount += await countFiles(trainDir)
+              }
+              if (fs.existsSync(valDir)) {
+                imageCount += await countFiles(valDir)
+              }
+              if (fs.existsSync(testDir)) {
+                imageCount += await countFiles(testDir)
+              }
+              
+              // train/val/test 폴더가 없으면 images 폴더 직접 카운트
+              if (!fs.existsSync(trainDir) && !fs.existsSync(valDir) && !fs.existsSync(testDir)) {
+                imageCount += await countFiles(imagesDir)
+              }
+            }
+            
+            if (fs.existsSync(labelsDir)) {
+              const trainDir = path.join(labelsDir, 'train')
+              const valDir = path.join(labelsDir, 'val')
+              const testDir = path.join(labelsDir, 'test')
+              
+              if (fs.existsSync(trainDir)) {
+                labelCount += await countFiles(trainDir)
+              }
+              if (fs.existsSync(valDir)) {
+                labelCount += await countFiles(valDir)
+              }
+              if (fs.existsSync(testDir)) {
+                labelCount += await countFiles(testDir)
+              }
+              
+              if (!fs.existsSync(trainDir) && !fs.existsSync(valDir) && !fs.existsSync(testDir)) {
+                labelCount += await countFiles(labelsDir)
+              }
+            }
+            
+            if (fs.existsSync(metaDir)) {
+              metadataCount += await countFiles(metaDir)
+            }
+            if (fs.existsSync(metaEDir)) {
+              metadataCount += await countFiles(metaEDir)
+            }
+          }
+        } else {
+          // 기존 구조: images/train, labels/train 등
+          const imagesTrainPath = path.join(datasetPath, 'images', 'train')
+          const imagesValPath = path.join(datasetPath, 'images', 'val')
+          const labelsTrainPath = path.join(datasetPath, 'labels', 'train')
+          const labelsValPath = path.join(datasetPath, 'labels', 'val')
+          const metaPath = path.join(datasetPath, 'meta')
+          const metaEPath = path.join(datasetPath, 'meta-e')
+          
+          if (fs.existsSync(imagesTrainPath)) {
+            imageCount += await countFiles(imagesTrainPath)
+          }
+          if (fs.existsSync(imagesValPath)) {
+            imageCount += await countFiles(imagesValPath)
+          }
+          if (fs.existsSync(labelsTrainPath)) {
+            labelCount += await countFiles(labelsTrainPath)
+          }
+          if (fs.existsSync(labelsValPath)) {
+            labelCount += await countFiles(labelsValPath)
+          }
+          if (fs.existsSync(metaPath)) {
+            metadataCount += await countFiles(metaPath)
+          }
+          if (fs.existsSync(metaEPath)) {
+            metadataCount += await countFiles(metaEPath)
+          }
+        }
+      }
+    }
     
     res.json({
       success: true,
@@ -3464,7 +5993,7 @@ app.post('/api/synthetic/dataset/backup', async (req, res) => {
     const { description = '통합 처리 백업' } = req.body
     console.log('💾 백업 요청:', description)
     
-    const currentPath = path.join(__dirname, '..', 'output', 'synthetic')
+    const currentPath = getSyntheticRoot()
     const versionsDir = path.join(__dirname, '..', 'output', 'datasets')
     const versionMetadataPath = path.join(__dirname, '..', 'output', 'dataset_versions.json')
     
@@ -4094,7 +6623,7 @@ const evaluateCurrentModel = async (modelPath) => {
     const { spawn } = await import('child_process')
     
     const evaluationScript = path.join(__dirname, '..', 'scripts', 'evaluate_model.py')
-    const dataPath = path.join(__dirname, '..', 'output', 'dataset_synthetic')
+    const dataPath = getDatasetSyntheticPath()
     
     return new Promise((resolve) => {
       const process = spawn('python', [evaluationScript, '--model', modelPath, '--data', dataPath], {
@@ -5654,6 +8183,173 @@ app.use((err, req, res, next) => {
     // 프로덕션에서는 상세 스택 추적 제거
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   })
+})
+
+// 경로 설정 API 엔드포인트
+// 현재 경로 조회
+app.get('/api/synthetic/config/path', (req, res) => {
+  try {
+    const currentPath = getSyntheticRoot()
+    const datasetPath = getDatasetSyntheticPath()
+    
+    // 환경 변수 파일에서 현재 설정 읽기
+    const envPath = path.join(process.cwd(), 'config', 'synthetic_dataset.env')
+    let envContent = ''
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf-8')
+      // [FIX] 수정됨: 주석이 아닌 실제 설정 라인만 매칭 (^로 시작, # 제외)
+      const lines = envContent.split(/\r?\n/)
+      for (const line of lines) {
+        const trimmed = line.trim()
+        // 주석이 아니고 BRICKBOX_SYNTHETIC_ROOT로 시작하는 라인만 매칭
+        if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('BRICKBOX_SYNTHETIC_ROOT=')) {
+          const match = trimmed.match(/^BRICKBOX_SYNTHETIC_ROOT=(.+)$/)
+          if (match) {
+            const configuredPath = match[1].trim()
+            return res.json({
+              success: true,
+              currentPath,
+              datasetPath,
+              configuredPath,
+              source: 'env_file'
+            })
+          }
+        }
+      }
+    }
+    
+    // 환경 변수 파일에 설정이 없으면 기본값 반환
+    res.json({
+      success: true,
+      currentPath,
+      datasetPath,
+      configuredPath: './output/synthetic',
+      source: 'default'
+    })
+  } catch (error) {
+    console.error('경로 설정 조회 오류:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 경로 설정 업데이트
+app.post('/api/synthetic/config/path', (req, res) => {
+  try {
+    const { path: newPath } = req.body
+    
+    if (!newPath || typeof newPath !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: '경로가 필요합니다'
+      })
+    }
+    
+    // 경로 유효성 검사
+    const trimmedPath = newPath.trim()
+    if (trimmedPath.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: '경로가 비어있습니다'
+      })
+    }
+    
+    // 환경 변수 파일 경로
+    const envPath = path.join(process.cwd(), 'config', 'synthetic_dataset.env')
+    
+    // 환경 변수 파일 읽기
+    let envContent = ''
+    let lineEnding = '\n' // 기본 줄바꿈 문자
+    if (fs.existsSync(envPath)) {
+      envContent = fs.readFileSync(envPath, 'utf-8')
+      // 줄바꿈 문자 감지 (원본 파일 형식 유지)
+      if (envContent.includes('\r\n')) {
+        lineEnding = '\r\n'
+      } else if (envContent.includes('\n')) {
+        lineEnding = '\n'
+      }
+    }
+    
+    // BRICKBOX_SYNTHETIC_ROOT 업데이트 또는 추가
+    const lines = envContent.split(/\r?\n/) // 모든 줄바꿈 형식 지원
+    let found = false
+    const updatedLines = lines.map(line => {
+      const trimmed = line.trim()
+      // 주석이 아니고 BRICKBOX_SYNTHETIC_ROOT로 시작하는 라인만 업데이트
+      if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('BRICKBOX_SYNTHETIC_ROOT=')) {
+        found = true
+        // 원본 들여쓰기 유지 (있는 경우)
+        const indent = line.match(/^\s*/)?.[0] || ''
+        return `${indent}BRICKBOX_SYNTHETIC_ROOT=${trimmedPath}`
+      }
+      return line
+    })
+    
+    // 없으면 추가
+    if (!found) {
+      // 합성 데이터셋 생성 설정 섹션 찾기
+      let insertIndex = updatedLines.length
+      for (let i = 0; i < updatedLines.length; i++) {
+        if (updatedLines[i].includes('# 합성 데이터셋 생성 설정')) {
+          // 섹션 헤더 다음 줄에 추가
+          insertIndex = i + 4 // 헤더 + 설명 줄들 건너뛰기
+          break
+        }
+      }
+      updatedLines.splice(insertIndex, 0, `BRICKBOX_SYNTHETIC_ROOT=${trimmedPath}`)
+    }
+    
+    // SYNTHETIC_OUTPUT_DIR도 업데이트 (하위 호환성)
+    let foundOutputDir = false
+    const finalLines = updatedLines.map(line => {
+      const trimmed = line.trim()
+      // 주석이 아니고 SYNTHETIC_OUTPUT_DIR로 시작하는 라인만 업데이트
+      if (trimmed && !trimmed.startsWith('#') && trimmed.startsWith('SYNTHETIC_OUTPUT_DIR=')) {
+        foundOutputDir = true
+        // 원본 들여쓰기 유지 (있는 경우)
+        const indent = line.match(/^\s*/)?.[0] || ''
+        return `${indent}SYNTHETIC_OUTPUT_DIR=${trimmedPath}`
+      }
+      return line
+    })
+    
+    if (!foundOutputDir) {
+      // BRICKBOX_SYNTHETIC_ROOT 다음 줄에 추가
+      const brickboxIndex = finalLines.findIndex(line => {
+        const trimmed = line.trim()
+        return trimmed && !trimmed.startsWith('#') && trimmed.startsWith('BRICKBOX_SYNTHETIC_ROOT=')
+      })
+      if (brickboxIndex !== -1) {
+        finalLines.splice(brickboxIndex + 1, 0, `SYNTHETIC_OUTPUT_DIR=${trimmedPath}`)
+      }
+    }
+    
+    // 파일 저장 (원본 줄바꿈 문자 형식 유지)
+    const updatedContent = finalLines.join(lineEnding)
+    fs.writeFileSync(envPath, updatedContent, 'utf-8')
+    
+    // 환경 변수 다시 로드 (현재 프로세스에만 적용)
+    dotenv.config({ path: envPath, override: true })
+    
+    console.log(`✅ 경로 설정 업데이트: ${trimmedPath}`)
+    
+    res.json({
+      success: true,
+      message: '경로 설정이 업데이트되었습니다',
+      newPath: trimmedPath,
+      currentPath: getSyntheticRoot(),
+      datasetPath: getDatasetSyntheticPath(),
+      note: '서버 재시작 후 모든 스크립트에 적용됩니다'
+    })
+  } catch (error) {
+    console.error('경로 설정 업데이트 오류:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
 })
 
 // 404 핸들러
