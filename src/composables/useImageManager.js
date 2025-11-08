@@ -347,6 +347,7 @@ export function useImageManager() {
 
   // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수 (파일명 기반 중복 검사)
   const processRebrickableImage = async (imageUrl, partNum, colorId = null, options = {}) => {
+    const elementId = options?.elementId || null
     try {
       // 원본 URL에서 파일명 추출
       const originalFilename = extractOriginalFilename(imageUrl)
@@ -438,7 +439,7 @@ export function useImageManager() {
         console.log(`✅ 업로드된 이미지 URL: ${uploadedUrl}`)
         
         // part_images 동기화
-        await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName })
+        await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName, elementId })
         
         return {
           originalUrl: imageUrl,
@@ -495,7 +496,7 @@ export function useImageManager() {
           console.log(`✅ 프록시를 통한 업로드 성공: ${uploadedUrl}`)
           
           // part_images 동기화
-          await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName })
+          await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName, elementId })
           
           return {
             originalUrl: imageUrl,
@@ -754,7 +755,7 @@ export function useImageManager() {
   }
 
   // 업로드 직후 part_images 테이블에 동기화 (트리거 없이 앱 레벨에서 처리)
-  const upsertPartImage = async ({ partNum, colorId, uploadedUrl, filename }) => {
+  const upsertPartImage = async ({ partNum, colorId, uploadedUrl, filename, elementId }) => {
     try {
       if (!partNum || typeof colorId !== 'number' || !uploadedUrl) return
 
@@ -764,16 +765,24 @@ export function useImageManager() {
         original_url: uploadedUrl,
         uploaded_url: uploadedUrl,
         filename: filename || `${partNum}_${colorId}.webp`,
-        upload_status: 'completed'
+        upload_status: 'completed',
+        ...(elementId && { element_id: String(elementId) }) // element_id가 있으면 추가
       }
 
-      // 1) 존재 시 업데이트
-      const { data: updated, error: updateError } = await supabase
+      // element_id가 있으면 element_id로도 조회/업데이트 시도
+      let updateQuery = supabase
         .from('part_images')
         .update(payload)
-        .eq('part_id', String(partNum))
-        .eq('color_id', colorId)
-        .select('part_id')
+      
+      if (elementId) {
+        // element_id가 있으면 element_id로 우선 조회
+        updateQuery = updateQuery.eq('element_id', String(elementId))
+      } else {
+        // element_id가 없으면 part_id + color_id로 조회
+        updateQuery = updateQuery.eq('part_id', String(partNum)).eq('color_id', colorId)
+      }
+
+      const { data: updated, error: updateError } = await updateQuery.select('part_id')
 
       if (updateError) {
         console.warn('part_images update failed, will try insert:', updateError.message)
@@ -789,9 +798,9 @@ export function useImageManager() {
           console.warn('part_images insert failed:', insertError.message)
           return
         }
-        console.log(`part_images inserted: ${partNum}_${colorId}`)
+        console.log(`part_images inserted: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`)
       } else {
-        console.log(`part_images updated: ${partNum}_${colorId}`)
+        console.log(`part_images updated: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`)
       }
     } catch (err) {
       console.warn('part_images upsert error:', err.message)

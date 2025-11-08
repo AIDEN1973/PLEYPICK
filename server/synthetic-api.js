@@ -3755,20 +3755,27 @@ async function startBlenderRendering(job) {
             message: `📦 부품 ${i + 1}/${setPartsData.length} 렌더링 시작: ${setPart.lego_parts?.name || partId}` 
           })
           
-          // 🔧 수정됨: 한 개씩 순차 렌더링 및 완료 대기
+          // [FIX] 한 개씩 순차 렌더링 및 완료 대기
+          // SKIP 감지 시 즉시 완료 처리되어 다음 부품으로 진행
           await startBlenderRendering(partJob)
           
           // [FIX] SKIP 감지 시 즉시 다음 부품으로 진행
+          // SKIP은 정상 완료로 처리하여 다음 부품 계속 렌더링
+          // startBlenderRendering 내부에서 SKIP 감지 시 partJob.status = 'completed'로 설정됨
           if (partJob.status === 'completed') {
-            console.log(`[부품 ${i + 1}] SKIP으로 인해 즉시 완료 처리`)
+            console.log(`[부품 ${i + 1}] SKIP 또는 완료로 인해 즉시 다음 부품으로 진행`)
             results.completed++
             job.logs.push({ 
               timestamp: new Date(), 
               type: 'success', 
-              message: `✅ 부품 ${i + 1}/${setPartsData.length} 완료 (SKIP): ${setPart.lego_parts?.name || partId}` 
+              message: `✅ 부품 ${i + 1}/${setPartsData.length} 완료 (SKIP 또는 렌더링 완료): ${setPart.lego_parts?.name || partId}` 
             })
-            continue // 다음 부품으로 즉시 진행
+            // 다음 부품으로 즉시 진행 (continue) - 대기 로직 건너뜀
+            continue
           }
+          
+          // [FIX] SKIP이 아닌 경우에만 대기 로직 실행
+          // SKIP 시에는 이미 partJob.status가 'completed'로 설정되어 위에서 continue됨
           
           // [FIX] Blender 프로세스 종료 감지 개선
           // partJob.blenderProcess에 close 이벤트 핸들러 추가
@@ -4400,20 +4407,21 @@ async function startBlenderRendering(job) {
     }
     
     // [FIX] SKIP 메시지 감지 및 즉시 완료 처리
-    if (output.includes('SKIP:') || output.includes('로컬 기준으로 이미 렌더링 완료')) {
-      console.log('✅ SKIP 감지: 렌더링 완료로 처리')
+    // 세트 렌더링에서 중복 체크 후 모든 부품 렌더링되도록 SKIP 시 즉시 완료 처리
+    if (output.includes('SKIP:') || output.includes('로컬 기준으로 이미 렌더링 완료') || output.includes('원격 기준으로 이미 렌더링 완료')) {
+      console.log('✅ SKIP 감지: 렌더링 완료로 처리 (다음 부품 계속 렌더링)')
       job.status = 'completed'
       job.progress = 100
       job.logs.push({
         timestamp: new Date(),
-        message: 'SKIP: 이미 렌더링 완료된 부품',
+        message: 'SKIP: 이미 렌더링 완료된 부품 (다음 부품 계속 렌더링)',
         type: 'success'
       })
       
-      // [FIX] SKIP 시 Blender 프로세스 즉시 종료
+      // [FIX] SKIP 시 Blender 프로세스 즉시 종료하여 다음 부품으로 빠르게 진행
       if (blenderProcess && blenderProcess.pid) {
         try {
-          console.log(`✅ SKIP 감지: Blender 프로세스 종료 시도 (PID: ${blenderProcess.pid})`)
+          console.log(`✅ SKIP 감지: Blender 프로세스 종료 시도 (PID: ${blenderProcess.pid}) - 다음 부품으로 진행`)
           blenderProcess.kill('SIGTERM')
           setTimeout(() => {
             if (blenderProcess && blenderProcess.exitCode === null) {

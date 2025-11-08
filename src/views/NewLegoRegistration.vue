@@ -1219,26 +1219,43 @@ export default {
                   
                   // 이미지 업로드 (백그라운드에서 실행)
                   try {
-                    console.log(`🖼️ Uploading image for ${partData.part.part_num}...`)
+                    console.log(`🖼️ Uploading image for ${partData.part.part_num} (element_id: ${partData.element_id})...`)
+                    
+                    // element_id가 있으면 Rebrickable API에서 element_id 기반 이미지 URL 가져오기
+                    let imageUrl = partData.part.part_img_url
+                    if (partData.element_id) {
+                      try {
+                        const { getElement } = useRebrickable()
+                        const elementData = await getElement(partData.element_id)
+                        if (elementData?.element_img_url || elementData?.part_img_url) {
+                          imageUrl = elementData.element_img_url || elementData.part_img_url
+                          console.log(`✅ element_id ${partData.element_id} 기반 이미지 URL 획득:`, imageUrl)
+                        }
+                      } catch (elementErr) {
+                        console.warn(`⚠️ element_id ${partData.element_id} 이미지 URL 가져오기 실패, 기본 part_img_url 사용:`, elementErr)
+                      }
+                    }
+                    
                     const imageResult = await processRebrickableImage(
-                      partData.part.part_img_url,
+                      imageUrl,
                       partData.part.part_num,
-                      partData.color.id
-                      // forceUpload 제거 - 중복 이미지는 스킵
+                      partData.color.id,
+                      { elementId: partData.element_id || null } // element_id 전달
                     )
                     
                     if (imageResult.uploadedUrl) {
                       console.log(`💾 Saving image metadata for ${partData.part.part_num}...`)
                       await saveImageMetadata({
-                        original_url: partData.part.part_img_url,
+                        original_url: imageUrl,
                         supabase_url: imageResult.uploadedUrl,
                         file_path: imageResult.path,
                         file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.webp`,
                         part_num: partData.part.part_num,
                         color_id: partData.color.id,
+                        element_id: partData.element_id || null,
                         set_num: selectedSet.value?.set_num
                       })
-                      console.log(`✅ Image metadata saved for ${partData.part.part_num}`)
+                      console.log(`✅ Image metadata saved for ${partData.part.part_num} (element_id: ${partData.element_id})`)
                     }
                   } catch (imageError) {
                     console.warn(`⚠️ Image upload failed for ${partData.part.part_num}:`, imageError)

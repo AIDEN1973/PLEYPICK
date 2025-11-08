@@ -309,13 +309,17 @@ def prepare_dataset(set_num, part_id=None):
                         
                         print(f"[INFO] train/val/test split 생성 완료: train={len(train_files)}, val={len(val_files)}, test={len(test_files)}")
                     
+                    # [FIX] 부품 단위 학습: part_id를 클래스 이름으로 사용 (일관성 확보)
+                    # set_num == 'latest'이고 part_id가 있을 때는 부품 단위 학습
+                    # 단일 클래스 모델(nc: 1, names: ['lego_part'])이 아닌 부품 ID 기반 모델로 학습
+                    class_names = [part_id] if part_id else ['lego_part']
                     yaml_content = {
                         'path': str(dataset_path.absolute()),
                         'train': 'images/train',
                         'val': 'images/val', 
                         'test': 'images/test',
-                        'nc': 1,
-                        'names': ['lego_part']
+                        'nc': len(class_names),
+                        'names': class_names  # [FIX] 부품 ID를 클래스 이름으로 사용
                     }
                     with open(dataset_yaml_path, 'w', encoding='utf-8') as f:
                         import yaml
@@ -409,7 +413,15 @@ def prepare_dataset(set_num, part_id=None):
         return None
     
     # 중복 부품 제거 처리
-    if set_num != 'latest':
+    # [FIX] 세트 단위 학습 시 이미 부품 단위로 학습된 부품 제외
+    # set_num == 'latest'이고 part_id가 없을 때는 전체 데이터셋 학습이므로 스킵
+    # 하지만 세트 단위 학습(set_num != 'latest')이거나 부품 단위 학습(set_num == 'latest' and part_id)일 때는 중복 제거 적용
+    should_check_duplicates = (
+        (set_num != 'latest') or  # 세트 단위 학습: 이미 학습된 부품 제외 필요
+        (set_num == 'latest' and part_id)  # 부품 단위 학습: 이미 학습된 부품 제외 필요
+    )
+    
+    if should_check_duplicates:
         filtered_yaml = remove_duplicate_parts(yaml_file, set_num, part_id)
         if filtered_yaml:
             yaml_file = filtered_yaml
@@ -999,6 +1011,20 @@ def train_yolo_model(dataset_yaml, config, job_id=None):
     """YOLO 모델 학습"""
     print("[START] YOLO 모델 학습 시작...")
     
+    # [FIX] 부품 단위 학습 모델: dataset.yaml에서 class_names 추출하여 config에 추가
+    try:
+        import yaml
+        with open(dataset_yaml, 'r', encoding='utf-8') as f:
+            dataset_config = yaml.safe_load(f)
+        if dataset_config and 'names' in dataset_config:
+            config['class_names'] = dataset_config['names']  # 부품 ID 리스트
+            config['trained_parts'] = dataset_config['names']  # 동일
+            config['num_classes'] = dataset_config.get('nc', len(dataset_config['names']))
+            print(f"[INFO] 부품 단위 학습 모델 감지: {len(config['class_names'])}개 클래스")
+            print(f"[INFO] 클래스 목록: {config['class_names'][:10]}{'...' if len(config['class_names']) > 10 else ''}")
+    except Exception as e:
+        print(f"[WARN] dataset.yaml에서 class_names 추출 실패: {e}")
+    
     # Supabase 클라이언트 설정
     supabase = None
     if job_id:
@@ -1369,7 +1395,11 @@ def upload_and_register_model(model_path, onnx_path, config):
                 'epochs': config.get('epochs', 100),
                 'batch_size': config.get('batch_size', 16),
                 'imgsz': config.get('imgsz', 640),
-                'device': config.get('device', 'cuda')
+                'device': config.get('device', 'cuda'),
+                # [FIX] 부품 단위 학습 모델: class_names 저장 (classId → part_id 매핑용)
+                'class_names': config.get('class_names', []),  # 부품 단위 학습 시 부품 ID 리스트
+                'trained_parts': config.get('trained_parts', []),  # 학습된 부품 목록 (class_names와 동일)
+                'num_classes': config.get('num_classes', 1)  # 클래스 수
             }
         }
         
@@ -1433,8 +1463,8 @@ def main():
         actual_part_id = args.part_id
         
         # 3. 데이터셋 준비 (중복 부품 제거 포함)
-        dataset_yaml = prepare_dataset(args.set_num, actual_part_id)
-        if not dataset_yaml:
+        dataset_yaml_result = prepare_dataset(args.set_num, actual_part_id)
+        if not dataset_yaml_result:
             print("[ERROR] 데이터셋 준비 실패")
             if args.job_id:
                 update_training_status(args.job_id, 'failed', {'error': '데이터셋 준비 실패'})

@@ -2138,14 +2138,67 @@ export default {
         try {
           detections = await detectPartsWithYOLO(imageData, { realtime: false }) // 🔧 수정됨: 하이브리드 검출은 realtime: false (이미지 크롭 필요)
           detectionMethod = 'YOLO'
-          console.log('✅ YOLO 검출 성공:', {
+          console.log('[OK] YOLO 검출 성공:', {
             detectionCount: detections.length,
             detections: detections.map(d => ({
               id: d.id,
               confidence: d.confidence,
-              boundingBox: d.boundingBox
+              classId: d.classId,
+              boundingBox: d.boundingBox,
+              area: d.boundingBox ? (d.boundingBox.width * d.boundingBox.height) : 0
             }))
           })
+          if (detections.length > 0) {
+            const confStats = {
+              min: Math.min(...detections.map(d => d.confidence || 0)),
+              max: Math.max(...detections.map(d => d.confidence || 0)),
+              avg: detections.reduce((sum, d) => sum + (d.confidence || 0), 0) / detections.length
+            }
+            const classIdCounts = detections.reduce((acc, d) => {
+              const cid = d.classId !== undefined ? d.classId : 'unknown'
+              acc[cid] = (acc[cid] || 0) + 1
+              return acc
+            }, {})
+            const bboxStats = detections.map(d => {
+              const w = d.boundingBox?.width || 0
+              const h = d.boundingBox?.height || 0
+              const area = w * h
+              return { width: w, height: h, area, aspectRatio: w > 0 ? h / w : 0 }
+            })
+            const avgArea = bboxStats.reduce((sum, b) => sum + b.area, 0) / bboxStats.length
+            
+            // [FIX] 부품 단위 학습 모델: part_id 분포도 계산
+            const partIdCounts = detections.reduce((acc, d) => {
+              const pid = d.partId || null
+              if (pid) {
+                acc[pid] = (acc[pid] || 0) + 1
+              }
+              return acc
+            }, {})
+            
+            console.log('[INFO] YOLO 검출 통계:', {
+              confidence: confStats,
+              classIdDistribution: classIdCounts,
+              partIdDistribution: Object.keys(partIdCounts).length > 0 ? partIdCounts : null,
+              isPartBasedModel: detections.some(d => d.partId) ? true : false,
+              boundingBoxStats: {
+                count: bboxStats.length,
+                avgArea: avgArea,
+                avgAspectRatio: bboxStats.reduce((sum, b) => sum + b.aspectRatio, 0) / bboxStats.length,
+                samples: bboxStats.slice(0, 5)
+              },
+              analysis: {
+                note: 'YOLO 모델이 레고 부품을 탐지하는지 확인:',
+                highConfidenceCount: detections.filter(d => (d.confidence || 0) >= 0.7).length,
+                reasonableSizeCount: bboxStats.filter(b => b.area >= 0.01 && b.area <= 0.5).length,
+                warning: detections.some(d => d.partId) 
+                  ? `부품 단위 학습 모델 감지: ${Object.keys(partIdCounts).length}개 부품 검출됨`
+                  : (classIdCounts && Object.keys(classIdCounts).length > 1 
+                    ? '다양한 classId가 검출됨 - 세트 단위 학습 모델일 가능성' 
+                    : '단일 클래스 검출 (정상)')
+              }
+            })
+          }
         } catch (yoloError) {
           console.warn('❌ YOLO 검출 실패, 휴리스틱 검출로 전환:', yoloError)
           detectionMethod = '휴리스틱'
@@ -2739,18 +2792,21 @@ export default {
             detections = await detectObjectsSimple(imageData, srcW, srcH)
           }
           
-          // YOLO 검출 결과를 바운딩박스 형식으로 변환
+          // [FIX] YOLO 검출 결과를 바운딩박스 형식으로 변환
+          // YOLO는 targetW x targetH 이미지에서 탐지하므로, 정규화된 좌표를 srcW x srcH로 스케일링
+          const scaleX = srcW / targetW
+          const scaleY = srcH / targetH
           const normalizedDetections = detections.map(detection => {
             // YOLO 검출 결과: boundingBox 형식 { x, y, width, height } (정규화된 좌표 0-1)
             const bbox = detection.boundingBox || detection.box || detection.bbox
             let x, y, width, height
             
             if (bbox && typeof bbox.x === 'number') {
-              // YOLO 형식: 정규화된 좌표를 픽셀 좌표로 변환
-              x = bbox.x * srcW
-              y = bbox.y * srcH
-              width = bbox.width * srcW
-              height = bbox.height * srcH
+              // [FIX] 정규화된 좌표를 targetW x targetH 기준 픽셀 좌표로 변환 후 srcW x srcH로 스케일링
+              x = bbox.x * targetW * scaleX
+              y = bbox.y * targetH * scaleY
+              width = bbox.width * targetW * scaleX
+              height = bbox.height * targetH * scaleY
             } else if (detection.x !== undefined) {
               // 휴리스틱 검출 형식: 이미 픽셀 좌표
               x = detection.x
@@ -2779,10 +2835,16 @@ export default {
           
           console.log(`🔍 실시간 검출된 객체: ${normalizedDetections.length}개`)
           
-          // 레고 부품 필터링: 신뢰도 임계값 적용 (높은 신뢰도만 표시)
-          const LEGO_CONFIDENCE_THRESHOLD = 0.7 // 레고 부품 필터링 임계값
+          // [FIX] 레고 부품 필터링: false positive 방지를 위해 임계값 상향 및 크기 필터 추가
+          const LEGO_CONFIDENCE_THRESHOLD = 0.75 // [FIX] 0.7 → 0.75 (false positive 방지)
+          const MIN_BBOX_AREA = 0.01 // 최소 바운딩 박스 면적 (이미지의 1%)
           const filteredDetections = normalizedDetections.filter(detection => {
-            return detection.confidence >= LEGO_CONFIDENCE_THRESHOLD
+            const confidence = detection.confidence || 0
+            const bbox = detection.boundingBox || {}
+            const area = (bbox.width || 0) * (bbox.height || 0)
+            
+            // [FIX] confidence와 크기 모두 검증
+            return confidence >= LEGO_CONFIDENCE_THRESHOLD && area >= MIN_BBOX_AREA
           })
           
           console.log(`🔍 레고 부품 필터링: ${normalizedDetections.length}개 → ${filteredDetections.length}개 (신뢰도 >= ${LEGO_CONFIDENCE_THRESHOLD})`)
@@ -2820,25 +2882,46 @@ export default {
             const bomList = setMetadata.value?.partsMetadata || []
             console.log(`🤖 실시간 AI 메타데이터 매칭 시작: ${filteredDetections.length}개 검출, ${bomList.length}개 BOM 부품`)
             
-            // 각 검출 결과에 대해 BOM 부품과 벡터 유사도 비교
-            for (let i = 0; i < Math.min(filteredDetections.length, 10); i++) { // 상위 10개만 처리 (성능)
+            // [FIX] 실시간 검출 성능 최적화: CLIP 이미지 임베딩 생성을 병렬 처리
+            // 상위 10개만 처리하되, CLIP 임베딩 생성은 비동기로 처리하여 프레임 블로킹 방지
+            const embeddingPromises = []
+            for (let i = 0; i < Math.min(filteredDetections.length, 10); i++) {
+              const detection = filteredDetections[i]
+              if (detection.image) {
+                // [FIX] 실시간 검출에서는 원본 이미지(imageData)를 사용하여 크롭 수행
+                const embeddingPromise = generateCLIPImageEmbedding(detection.image, detection, imageData)
+                  .then(imageEmbedding => {
+                    if (imageEmbedding) {
+                      if (!detection.features) {
+                        detection.features = {}
+                      }
+                      detection.features.shape_vector = imageEmbedding
+                      detection.features.clip_embedding = imageEmbedding
+                      if (i < 3) {
+                        console.log(`✅ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 완료: ${imageEmbedding.length}차원`)
+                      }
+                    }
+                    return imageEmbedding
+                  })
+                  .catch(err => {
+                    if (i < 3) {
+                      console.warn(`⚠️ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 실패:`, err.message)
+                    }
+                    return null
+                  })
+                embeddingPromises.push(embeddingPromise)
+              }
+            }
+            
+            // [FIX] CLIP 임베딩 생성을 기다리지 않고 바로 AI 메타데이터 조회 시작
+            // 임베딩이 완료되면 자동으로 detection.features에 저장됨
+            for (let i = 0; i < Math.min(filteredDetections.length, 10); i++) {
               const detection = filteredDetections[i]
               try {
-                // 🔧 수정됨: 기술문서 5.1에 따라 크롭된 이미지에서 CLIP 이미지 임베딩 생성
-                let imageEmbedding = null
-                if (detection.image) {
-                  console.log(`🖼️ 실시간 검출 ${i + 1} 크롭 이미지에서 CLIP 이미지 임베딩 생성 중...`)
-                  imageEmbedding = await generateCLIPImageEmbedding(detection.image, detection, imageData)
-                  if (imageEmbedding) {
-                    console.log(`✅ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 완료: ${imageEmbedding.length}차원`)
-                  } else {
-                    console.warn(`⚠️ 실시간 검출 ${i + 1} CLIP 이미지 임베딩 생성 실패`)
-                  }
-                }
-                
                 const aiMetadata = await getAIMetadataForDetection(detection, bomList)
                 
                 // 이미지 임베딩 우선, 없으면 DB의 clip_text_emb 사용
+                const imageEmbedding = detection.features?.shape_vector || detection.features?.clip_embedding || null
                 let clipEmbedding = imageEmbedding
                 if (!clipEmbedding && aiMetadata?.clip_text_emb) {
                   clipEmbedding = normalizeVector(aiMetadata.clip_text_emb)
@@ -2848,7 +2931,9 @@ export default {
                   // BOM 부품과 매칭된 경우만 추가
                   const matchedBOM = bomList.find(p => String(p.part_id) === String(aiMetadata.part_id))
                   if (matchedBOM) {
-                    console.log(`✅ 실시간 매칭 성공: 검출 confidence=${detection.confidence.toFixed(3)}, part_id=${aiMetadata.part_id}, similarity=${aiMetadata.confidence?.toFixed(3) || 'N/A'}`)
+                    if (i < 3) {
+                      console.log(`✅ 실시간 매칭 성공: 검출 confidence=${detection.confidence.toFixed(3)}, part_id=${aiMetadata.part_id}, similarity=${aiMetadata.confidence?.toFixed(3) || 'N/A'}`)
+                    }
                     enhancedDetections.push({
                       ...detection,
                       features: (imageEmbedding || clipEmbedding) ? {
@@ -2856,7 +2941,7 @@ export default {
                         color_lab: aiMetadata?.feature_json?.color || null,
                         size_stud: aiMetadata?.feature_json?.size || null,
                         clip_embedding: imageEmbedding || clipEmbedding
-                      } : null,
+                      } : detection.features,
                       ai_metadata: aiMetadata,
                       polygon_uv: detection.polygon_uv || (() => {
                         const centerX = detection.x / srcW
@@ -2874,8 +2959,15 @@ export default {
                   }
                 }
               } catch (err) {
-                console.warn(`⚠️ 실시간 AI 메타데이터 매칭 실패 (검출 ${i + 1}):`, err.message)
+                if (i < 3) {
+                  console.warn(`⚠️ 실시간 AI 메타데이터 매칭 실패 (검출 ${i + 1}):`, err.message)
+                }
               }
+            }
+            
+            // [FIX] CLIP 임베딩 생성 완료 대기 (최대 2초)
+            if (embeddingPromises.length > 0) {
+              await Promise.allSettled(embeddingPromises)
             }
             
             console.log(`🤖 실시간 AI 메타데이터 매칭 완료: ${enhancedDetections.length}개 매칭 성공`)
@@ -3923,9 +4015,13 @@ export default {
             let width = Math.max(1, Math.round(boundingBox.width * imgW))
             let height = Math.max(1, Math.round(boundingBox.height * imgH))
             
-            // 🔧 수정됨: tight-crop 규칙 적용 (패딩 및 최소 크기 보장)
-            const MIN_CROP_SIZE = 128  // CLIP 입력 최적화를 위한 최소 크기
+            // [FIX] tight-crop 규칙 적용 (패딩 및 최소 크기 보장)
+            const IDEAL_MIN_CROP_SIZE = 128  // CLIP 입력 최적화를 위한 이상적 최소 크기
+            const ABSOLUTE_MIN_CROP_SIZE = 64  // 절대 최소 크기 (원본 이미지가 작을 때)
             const PADDING_RATIO = 0.15  // 15% 패딩 (기술문서 5.1)
+            
+            // 원본 이미지 크기를 고려한 동적 최소 크기
+            const minCropSize = Math.min(IDEAL_MIN_CROP_SIZE, Math.max(ABSOLUTE_MIN_CROP_SIZE, Math.min(imgW, imgH) * 0.2))
             
             // 패딩 적용
             const paddingX = Math.max(0, Math.round(width * PADDING_RATIO))
@@ -3936,37 +4032,52 @@ export default {
             width = Math.min(imgW - x, width + paddingX * 2)
             height = Math.min(imgH - y, height + paddingY * 2)
             
-            // 최소 크기 보장 (정사각형 유지)
-            if (width < MIN_CROP_SIZE || height < MIN_CROP_SIZE) {
-              const scale = Math.max(MIN_CROP_SIZE / width, MIN_CROP_SIZE / height)
+            // 최소 크기 보장 (원본 이미지 크기 고려)
+            if (width < minCropSize || height < minCropSize) {
+              const scale = Math.max(minCropSize / width, minCropSize / height)
               const newW = Math.min(imgW, Math.round(width * scale))
               const newH = Math.min(imgH, Math.round(height * scale))
               
               // 중앙 정렬
-              x = Math.max(0, Math.min(imgW - newW, x - (newW - width) / 2))
-              y = Math.max(0, Math.min(imgH - newH, y - (newH - height) / 2))
+              const centerX = x + width / 2
+              const centerY = y + height / 2
+              x = Math.max(0, Math.min(imgW - newW, Math.round(centerX - newW / 2)))
+              y = Math.max(0, Math.min(imgH - newH, Math.round(centerY - newH / 2)))
               width = newW
               height = newH
             }
             
-            // 경계 검사
-            const x1 = Math.min(x, imgW - 1)
-            const y1 = Math.min(y, imgH - 1)
-            const x2 = Math.min(x + width, imgW)
-            const y2 = Math.min(y + height, imgH)
-            const w = Math.max(MIN_CROP_SIZE, x2 - x1)
-            const h = Math.max(MIN_CROP_SIZE, y2 - y1)
+            // 경계 검사 및 최종 크기 계산
+            const x1 = Math.max(0, Math.min(imgW - 1, x))
+            const y1 = Math.max(0, Math.min(imgH - 1, y))
+            const x2 = Math.min(imgW, x1 + width)
+            const y2 = Math.min(imgH, y1 + height)
+            let w = Math.max(1, x2 - x1)
+            let h = Math.max(1, y2 - y1)
             
-            // 🔧 수정됨: 크롭 품질 로깅
-            if (w < 64 || h < 64) {
-              console.warn(`⚠️ 작은 크롭 이미지: ${w}x${h} (원본: ${imgW}x${imgH}, bbox: ${(boundingBox.width * 100).toFixed(1)}% x ${(boundingBox.height * 100).toFixed(1)}%)`)
+            // [FIX] 최종 최소 크기 확인 및 로깅
+            if (w < ABSOLUTE_MIN_CROP_SIZE || h < ABSOLUTE_MIN_CROP_SIZE) {
+              console.warn(`⚠️ 최소 크기 미달: ${w}x${h} (원본: ${imgW}x${imgH}, bbox: ${(boundingBox.width * 100).toFixed(1)}% x ${(boundingBox.height * 100).toFixed(1)}%, MIN: ${ABSOLUTE_MIN_CROP_SIZE})`)
+            } else if (w < IDEAL_MIN_CROP_SIZE || h < IDEAL_MIN_CROP_SIZE) {
+              console.log(`⚠️ 이상적 크기 미달: ${w}x${h} (원본: ${imgW}x${imgH}, bbox: ${(boundingBox.width * 100).toFixed(1)}% x ${(boundingBox.height * 100).toFixed(1)}%, IDEAL: ${IDEAL_MIN_CROP_SIZE})`)
+            } else {
+              console.log(`✅ 크롭 크기 정상: ${w}x${h} (원본: ${imgW}x${imgH}, bbox: ${(boundingBox.width * 100).toFixed(1)}% x ${(boundingBox.height * 100).toFixed(1)}%)`)
             }
             
             const canvas = document.createElement('canvas')
             canvas.width = w
             canvas.height = h
             const ctx = canvas.getContext('2d')
-            ctx.drawImage(img, x1, y1, w, h, 0, 0, w, h)
+            
+            // [FIX] 최종 좌표 재계산 (경계 내에서)
+            const finalX1 = Math.max(0, Math.min(imgW - 1, x1))
+            const finalY1 = Math.max(0, Math.min(imgH - 1, y1))
+            const finalX2 = Math.min(imgW, finalX1 + w)
+            const finalY2 = Math.min(imgH, finalY1 + h)
+            const finalW = finalX2 - finalX1
+            const finalH = finalY2 - finalY1
+            
+            ctx.drawImage(img, finalX1, finalY1, finalW, finalH, 0, 0, w, h)
             resolve(canvas.toDataURL('image/png'))
           } catch (err) {
             reject(err)

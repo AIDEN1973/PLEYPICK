@@ -14,6 +14,7 @@
     "dev:api": "node --env-file=.env server/synthetic-api.js",
     "manual-upload": "node --env-file=.env server/manual-upload-api.cjs",
     "monitoring": "node --env-file=.env server/monitoring-api.js",
+    "inspection-api": "node --env-file=.env server/inspection-api.js",
     "clip:service": "pip install -r server/requirements-clip.txt && python server/clip-embedding-service.py",
     "ai-api": "node public/api/ai/inference.js",
     "webp-image-api": "node --env-file=.env server/webp-image-api.js",

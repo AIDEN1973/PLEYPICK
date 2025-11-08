@@ -147,6 +147,11 @@ export function useRebrickable() {
     return await apiCall(`/lego/minifigs/${figNum}/`)
   }
 
+  // element_id로 부품 정보 조회 (색상 포함)
+  const getElement = async (elementId) => {
+    return await apiCall(`/lego/elements/${elementId}/`)
+  }
+
   // 미니피규어의 부품 목록 조회
   const getMinifigParts = async (figNum) => {
     const allParts = []
@@ -215,6 +220,31 @@ export function useRebrickable() {
     }
   }
 
+  // 테마(시리즈) 목록 조회
+  const getThemes = async (page = 1, pageSize = 100) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString()
+    })
+    
+    return await apiCall(`/lego/themes/?${params}`)
+  }
+
+  // 특정 테마(시리즈) 정보 조회
+  const getTheme = async (themeId) => {
+    return await apiCall(`/lego/themes/${themeId}/`)
+  }
+
+  // 테마별 세트 목록 조회
+  const getThemeSets = async (themeId, page = 1, pageSize = 100) => {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString()
+    })
+    
+    return await apiCall(`/lego/themes/${themeId}/sets/?${params}`)
+  }
+
   return {
     loading,
     error,
@@ -227,7 +257,11 @@ export function useRebrickable() {
     getMultipleParts,
     searchMinifigs,
     getMinifig,
+    getElement,
     getMinifigParts,
-    getSetMinifigs
+    getSetMinifigs,
+    getThemes,
+    getTheme,
+    getThemeSets
   }
 }

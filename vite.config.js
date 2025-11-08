@@ -17,6 +17,7 @@ const DEFAULT_PORTS = {
   manualUploadApi: 3030,
   monitoring: 3040,
   semanticVectorApi: 3022,
+  inspectionApi: 3045,
 }
 
 function getIntegratedConfig(mode) {
@@ -35,6 +36,7 @@ function getIntegratedConfig(mode) {
     manualUploadApi: toInt(env.VITE_PORT_MANUAL_UPLOAD_API, DEFAULT_PORTS.manualUploadApi),
     monitoring: toInt(env.VITE_PORT_MONITORING, DEFAULT_PORTS.monitoring),
     semanticVectorApi: toInt(env.VITE_PORT_SEMANTIC_VECTOR_API, DEFAULT_PORTS.semanticVectorApi),
+    inspectionApi: toInt(env.VITE_PORT_INSPECTION_API, DEFAULT_PORTS.inspectionApi),
   }
   return {
     ports,
@@ -133,6 +135,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       host: '0.0.0.0',
       proxy: {
+        '/api/inspection': {
+          target: `http://localhost:${portConfig.inspectionApi || 3045}`,
+          changeOrigin: true,
+          configure: createProxyLogger('Inspection')
+        },
         '/api/upload/proxy-image': {
           target: `http://localhost:${portConfig.webpApi}`,
           changeOrigin: true,

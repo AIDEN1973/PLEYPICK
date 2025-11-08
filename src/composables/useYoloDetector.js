@@ -15,6 +15,11 @@ export function useYoloDetector() {
   let initStage1Promise = null
   let initStage2Promise = null
   let initDefaultPromise = null
+  
+  // [FIX] 부품 단위 학습 모델: classId → part_id 매핑 (stage별로 저장)
+  let stage1ClassIdToPartId = null
+  let stage2ClassIdToPartId = null
+  let defaultClassIdToPartId = null
 
   const isWebGPUAvailable = () => {
     return typeof navigator !== 'undefined' && 'gpu' in navigator
@@ -181,20 +186,49 @@ export function useYoloDetector() {
             const imgsz = activeModel.training_metadata.imgsz
             if (imgsz && typeof imgsz === 'number' && imgsz > 0) {
               inputSize = imgsz
-              console.log(`📊 모델 입력 크기 자동 설정: ${inputSize}px (training_metadata.imgsz)`)
+              console.log(`[INFO] 모델 입력 크기 자동 설정: ${inputSize}px (training_metadata.imgsz)`)
             } else {
-              console.warn(`⚠️ training_metadata.imgsz가 유효하지 않음: ${imgsz}, 기본값 640 사용`)
+              console.warn(`[WARNING] training_metadata.imgsz가 유효하지 않음: ${imgsz}, 기본값 640 사용`)
+            }
+            
+            // [FIX] 부품 단위 학습 모델: classId → part_id 매핑 정보 저장
+            if (activeModel.training_metadata.class_names || activeModel.training_metadata.trained_parts) {
+              const classNames = activeModel.training_metadata.class_names || activeModel.training_metadata.trained_parts || []
+              if (Array.isArray(classNames) && classNames.length > 0) {
+                // classId → part_id 매핑 생성 (classId는 인덱스)
+                const classIdToPartId = {}
+                classNames.forEach((partId, idx) => {
+                  classIdToPartId[idx] = partId
+                })
+                activeModel.classIdToPartId = classIdToPartId
+                console.log(`[INFO] 부품 단위 학습 모델 감지: ${classNames.length}개 클래스, classId 매핑 생성됨`)
+                console.log(`[INFO] classId 매핑 샘플:`, Object.entries(classIdToPartId).slice(0, 5).map(([cid, pid]) => `${cid}→${pid}`).join(', '))
+              }
             }
           } else {
-            console.warn(`⚠️ training_metadata가 없음, 기본값 640 사용`)
+            console.warn(`[WARNING] training_metadata가 없음, 기본값 640 사용`)
           }
           
-          console.log('📊 model_registry 활성 모델 조회 성공:', activeModel.model_name, {
-            model_url: activeModel.model_url,
-            model_path: activeModel.model_path,
-            model_stage: activeModel.model_stage,
-            inputSize: inputSize
-          })
+      // [FIX] 부품 단위 학습 모델: classId 매핑을 전역 변수에 저장 (세션별로 사용)
+      if (activeModel.classIdToPartId) {
+        // Stage별로 매핑 저장
+        if (stage === 'stage1') {
+          stage1ClassIdToPartId = activeModel.classIdToPartId
+        } else if (stage === 'stage2') {
+          stage2ClassIdToPartId = activeModel.classIdToPartId
+        } else {
+          defaultClassIdToPartId = activeModel.classIdToPartId
+        }
+      }
+      
+      console.log('[INFO] model_registry 활성 모델 조회 성공:', activeModel.model_name, {
+        model_url: activeModel.model_url,
+        model_path: activeModel.model_path,
+        model_stage: activeModel.model_stage,
+        inputSize: inputSize,
+        hasClassIdMapping: !!activeModel.classIdToPartId,
+        classCount: activeModel.classIdToPartId ? Object.keys(activeModel.classIdToPartId).length : 0
+      })
           
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
           
@@ -518,14 +552,26 @@ export function useYoloDetector() {
       classes.push(maxCls)
     }
 
-    // 폐쇄 환경 최적화: topK를 줄여서 과도한 false positive 방지 // 🔧 수정됨
-    const topK = Math.min(maxDetections, 50) // 🔧 수정됨: 기본값 100 → 50
-    const keep = nms(boxes, scores, 0.45, topK) // IoU 임계값 0.45 유지
-    return keep.map(i => ({
-      box: boxes[i],
-      score: scores[i],
-      classId: classes[i]
-    }))
+    // [FIX] NMS 최적화: 바운딩 박스 정확도 향상을 위해 IoU 임계값 조정
+    const topK = Math.min(maxDetections, 50)
+    // IoU 임계값: 0.45 → 0.50 (더 엄격한 중복 제거로 정확한 바운딩 박스 유지)
+    const keep = nms(boxes, scores, 0.50, topK)
+    
+    // [FIX] 부품 단위 학습 모델: classId를 part_id로 변환
+    // postprocess는 detect 함수에서 호출되며, stage 정보를 전달받지 않음
+    // 따라서 전역 변수에서 매핑을 가져와야 함 (stage별로 설정됨)
+    const classIdToPartId = stage1ClassIdToPartId || stage2ClassIdToPartId || defaultClassIdToPartId || null
+    
+    return keep.map(i => {
+      const classId = classes[i]
+      const partId = classIdToPartId && classIdToPartId[classId] !== undefined ? classIdToPartId[classId] : null
+      return {
+        box: boxes[i],
+        score: scores[i],
+        classId: classId,
+        partId: partId  // [FIX] 부품 단위 학습 모델: part_id 추가
+      }
+    })
   }
 
   const cropToDataUrl = (imageDataUrl, box) => {
@@ -639,15 +685,28 @@ export function useYoloDetector() {
     
     console.log('🔧 선택된 출력 텐서:', { dims: output.dims, type: output.type, dataLength: output.data.length })
 
-    // 폐쇄 환경 최적화: confidence threshold를 높여서 false positive 감소 // 🔧 수정됨
+    // [FIX] confidence threshold 조정: false positive 방지
     // 기술문서 4.2: conf=0.15는 개방 환경용, 폐쇄 환경에서는 더 보수적으로
-    const confThreshold = options.confThreshold || 0.25 // 🔧 수정됨: 기본값 0.15 → 0.25
+    // 실시간 검출에서는 더 높은 임계값으로 false positive 제거
+    const confThreshold = options.confThreshold || (options.realtime ? 0.35 : 0.25)
     const maxDetections = options.maxDetections || 50 // 🔧 수정됨: 기본값 50
     const dets = postprocess(output, img.width, img.height, dx, dy, scale, confThreshold, maxDetections)
     
     console.log('🔍 YOLO 원시 검출:', dets?.length || 0)
     if (dets.length > 0) {
-      console.log('🔍 검출 결과 샘플:', dets.slice(0, 3).map(d => ({ box: d.box, score: d.score, classId: d.classId })))
+      console.log('[CHECK] 검출 결과 샘플:', dets.slice(0, 3).map(d => ({ box: d.box, score: d.score, classId: d.classId })))
+      console.log('[INFO] 검출 결과 통계:', {
+        total: dets.length,
+        confidenceRange: dets.length > 0 ? {
+          min: Math.min(...dets.map(d => d.score)),
+          max: Math.max(...dets.map(d => d.score)),
+          avg: dets.reduce((sum, d) => sum + d.score, 0) / dets.length
+        } : null,
+        classIdDistribution: dets.reduce((acc, d) => {
+          acc[d.classId] = (acc[d.classId] || 0) + 1
+          return acc
+        }, {})
+      })
     }
 
     // 결과를 BrickBox 형식으로 변환
@@ -671,6 +730,7 @@ export function useYoloDetector() {
           },
           confidence: d.score,
           classId: d.classId,
+          partId: d.partId || null,  // [FIX] 부품 단위 학습 모델: part_id 포함
           image: imageDataUrl, // 원본 이미지 URL 사용 (크롭 스킵으로 성능 향상)
           timestamp: new Date().toISOString()
         })
@@ -693,6 +753,7 @@ export function useYoloDetector() {
           },
           confidence: d.score,
           classId: d.classId,
+          partId: d.partId || null,  // [FIX] 부품 단위 학습 모델: part_id 포함
           image: crop,
           timestamp: new Date().toISOString()
         })
@@ -704,10 +765,11 @@ export function useYoloDetector() {
     }
     
     if (mapped.length > 0) {
-      console.log(`📊 검출 결과 샘플 (최종):`, mapped.slice(0, 3).map(m => ({
+      console.log(`[INFO] 검출 결과 샘플 (최종):`, mapped.slice(0, 3).map(m => ({
         confidence: m.confidence.toFixed(3),
         boundingBox: m.boundingBox,
-        classId: m.classId
+        classId: m.classId,
+        partId: m.partId || null  // [FIX] 부품 단위 학습 모델: part_id 포함
       })))
     }
     

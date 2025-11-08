@@ -7692,7 +7692,9 @@ def main():
             print(f"[CHECK] 로컬에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 이미 존재: {local_file_count}개 파일")
             print(f"SKIP: 로컬 기준으로 이미 렌더링 완료 (목표: {MIN_FILES_FOR_COMPLETE}개)")
             print(f" 로컬 경로: {local_images_dir}")
-            return results  # 렌더링 완전 건너뛰기
+            # [FIX] SKIP 시에도 정상 종료 코드로 반환하여 다음 부품 계속 처리
+            # return results 대신 빈 results 반환 (정상 종료)
+            return results  # 빈 results 반환 (정상 종료로 처리)
         elif local_file_count > 0:
             # [FIX] 수정됨: 부족한 개수만 추가 렌더링
             missing_count = MIN_FILES_FOR_COMPLETE - local_file_count
@@ -7737,7 +7739,8 @@ def main():
                     print(f"[CHECK] 원격에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 이미 존재: {len(existing_remote_files)}개 파일")
                     print(f"SKIP: 원격 기준으로 이미 렌더링 완료 (목표: {MIN_FILES_FOR_COMPLETE}개)")
                     print(f" 원격 파일들: {list(existing_remote_files)[:5]}...")
-                    return results  # 렌더링 완전 건너뛰기
+                    # [FIX] SKIP 시에도 정상 종료 코드로 반환하여 다음 부품 계속 처리
+                    return results  # 빈 results 반환 (정상 종료로 처리)
                 elif existing_remote_files:
                     print(f"[INFO] 원격에 {check_id} ({'Element ID' if element_id else 'Part ID'}) 불완전한 렌더링 발견: {len(existing_remote_files)}개 파일")
                     print(f" 기존 파일 목록에 추가하여 개별 중복 체크 진행")

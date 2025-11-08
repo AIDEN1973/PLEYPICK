@@ -135,10 +135,11 @@ export function useOptimizedRealtimeDetection() {
       // [FIX] 수정됨: inputSize는 모델 로드 시 training_metadata에서 자동 설정되므로 전달하지 않음
       console.log('📊 1단계 검출: Stage1 모델 (빠른 전체 스캔)')
       await init({ modelPath: null, stage: 'stage1' })
-      // 실시간 모드: 낮은 threshold로 더 많은 후보 검출, 하이브리드 모드: 높은 threshold로 정확도 우선 // 🔧 수정됨
-      const confThreshold = isRealtime ? 0.20 : 0.25 // 🔧 수정됨: 실시간은 0.20, 하이브리드는 0.25
-      const maxDet = isRealtime ? 100 : 50 // 🔧 수정됨: 실시간은 100개, 하이브리드는 50개
-      const stage1Dets = await detect(imageData, { confThreshold, maxDetections: maxDet, stage: 'stage1', realtime: isRealtime }) // 🔧 수정됨
+      // [FIX] 실시간 모드: false positive 방지를 위해 threshold 상향
+      // 하이브리드 모드: 정확도 우선
+      const confThreshold = isRealtime ? 0.35 : 0.25 // [FIX] 실시간: 0.20 → 0.35 (false positive 방지)
+      const maxDet = isRealtime ? 50 : 50 // [FIX] 실시간: 100 → 50 (과도한 탐지 방지)
+      const stage1Dets = await detect(imageData, { confThreshold, maxDetections: maxDet, stage: 'stage1', realtime: isRealtime })
       console.log(`✅ 1단계 검출 완료: ${stage1Dets.length}개 객체`)
       
       // 의심 영역 식별 (신뢰도 낮거나 크기 이상한 객체)
@@ -155,20 +156,22 @@ export function useOptimizedRealtimeDetection() {
           console.log('📊 2단계 검출: Stage2 모델 (정밀 검증)')
           // [FIX] 수정됨: inputSize는 모델 로드 시 training_metadata에서 자동 설정되므로 전달하지 않음
           await init({ modelPath: null, stage: 'stage2' })
-          // 모드별 최적화: 실시간은 더 많은 후보, 하이브리드는 정확도 우선 // 🔧 수정됨
-          const stage2Conf = isRealtime ? 0.4 : 0.5 // 🔧 수정됨: 실시간은 0.4, 하이브리드는 0.5
-          const stage2Max = isRealtime ? 100 : 50 // 🔧 수정됨: 실시간은 100개, 하이브리드는 50개
-          const stage2Dets = await detect(imageData, { confThreshold: stage2Conf, maxDetections: stage2Max, stage: 'stage2', realtime: isRealtime }) // 🔧 수정됨
+          // [FIX] 모드별 최적화: false positive 방지 우선
+          const stage2Conf = isRealtime ? 0.50 : 0.5 // [FIX] 실시간: 0.4 → 0.50 (false positive 방지)
+          const stage2Max = isRealtime ? 50 : 50 // [FIX] 실시간: 100 → 50 (과도한 탐지 방지)
+          const stage2Dets = await detect(imageData, { confThreshold: stage2Conf, maxDetections: stage2Max, stage: 'stage2', realtime: isRealtime })
           console.log(`✅ 2단계 검증 완료: ${stage2Dets.length}개 객체`)
           
-          // 결과 통합: Stage1에서 확실한 것 + Stage2에서 새로 찾은 것
+          // [FIX] 결과 통합: Stage1에서 확실한 것 + Stage2에서 새로 찾은 것
+          // 단일 부품 학습 모델 최적화: confidence threshold를 높여서 false positive 제거
           const confidentStage1 = stage1Dets.filter(d => d.confidence >= 0.7)
-          const mergedDets = [...confidentStage1, ...stage2Dets]
+          const confidentStage2 = stage2Dets.filter(d => d.confidence >= 0.6) // [FIX] Stage2도 필터링
+          const mergedDets = [...confidentStage1, ...confidentStage2]
           
-          // 중복 제거 (IoU 기반)
+          // [FIX] 중복 제거 (IoU 기반) - 단일 부품 학습 모델 최적화
           const uniqueDets = removeDuplicateDetections(mergedDets)
           finalDets = uniqueDets
-          console.log(`🔄 결과 통합: ${mergedDets.length}개 → ${uniqueDets.length}개 (중복 제거)`)
+          console.log(`🔄 결과 통합: ${mergedDets.length}개 → ${uniqueDets.length}개 (중복 제거, Stage1: ${confidentStage1.length}개, Stage2: ${confidentStage2.length}개)`)
         } catch (stage2Error) {
           console.warn('⚠️ 2단계 검출 실패, 1단계 결과만 사용:', stage2Error)
           finalDets = stage1Dets
@@ -214,22 +217,28 @@ export function useOptimizedRealtimeDetection() {
     }
   }
   
-  // 중복 검출 제거 (IoU 기반) // 🔧 수정됨
+  // [FIX] 중복 검출 제거 (IoU 기반) - 단일 부품 학습 모델 최적화
   const removeDuplicateDetections = (detections) => {
     if (detections.length <= 1) return detections
     
+    // [FIX] 정규화된 좌표(0-1)에서 IoU 계산
     const iou = (box1, box2) => {
-      const x1 = Math.max(box1.x, box2.x)
-      const y1 = Math.max(box1.y, box2.y)
-      const x2 = Math.min(box1.x + box1.width, box2.x + box2.width)
-      const y2 = Math.min(box1.y + box1.height, box2.y + box2.height)
+      // boundingBox 형식: { x, y, width, height } (정규화된 좌표 0-1)
+      const x1 = Math.max(box1.x || 0, box2.x || 0)
+      const y1 = Math.max(box1.y || 0, box2.y || 0)
+      const x2 = Math.min((box1.x || 0) + (box1.width || 0), (box2.x || 0) + (box2.width || 0))
+      const y2 = Math.min((box1.y || 0) + (box1.height || 0), (box2.y || 0) + (box2.height || 0))
+      
       const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1)
-      const area1 = box1.width * box1.height
-      const area2 = box2.width * box2.height
-      return inter / (area1 + area2 - inter + 1e-6)
+      const area1 = (box1.width || 0) * (box1.height || 0)
+      const area2 = (box2.width || 0) * (box2.height || 0)
+      const union = area1 + area2 - inter
+      
+      if (union <= 0) return 0
+      return inter / union
     }
     
-    const sorted = detections.sort((a, b) => b.confidence - a.confidence)
+    const sorted = detections.sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
     const keep = []
     const used = new Set()
     
@@ -237,17 +246,35 @@ export function useOptimizedRealtimeDetection() {
       if (used.has(i)) continue
       
       const current = sorted[i]
+      const currentBox = current.boundingBox || current.box || {}
+      
+      // [FIX] 유효한 boundingBox가 없으면 스킵
+      if (!currentBox.x && !currentBox.y && !currentBox.width && !currentBox.height) {
+        continue
+      }
+      
       keep.push(current)
       
-      // IoU가 높은 중복 제거
+      // [FIX] IoU 임계값을 0.5 → 0.4로 낮춰서 더 엄격한 중복 제거 (단일 부품 학습 모델 최적화)
+      const iouThreshold = 0.4
       for (let j = i + 1; j < sorted.length; j++) {
         if (used.has(j)) continue
-        const box1 = current.boundingBox
-        const box2 = sorted[j].boundingBox
-        if (iou(box1, box2) > 0.5) {
+        
+        const otherBox = sorted[j].boundingBox || sorted[j].box || {}
+        const overlap = iou(currentBox, otherBox)
+        
+        if (overlap > iouThreshold) {
           used.add(j)
+          // [FIX] 중복 제거 로깅 (처음 5개만)
+          if (keep.length <= 5) {
+            console.log(`🔍 중복 제거: IoU=${overlap.toFixed(3)} > ${iouThreshold}, confidence: ${current.confidence?.toFixed(3)} vs ${sorted[j].confidence?.toFixed(3)}`)
+          }
         }
       }
+    }
+    
+    if (detections.length > keep.length) {
+      console.log(`🔍 중복 제거 완료: ${detections.length}개 → ${keep.length}개 (IoU 임계값: 0.4)`)
     }
     
     return keep
