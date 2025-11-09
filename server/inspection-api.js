@@ -54,6 +54,11 @@ app.get('/api/inspection', async (req, res) => {
   }
 
   try {
+    if (!SUPABASE_SERVICE_KEY) {
+      console.error('[Inspection API] SUPABASE_SERVICE_KEY가 설정되지 않았습니다.')
+      return res.status(500).json({ error: 'Supabase 서비스 키가 설정되지 않았습니다' })
+    }
+
     const { data: session, error: sessionError } = await supabase
       .from('inspection_sessions')
       .select('*')
@@ -61,7 +66,8 @@ app.get('/api/inspection', async (req, res) => {
       .maybeSingle()
 
     if (sessionError) {
-      return res.status(500).json({ error: sessionError.message })
+      console.error('[Inspection API] 세션 조회 실패:', sessionError)
+      return res.status(500).json({ error: sessionError.message, code: sessionError.code })
     }
 
     if (!session) {
@@ -75,13 +81,14 @@ app.get('/api/inspection', async (req, res) => {
       .order('updated_at', { ascending: true })
 
     if (itemsError) {
-      return res.status(500).json({ error: itemsError.message })
+      console.error('[Inspection API] 아이템 조회 실패:', itemsError)
+      return res.status(500).json({ error: itemsError.message, code: itemsError.code })
     }
 
     return res.json({ session, items: items || [] })
   } catch (error) {
     console.error('[Inspection API] GET /api/inspection 실패:', error)
-    return res.status(500).json({ error: 'failed_to_fetch_session' })
+    return res.status(500).json({ error: error.message || 'failed_to_fetch_session' })
   }
 })
 
@@ -193,6 +200,11 @@ app.get('/api/inspection/notes', async (req, res) => {
   console.log('[Inspection API] GET /api/inspection/notes - 노트 조회:', { setId })
 
   try {
+    if (!SUPABASE_SERVICE_KEY) {
+      console.error('[Inspection API] SUPABASE_SERVICE_KEY가 설정되지 않았습니다.')
+      return res.status(500).json({ error: 'Supabase 서비스 키가 설정되지 않았습니다' })
+    }
+
     const { data, error } = await supabase
       .from('set_inspection_notes')
       .select('*')
@@ -201,14 +213,14 @@ app.get('/api/inspection/notes', async (req, res) => {
 
     if (error) {
       console.error('[Inspection API] Supabase 오류 (notes):', error)
-      return res.status(500).json({ error: error.message })
+      return res.status(500).json({ error: error.message, code: error.code })
     }
 
     console.log(`[Inspection API] GET /api/inspection/notes - 성공, ${data?.length || 0}개 노트`)
     return res.json({ notes: data || [] })
   } catch (error) {
     console.error('[Inspection API] GET /api/inspection/notes 실패:', error)
-    return res.status(500).json({ error: 'failed_to_fetch_notes' })
+    return res.status(500).json({ error: error.message || 'failed_to_fetch_notes' })
   }
 })
 

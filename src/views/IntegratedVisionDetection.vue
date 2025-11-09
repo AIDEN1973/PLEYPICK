@@ -62,8 +62,14 @@
                 class="set-item"
                 @click="setNumber = set.set_num"
               >
-                <div class="set-number">{{ set.set_num }}</div>
-                <div class="set-name">{{ set.name }}</div>
+                <div class="set-number">{{ formatSetNum(set.set_num) }}</div>
+                <div class="set-name">
+                  <span v-if="set.set_num" class="set-num">{{ formatSetNum(set.set_num) }}</span>
+                  <span v-if="set.set_num && set.theme_name" class="separator">|</span>
+                  <span v-if="set.theme_name" class="theme-name">{{ set.theme_name }}</span>
+                  <span v-if="set.set_num || set.theme_name" class="name">{{ set.name }}</span>
+                  <span v-else>{{ set.name }}</span>
+                </div>
                 <div class="set-info">{{ set.year }}년 • {{ set.num_parts }}개 부품</div>
               </div>
             </div>
@@ -392,6 +398,12 @@ const loadAvailableSets = async () => {
   } catch (err) {
     console.error('Failed to load available sets:', err)
   }
+}
+
+const formatSetNum = (setNum) => {
+  if (!setNum) return ''
+  // -1, -2 같은 접미사 제거 및 공백 제거
+  return String(setNum).replace(/-\d+$/, '').trim()
 }
 
 // 세션 시작
@@ -1187,6 +1199,34 @@ onUnmounted(() => {
   font-size: 13px;
   margin-bottom: 4px;
   line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.set-name .set-num {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-name .separator {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.set-name .theme-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-name .name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
 }
 
 .set-info {

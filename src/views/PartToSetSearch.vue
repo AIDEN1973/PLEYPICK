@@ -256,7 +256,7 @@ export default {
               if (!error && partImage?.uploaded_url) {
                 color.image_url = partImage.uploaded_url
               } else if (alternatives[0].part_img_url) {
-                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+                color.image_url = alternatives[0].part_img_url
               }
 
               // 엘리먼트 ID 조회
@@ -273,7 +273,7 @@ export default {
               }
             } catch (err) {
               if (alternatives[0].part_img_url) {
-                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+                color.image_url = alternatives[0].part_img_url
               }
             }
           }
@@ -359,7 +359,7 @@ export default {
             }
 
             if (!imageUrl && partInfo?.part_img_url) {
-              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+              imageUrl = partInfo.part_img_url
             }
 
             return {

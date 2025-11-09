@@ -11,7 +11,7 @@
         <input
           v-model="searchQuery"
           type="text"
-          placeholder="레고 세트 번호 또는 이름을 검색하세요..."
+          placeholder="레고 세트 번호 또는 이름을 검색하세요 (여러 번호는 쉼표 또는 공백으로 구분)"
           @keyup.enter="searchSets"
           class="search-input"
         />
@@ -39,7 +39,32 @@
 
     <!-- 검색 결과 (단일 제품 번호가 아닌 경우에만 표시) -->
     <div v-if="searchResults.length > 0 && !isSingleSetNumber(searchQuery)" class="search-results">
-      <h3>검색 결과 ({{ searchResults.length }}개)</h3>
+      <div class="search-results-header">
+        <h3>검색 결과 ({{ searchResults.length }}개)</h3>
+        <div class="batch-actions" v-if="isMultipleSetNumbers(searchQuery)">
+          <button 
+            @click="selectAllSets" 
+            class="btn btn-sm"
+            :disabled="saving"
+          >
+            전체 선택
+          </button>
+          <button 
+            @click="deselectAllSets" 
+            class="btn btn-sm"
+            :disabled="saving"
+          >
+            전체 해제
+          </button>
+          <button 
+            @click="saveSelectedSetsBatch" 
+            class="btn btn-primary"
+            :disabled="saving || selectedSetsForBatch.length === 0"
+          >
+            {{ saving ? '일괄 저장 중...' : `선택된 세트 일괄 저장 (${selectedSetsForBatch.length}개)` }}
+          </button>
+        </div>
+      </div>
       <div class="data-source-info">
         <span v-if="isLocalData" class="source-badge local">📁 로컬 데이터베이스</span>
         <span v-else class="source-badge api">🌐 Rebrickable API</span>
@@ -49,10 +74,18 @@
           v-for="set in searchResults" 
           :key="set.set_num"
           class="set-card"
-          :class="{ 'existing-set': set.isExisting }"
-          @click="selectSet(set)"
+          :class="{ 'existing-set': set.isExisting, 'selected-for-batch': isSetSelectedForBatch(set.set_num) }"
+          @click="!isMultipleSetNumbers(searchQuery) && selectSet(set)"
         >
-          <div class="set-image">
+          <div v-if="isMultipleSetNumbers(searchQuery)" class="set-checkbox" @click.stop>
+            <input 
+              type="checkbox" 
+              :checked="isSetSelectedForBatch(set.set_num)"
+              @change="toggleSetSelection(set.set_num)"
+              :disabled="saving"
+            />
+          </div>
+          <div class="set-image" @click.stop="selectSet(set)">
             <img 
               :src="set.set_img_url" 
               :alt="set.name"
@@ -63,9 +96,14 @@
               <span class="duplicate-text">이미 등록됨</span>
             </div>
           </div>
-          <div class="set-info">
-            <h4>{{ set.name }}</h4>
-            <p class="set-number">{{ set.set_num }}</p>
+          <div class="set-info" @click.stop="selectSet(set)">
+            <h4>
+              <span v-if="set.set_num" class="set-num">{{ formatSetNum(set.set_num) }}</span>
+              <span v-if="set.set_num && set.theme_name" class="separator">|</span>
+              <span v-if="set.theme_name" class="theme-name">{{ set.theme_name }}</span>
+              <span v-if="set.set_num || set.theme_name" class="set-name">{{ set.name }}</span>
+              <span v-else>{{ set.name }}</span>
+            </h4>
             <p class="set-year">{{ set.year }}</p>
             <p class="set-pieces">{{ set.num_parts }}개 부품</p>
             <div v-if="set.isExisting" class="duplicate-info">
@@ -82,8 +120,14 @@
         <div class="set-main-info">
           <img :src="selectedSet.set_img_url" :alt="selectedSet.name" class="set-large-image" />
           <div class="set-details-text">
-            <h2>{{ selectedSet.name }}</h2>
-            <p><strong>세트 번호:</strong> {{ selectedSet.set_num }}</p>
+            <h2>
+              <span v-if="selectedSet.set_num" class="set-num">{{ formatSetNum(selectedSet.set_num) }}</span>
+              <span v-if="selectedSet.set_num && selectedSet.theme_name" class="separator">|</span>
+              <span v-if="selectedSet.theme_name" class="theme-name">{{ selectedSet.theme_name }}</span>
+              <span v-if="selectedSet.set_num || selectedSet.theme_name" class="set-name">{{ selectedSet.name }}</span>
+              <span v-else>{{ selectedSet.name }}</span>
+            </h2>
+            <p v-if="selectedSet.set_num"><strong>세트 번호:</strong> {{ formatSetNum(selectedSet.set_num) }}</p>
             <p><strong>연도:</strong> {{ selectedSet.year }}</p>
             <p><strong>부품 수:</strong> {{ selectedSet.num_parts }}개</p>
             <p><strong>테마:</strong> {{ selectedSet.theme_id }}</p>
@@ -411,6 +455,7 @@ export default {
     const searchResults = ref([])
     const selectedSet = ref(null)
     const setParts = ref([])
+    const selectedSetsForBatch = ref([]) // 일괄 저장을 위해 선택된 세트 번호들
     const loadingParts = ref(false)
     const saving = ref(false)
     const successMessage = ref('')
@@ -425,6 +470,14 @@ export default {
     const processing = ref(false) // 전체 처리 상태
     const showProgressModal = ref(false) // 진행률 모달 표시 여부
 
+    // 입력값을 제품번호로 분리하는 함수
+    const parseSetNumbers = (query) => {
+      const trimmedQuery = query.trim()
+      // 쉼표 또는 공백으로 분리
+      const parts = trimmedQuery.split(/[,\s]+/).filter(part => part.trim().length > 0)
+      return parts.map(part => part.trim())
+    }
+
     // 단일 제품 번호인지 확인하는 함수
     const isSingleSetNumber = (query) => {
       const trimmedQuery = query.trim()
@@ -432,6 +485,14 @@ export default {
       // 예: "60315", "60315-1", "10497-1"
       const setNumberPattern = /^\d{3,6}(-\d+)?$/
       return setNumberPattern.test(trimmedQuery)
+    }
+
+    // 여러 제품번호인지 확인하는 함수
+    const isMultipleSetNumbers = (query) => {
+      const setNumbers = parseSetNumbers(query)
+      if (setNumbers.length <= 1) return false
+      // 모든 부분이 제품번호 패턴인지 확인
+      return setNumbers.every(num => isSingleSetNumber(num))
     }
 
     // 세트 번호를 Rebrickable API 형식으로 변환
@@ -442,6 +503,250 @@ export default {
       }
       // -1 접미사 추가
       return `${setNum}-1`
+    }
+
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
+    }
+
+    // 일괄 저장 관련 함수들
+    const isSetSelectedForBatch = (setNum) => {
+      return selectedSetsForBatch.value.includes(setNum)
+    }
+
+    const toggleSetSelection = (setNum) => {
+      const index = selectedSetsForBatch.value.indexOf(setNum)
+      if (index > -1) {
+        selectedSetsForBatch.value.splice(index, 1)
+      } else {
+        selectedSetsForBatch.value.push(setNum)
+      }
+    }
+
+    const selectAllSets = () => {
+      selectedSetsForBatch.value = searchResults.value.map(set => set.set_num)
+    }
+
+    const deselectAllSets = () => {
+      selectedSetsForBatch.value = []
+    }
+
+    // 선택된 세트들 일괄 저장
+    const saveSelectedSetsBatch = async () => {
+      if (selectedSetsForBatch.value.length === 0) {
+        error.value = '저장할 세트를 선택해주세요.'
+        return
+      }
+
+      try {
+        saving.value = true
+        successMessage.value = ''
+        error.value = ''
+
+        const selectedSets = searchResults.value.filter(set => 
+          selectedSetsForBatch.value.includes(set.set_num)
+        )
+
+        console.log(`일괄 저장 시작: ${selectedSets.length}개 세트`)
+
+        const results = {
+          success: [],
+          failed: [],
+          skipped: []
+        }
+
+        for (let i = 0; i < selectedSets.length; i++) {
+          const set = selectedSets[i]
+          const setNum = set.set_num
+          
+          try {
+            console.log(`[${i + 1}/${selectedSets.length}] 세트 저장 중: ${setNum}`)
+            
+            // 이미 등록된 세트는 건너뛰기
+            if (set.isExisting) {
+              console.log(`세트 ${setNum}는 이미 등록되어 있어 건너뜁니다.`)
+              results.skipped.push({ setNum, name: set.name, reason: '이미 등록됨' })
+              continue
+            }
+
+            // 세트 정보 가져오기
+            const formattedSetNum = formatSetNumber(setNum)
+            const setData = await getSet(formattedSetNum)
+            
+            // 부품 목록 가져오기
+            const partsResponse = await getSetPartsAPI(formattedSetNum)
+            const partsData = partsResponse?.results || []
+            
+            if (!Array.isArray(partsData) || partsData.length === 0) {
+              throw new Error(`부품 목록을 가져올 수 없습니다. (${partsData?.length || 0}개)`)
+            }
+            
+            // 세트 저장
+            const savedSet = await saveLegoSet({
+              set_num: setData.set_num,
+              name: setData.name,
+              year: setData.year,
+              theme_id: setData.theme_id,
+              num_parts: setData.num_parts,
+              set_img_url: setData.set_img_url,
+              set_url: setData.set_url,
+              last_modified_date: setData.last_modified_date
+            })
+
+            // 부품 저장 (element_id 기준으로 중복 제거)
+            const seenElementIds = new Set()
+            const partsToSave = []
+            
+            for (const part of partsData) {
+              const elementId = part.element_id || null
+              
+              // partsData에 이미 part_id와 color_id 정보가 있으므로 우선 사용
+              // element_id는 부품+색상 조합을 나타내므로, element_id만으로도 식별 가능
+              // 하지만 DB foreign key 제약조건을 위해 part_id와 color_id는 필요
+              const partId = part.part?.part_num || part.part_num
+              
+              // color_id 추출: part.color?.id 또는 part.color_id
+              let colorId = null
+              if (part.color?.id !== undefined && part.color?.id !== null) {
+                colorId = part.color.id
+              } else if (part.color_id !== undefined && part.color_id !== null) {
+                colorId = part.color_id
+              }
+              
+              // color_id가 없으면 건너뜀 (foreign key 제약조건 때문에 필요)
+              if (colorId === null || colorId === undefined) {
+                console.warn(`⚠️ color_id가 없는 부품 건너뜀: part_id=${partId}, element_id=${elementId}`)
+                continue
+              }
+              
+              // partId가 없으면 건너뜀 (foreign key 제약조건 때문에 필요)
+              if (!partId) {
+                console.warn(`⚠️ part_id가 없는 부품 건너뜀: element_id=${elementId}, color_id=${colorId}`)
+                continue
+              }
+              
+              // element_id가 있는 경우, 동일 element_id는 하나만 저장
+              if (elementId) {
+                if (seenElementIds.has(elementId)) {
+                  console.log(`⚠️ 동일 element_id=${elementId} 부품 중복 감지, 건너뜀 (part_id=${partId}, color_id=${colorId})`)
+                  continue
+                }
+                seenElementIds.add(elementId)
+              }
+              
+              partsToSave.push({
+                partId,
+                colorId,
+                quantity: part.quantity || 1,
+                isSpare: part.is_spare || false,
+                elementId,
+                partData: part.part, // 부품 정보 저장용
+                colorData: part.color // 색상 정보 저장용
+              })
+            }
+            
+            console.log(`📦 중복 제거 후 저장할 부품: ${partsToSave.length}개 (원본: ${partsData.length}개)`)
+            
+            // 부품 정보와 색상 정보를 먼저 저장
+            const uniqueParts = new Map()
+            const uniqueColors = new Map()
+            
+            for (const part of partsToSave) {
+              if (part.partData && !uniqueParts.has(part.partId)) {
+                uniqueParts.set(part.partId, part.partData)
+              }
+              if (part.colorData && !uniqueColors.has(part.colorId)) {
+                uniqueColors.set(part.colorId, part.colorData)
+              }
+            }
+            
+            // 부품 정보 저장
+            for (const [partId, partData] of uniqueParts.entries()) {
+              try {
+                await saveLegoPart(partData)
+                console.log(`✅ 부품 정보 저장: ${partId}`)
+              } catch (partError) {
+                console.warn(`⚠️ 부품 정보 저장 실패 (${partId}):`, partError)
+                // 계속 진행 (이미 존재할 수 있음)
+              }
+            }
+            
+            // 색상 정보 저장
+            for (const [colorId, colorData] of uniqueColors.entries()) {
+              try {
+                await saveLegoColor(colorData)
+                console.log(`✅ 색상 정보 저장: ${colorId}`)
+              } catch (colorError) {
+                console.warn(`⚠️ 색상 정보 저장 실패 (${colorId}):`, colorError)
+                // 계속 진행 (이미 존재할 수 있음)
+              }
+            }
+            
+            // 세트-부품 관계 저장
+            let savedPartsCount = 0
+            for (const part of partsToSave) {
+              try {
+                await saveSetPart(
+                  savedSet.id,
+                  part.partId,
+                  part.colorId,
+                  part.quantity,
+                  part.isSpare,
+                  part.elementId,
+                  1
+                )
+                savedPartsCount++
+              } catch (partError) {
+                console.error(`부품 저장 실패 (${part.partId}):`, partError)
+              }
+            }
+
+            results.success.push({
+              setNum,
+              name: setData.name,
+              partsCount: savedPartsCount
+            })
+
+            console.log(`✅ 세트 ${setNum} 저장 완료: ${savedPartsCount}개 부품`)
+
+          } catch (setError) {
+            console.error(`세트 ${setNum} 저장 실패:`, setError)
+            results.failed.push({
+              setNum,
+              name: set.name,
+              error: setError.message || '알 수 없는 오류'
+            })
+          }
+        }
+
+        // 결과 메시지 생성
+        let message = `일괄 저장 완료:\n`
+        message += `✅ 성공: ${results.success.length}개\n`
+        if (results.failed.length > 0) {
+          message += `❌ 실패: ${results.failed.length}개\n`
+        }
+        if (results.skipped.length > 0) {
+          message += `⏭️ 건너뜀: ${results.skipped.length}개\n`
+        }
+
+        successMessage.value = message
+
+        if (results.failed.length > 0) {
+          const failedList = results.failed.map(f => `${f.setNum} (${f.error})`).join(', ')
+          error.value = `실패한 세트: ${failedList}`
+        }
+
+        // 선택 초기화
+        selectedSetsForBatch.value = []
+
+      } catch (err) {
+        console.error('일괄 저장 실패:', err)
+        error.value = `일괄 저장 중 오류가 발생했습니다: ${err.message}`
+      } finally {
+        saving.value = false
+      }
     }
 
     // 부품 수량 합계 계산 (스페어 부품 제외)
@@ -530,6 +835,56 @@ export default {
       try {
         const query = searchQuery.value.trim()
         
+        // 여러 제품번호인지 확인
+        if (isMultipleSetNumbers(query)) {
+          console.log('Multiple set numbers detected, processing batch...')
+          const setNumbers = parseSetNumbers(query)
+          console.log(`Processing ${setNumbers.length} set numbers:`, setNumbers)
+          
+          // 여러 세트를 순차적으로 처리
+          const processedSets = []
+          const failedSets = []
+          
+          for (const setNum of setNumbers) {
+            try {
+              // 세트 번호를 Rebrickable API 형식으로 변환
+              const formattedSetNum = formatSetNumber(setNum)
+              console.log(`Processing set number: ${setNum} -> ${formattedSetNum}`)
+              
+              // 중복 확인
+              const existingSet = await checkSetExists(setNum)
+              
+              // 세트 정보 가져오기
+              const setData = await getSet(formattedSetNum)
+              
+              processedSets.push({
+                ...setData,
+                isExisting: !!existingSet,
+                existingData: existingSet
+              })
+            } catch (setError) {
+              console.error(`Failed to fetch set ${setNum}:`, setError)
+              failedSets.push({ setNum, error: setError.message })
+            }
+          }
+          
+          if (failedSets.length > 0) {
+            const failedList = failedSets.map(f => f.setNum).join(', ')
+            error.value = `다음 세트 번호를 찾을 수 없습니다: ${failedList}`
+          }
+          
+          if (processedSets.length > 0) {
+            // 검색 결과로 표시
+            searchResults.value = processedSets
+            isLocalData.value = false
+            selectedSet.value = null
+            setParts.value = []
+            selectedSetsForBatch.value = [] // 일괄 저장 선택 초기화
+          }
+          
+          return
+        }
+        
         // 단일 제품 번호인지 확인
         if (isSingleSetNumber(query)) {
           console.log('Single set number detected, fetching directly...')
@@ -565,6 +920,7 @@ export default {
             setParts.value = []
             searchResults.value = [] // 검색 결과 목록은 비우기
             isLocalData.value = false
+            selectedSetsForBatch.value = [] // 일괄 저장 선택 초기화
             
             // 자동으로 부품 목록 로드
             console.log('Auto-loading parts for direct set selection...')
@@ -591,6 +947,7 @@ export default {
         // 검색 결과가 없는 경우
         if (apiResults.length === 0) {
           searchResults.value = []
+          selectedSetsForBatch.value = [] // 일괄 저장 선택 초기화
           error.value = `"${query}"에 대한 검색 결과가 없습니다. 다른 키워드로 검색해보세요.`
           return
         }
@@ -610,6 +967,7 @@ export default {
           isExisting: existingSets.value.has(set.set_num),
           existingData: existingSetsData.find(existing => existing.set_num === set.set_num)
         }))
+        selectedSetsForBatch.value = [] // 일괄 저장 선택 초기화
         
         isLocalData.value = false
         
@@ -747,6 +1105,23 @@ export default {
         if (partsResult.status === 'fulfilled') {
           setParts.value = partsResult.value.results || []
           console.log(`✅ Loaded ${setParts.value.length} parts`)
+          
+          // element_id 확인 로그
+          const partsWithElementId = setParts.value.filter(p => p.element_id)
+          console.log(`🔍 element_id가 있는 부품: ${partsWithElementId.length}개`)
+          if (partsWithElementId.length > 0) {
+            console.log(`🔍 element_id 예시:`, partsWithElementId.slice(0, 3).map(p => ({
+              part_num: p.part?.part_num,
+              color_id: p.color?.id,
+              element_id: p.element_id
+            })))
+          } else {
+            console.warn(`⚠️ 모든 부품에 element_id가 없습니다. Rebrickable API 응답 구조 확인 필요.`)
+            if (setParts.value.length > 0) {
+              console.log(`🔍 첫 번째 부품 구조:`, Object.keys(setParts.value[0]))
+              console.log(`🔍 첫 번째 부품 전체:`, setParts.value[0])
+            }
+          }
         } else {
           console.error('❌ Failed to load parts:', partsResult.reason)
           setParts.value = []
@@ -1236,20 +1611,27 @@ export default {
                       }
                     }
                     
+                    // elementId가 실제로 존재하는지 확인 (0이나 빈 문자열도 유효한 값일 수 있음)
+                    const elementId = (partData.element_id !== null && partData.element_id !== undefined && partData.element_id !== '') 
+                      ? partData.element_id 
+                      : null
+                    console.log(`🔍 elementId 확인: partData.element_id=${partData.element_id}, 최종 elementId=${elementId}`)
+                    
                     const imageResult = await processRebrickableImage(
                       imageUrl,
                       partData.part.part_num,
                       partData.color.id,
-                      { elementId: partData.element_id || null } // element_id 전달
+                      { elementId } // element_id 전달
                     )
                     
                     if (imageResult.uploadedUrl) {
                       console.log(`💾 Saving image metadata for ${partData.part.part_num}...`)
+                      const { generateImageFilename } = useImageManager()
                       await saveImageMetadata({
                         original_url: imageUrl,
                         supabase_url: imageResult.uploadedUrl,
                         file_path: imageResult.path,
-                        file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.webp`,
+                        file_name: imageResult.filename || generateImageFilename(partData.part.part_num, partData.color.id, partData.element_id),
                         part_num: partData.part.part_num,
                         color_id: partData.color.id,
                         element_id: partData.element_id || null,
@@ -1613,23 +1995,38 @@ export default {
     if (result.totalParts > 0) {
       console.log(`🖼️ 백그라운드 이미지 마이그레이션 시작 (강제 업로드)...`)
       
-      // 캐시 초기화 후 강제 재업로드
+      // 캐시 초기화 후 강제 재업로드 (비동기로 실행, 완료를 기다리지 않음)
       const { clearCache } = useAutoImageMigration()
       clearCache()
       console.log(`🧹 이미지 마이그레이션 캐시 초기화 완료`)
       
-      triggerFullMigration({ force: true }) // 강제 재업로드 옵션 추가
-        .then(migrationResult => {
-          console.log(`✅ 이미지 마이그레이션 완료:`, migrationResult)
-        })
-        .catch(migrationError => {
-          console.warn(`⚠️ 이미지 마이그레이션 실패: ${migrationError.message}`)
-          alertMigrationFailed(
-            selectedSet.value.set_num,
-            { uploaded: 0, total: result.totalParts || 0 },
-            migrationError.message
+      // 비동기로 실행하되, 완료를 기다리지 않고 바로 다음 단계 진행
+      ;(async () => {
+        try {
+          // 타임아웃 설정 (5분)
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('마이그레이션 타임아웃 (5분)')), 300000)
           )
-        })
+          
+          const migrationResult = await Promise.race([
+            triggerFullMigration({ force: true }),
+            timeoutPromise
+          ])
+          console.log(`✅ 이미지 마이그레이션 완료:`, migrationResult)
+        } catch (migrationError) {
+          console.warn(`⚠️ 이미지 마이그레이션 실패: ${migrationError.message}`)
+          // 알림은 비동기로 처리 (다음 단계 진행을 막지 않음)
+          try {
+            await alertMigrationFailed(
+              selectedSet.value.set_num,
+              { uploaded: 0, total: result.totalParts || 0 },
+              migrationError.message
+            )
+          } catch (alertError) {
+            console.warn(`⚠️ 알림 전송 실패: ${alertError.message}`)
+          }
+        }
+      })() // 즉시 실행 함수로 비동기 실행
     }
         
         // ✅ LLM 분석은 조건부 실행
@@ -1737,8 +2134,16 @@ export default {
       batchCurrentStep,
       batchError,
       isSingleSetNumber,
+      isMultipleSetNumbers,
       formatSetNumber,
+      formatSetNum,
       calculatePartsTotal,
+      selectedSetsForBatch,
+      isSetSelectedForBatch,
+      toggleSetSelection,
+      selectAllSets,
+      deselectAllSets,
+      saveSelectedSetsBatch,
       validatePartsCount,
       calculatePartsStats,
       categorizeParts,
@@ -1809,9 +2214,60 @@ export default {
   cursor: not-allowed;
 }
 
-.search-results h3 {
+.search-results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.search-results-header h3 {
+  margin: 0;
   color: #333;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.batch-actions .btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: 500;
+}
+
+.batch-actions .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.batch-actions .btn-sm {
+  background: #f8f9fa;
+  color: #333;
+  border: 1px solid #dee2e6;
+}
+
+.batch-actions .btn-sm:hover:not(:disabled) {
+  background: #e9ecef;
+}
+
+.batch-actions .btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.batch-actions .btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
 .data-source-info {
@@ -1853,6 +2309,30 @@ export default {
   cursor: pointer;
   transition: transform 0.2s;
   overflow: hidden;
+  position: relative;
+}
+
+.set-card.selected-for-batch {
+  border: 2px solid #667eea;
+  box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+}
+
+.set-checkbox {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  background: white;
+  border-radius: 4px;
+  padding: 0.25rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.set-checkbox input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #667eea;
 }
 
 .set-card:hover {
@@ -1933,6 +2413,34 @@ export default {
   margin-bottom: 0.5rem;
   color: #333;
   font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.set-info h4 .set-num {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-info h4 .separator {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.set-info h4 .theme-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-info h4 .set-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
 }
 
 .set-number {
@@ -1972,6 +2480,34 @@ export default {
 .set-details-text h2 {
   color: #333;
   margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.set-details-text h2 .set-num {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-details-text h2 .separator {
+  font-size: 1rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.set-details-text h2 .theme-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-details-text h2 .set-name {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
 }
 
 .set-details-text p {

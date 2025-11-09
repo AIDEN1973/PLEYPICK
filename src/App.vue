@@ -58,10 +58,11 @@
                 </router-link>
 
                 <!-- 관리 드롭다운 -->
-                <div v-if="user && isAdmin" class="relative" ref="managementDropdown">
+                <div v-if="user" class="relative" ref="managementDropdown">
                   <button
                     @click="showManagementMenu = !showManagementMenu"
-                    class="text-sm xl:text-base font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
+                    :class="{ 'nav-menu-active': showManagementMenu }"
                   >
                     관리
                     <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2"

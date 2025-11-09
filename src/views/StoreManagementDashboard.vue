@@ -122,7 +122,7 @@
           <select v-model="selectedSet" @change="updateSelectedSet">
             <option value="">세트 선택</option>
             <option v-for="set in availableSets" :key="set.id" :value="set.id">
-              {{ set.name }} ({{ set.partCount }}개 부품)
+              {{ formatSetName(set) }} ({{ set.partCount }}개 부품)
             </option>
           </select>
         </div>
@@ -326,6 +326,22 @@ const closeUpdateModal = () => {
 // 시간 포맷팅
 const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleTimeString()
+}
+
+const formatSetNum = (setNum) => {
+  if (!setNum) return ''
+  return String(setNum).replace(/-\d+$/, '').trim()
+}
+
+const formatSetName = (set) => {
+  if (!set) return ''
+  const parts = []
+  if (set.set_num) parts.push(formatSetNum(set.set_num))
+  if (set.set_num && set.theme_name) parts.push('|')
+  if (set.theme_name) parts.push(set.theme_name)
+  if (set.set_num || set.theme_name) parts.push(set.name)
+  else parts.push(set.name)
+  return parts.join(' ')
 }
 
 // 차트 참조

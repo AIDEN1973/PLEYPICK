@@ -57,56 +57,6 @@ const SYNC_INTERVAL_MS = 30000
 const RETRY_DELAY_MS = 15000
 const CHANGE_DEBOUNCE_MS = 2000
 
-const callInspectionApi = async ({ method = 'GET', body = null, query = {} }) => {
-  const searchParams = new URLSearchParams(query)
-  const endpoint = `/api/inspection${searchParams.toString() ? `?${searchParams}` : ''}`
-
-  const response = await fetch(endpoint, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  let payload = null
-  try {
-    payload = await response.json()
-  } catch (_) {
-    payload = null
-  }
-
-  if (!response.ok) {
-    const message = payload?.error || `Inspection API ${method} 실패`
-    throw new Error(message)
-  }
-
-  return payload
-}
-
-const callNotesApi = async ({ method = 'GET', body = null, query = {} }) => {
-  const searchParams = new URLSearchParams(query)
-  const endpoint = `/api/inspection/notes${searchParams.toString() ? `?${searchParams}` : ''}`
-
-  const response = await fetch(endpoint, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  let payload = null
-  try {
-    payload = await response.json()
-  } catch (_) {
-    payload = null
-  }
-
-  if (!response.ok) {
-    const message = payload?.error || `Inspection notes API ${method} 실패`
-    throw new Error(message)
-  }
-
-  return payload
-}
-
 export function useInspectionSession() {
   const { supabase, user } = useSupabase()
   const loading = ref(false)
@@ -131,13 +81,24 @@ export function useInspectionSession() {
       loading.value = true
       error.value = null
 
+      if (!setId) {
+        throw new Error('set_id가 필요합니다.')
+      }
+
       const { data: setData, error: setError } = await supabase
         .from('lego_sets')
-        .select('id, name, set_num')
+        .select('id, name, set_num, theme_id, lego_themes:theme_id(name)')
         .eq('id', setId)
-        .single()
+        .maybeSingle()
 
-      if (setError) throw setError
+      if (setError) {
+        console.error('[loadSetParts] lego_sets 조회 실패:', setError)
+        throw new Error(`세트 정보를 불러올 수 없습니다: ${setError.message}`)
+      }
+
+      if (!setData) {
+        throw new Error(`set_id ${setId}에 해당하는 세트를 찾을 수 없습니다.`)
+      }
 
       const { data: partsData, error: partsError } = await supabase
         .from('set_parts')
@@ -360,6 +321,8 @@ export function useInspectionSession() {
         id: crypto.randomUUID(),
         set_id: setId,
         set_name: setInfo.name,
+        set_num: setInfo.set_num || null,
+        theme_name: setInfo.lego_themes?.name || null,
         user_id: user.value.id,
         status: 'in_progress',
         progress: 0,
@@ -438,25 +401,80 @@ export function useInspectionSession() {
 
   const loadFromServer = async (sessionId) => {
     try {
-      const data = await callInspectionApi({ method: 'GET', query: { session_id: sessionId } })
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('inspection_sessions')
+        .select('*, lego_sets:set_id(set_num, theme_id, name)')
+        .eq('id', sessionId)
+        .maybeSingle()
 
-      if (data?.session) {
+      if (sessionError) {
+        console.warn('[loadFromServer] 세션 조회 실패:', sessionError)
+        return
+      }
+
+      if (sessionData) {
         const preservedName = session.set_name
+        const preservedSetNum = session.set_num
+        const preservedThemeName = session.theme_name
         const currentUpdatedAt = session.updated_at ? new Date(session.updated_at).getTime() : 0
-        const incomingUpdatedAt = data.session.updated_at ? new Date(data.session.updated_at).getTime() : 0
+        const incomingUpdatedAt = sessionData.updated_at ? new Date(sessionData.updated_at).getTime() : 0
 
         if (incomingUpdatedAt >= currentUpdatedAt) {
-          Object.assign(session, data.session)
+          Object.assign(session, sessionData)
+          // lego_sets 정보에서 set_num과 theme_name 설정
+          if (sessionData.lego_sets) {
+            session.set_num = sessionData.lego_sets.set_num || preservedSetNum
+            session.set_name = sessionData.lego_sets.name || preservedName
+            
+            // theme_id가 있으면 lego_themes에서 theme_name 조회
+            if (sessionData.lego_sets.theme_id) {
+              try {
+                const { data: themeData, error: themeError } = await supabase
+                  .from('lego_themes')
+                  .select('name')
+                  .eq('theme_id', sessionData.lego_sets.theme_id)
+                  .maybeSingle()
+                
+                if (!themeError && themeData) {
+                  session.theme_name = themeData.name
+                } else {
+                  session.theme_name = preservedThemeName
+                }
+              } catch (err) {
+                console.warn('[loadFromServer] theme 조회 실패:', err)
+                session.theme_name = preservedThemeName
+              }
+            } else {
+              session.theme_name = preservedThemeName
+            }
+          }
         }
 
         if (!session.set_name && preservedName) {
           session.set_name = preservedName
         }
+        if (!session.set_num && preservedSetNum) {
+          session.set_num = preservedSetNum
+        }
+        if (!session.theme_name && preservedThemeName) {
+          session.theme_name = preservedThemeName
+        }
       }
 
-      if (Array.isArray(data?.items)) {
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('inspection_items')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('updated_at', { ascending: true })
+
+      if (itemsError) {
+        console.warn('[loadFromServer] 아이템 조회 실패:', itemsError)
+        return
+      }
+
+      if (Array.isArray(itemsData)) {
         const localMap = new Map(items.value.map(localItem => [`${localItem.part_id}_${localItem.color_id}`, localItem]))
-        const mergedItems = data.items.map(remoteItem => {
+        const mergedItems = itemsData.map(remoteItem => {
           const key = `${remoteItem.part_id}_${remoteItem.color_id}`
           const localItem = localMap.get(key)
 
@@ -504,7 +522,7 @@ export function useInspectionSession() {
           }
         })
 
-        const remoteKeys = new Set(data.items.map(item => `${item.part_id}_${item.color_id}`))
+        const remoteKeys = new Set(itemsData.map(item => `${item.part_id}_${item.color_id}`))
         items.value
           .filter(localItem => !remoteKeys.has(`${localItem.part_id}_${localItem.color_id}`))
           .forEach(orphan => {
@@ -528,10 +546,21 @@ export function useInspectionSession() {
     }
 
     try {
-      const data = await callNotesApi({ method: 'GET', query: { set_id: setId } })
-      notes.value = Array.isArray(data?.notes) ? data.notes : []
+      const { data, error } = await supabase
+        .from('set_inspection_notes')
+        .select('*')
+        .eq('set_id', setId)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('[loadSetNotes] 노트 조회 실패:', error)
+        notes.value = []
+        return
+      }
+
+      notes.value = Array.isArray(data) ? data : []
     } catch (err) {
-      console.error('세트 노트 로드 실패:', err)
+      console.error('[loadSetNotes] 노트 로드 실패:', err)
       notes.value = []
     }
   }
@@ -539,27 +568,46 @@ export function useInspectionSession() {
   const addSetNote = async ({ setId, noteType, noteText, partId }) => {
     if (!setId || !user.value) throw new Error('노트를 추가하려면 세션 정보가 필요합니다')
 
+    const now = new Date().toISOString()
     const payload = {
       set_id: setId,
       note_type: noteType,
       note_text: noteText,
       part_id: partId || null,
-      created_by: user.value.id
+      created_by: user.value.id,
+      created_at: now,
+      updated_at: now
     }
 
-    const data = await callNotesApi({ method: 'POST', body: payload })
+    const { data, error } = await supabase
+      .from('set_inspection_notes')
+      .insert(payload)
+      .select()
+      .single()
 
-    if (data?.note) {
-      notes.value = [data.note, ...notes.value]
+    if (error) {
+      throw new Error(error.message)
     }
 
-    return data?.note
+    if (data) {
+      notes.value = [data, ...notes.value]
+    }
+
+    return data
   }
 
   const deleteSetNote = async ({ noteId }) => {
     if (!noteId) return
 
-    await callNotesApi({ method: 'DELETE', query: { note_id: noteId } })
+    const { error } = await supabase
+      .from('set_inspection_notes')
+      .delete()
+      .eq('id', noteId)
+
+    if (error) {
+      throw new Error(error.message)
+    }
+
     notes.value = notes.value.filter(note => note.id !== noteId)
   }
 
@@ -617,21 +665,50 @@ export function useInspectionSession() {
       lastSyncError.value = null
       clearRetryTimer()
 
-      await callInspectionApi({
-        method: 'POST',
-        body: {
-          set_id: session.set_id,
-          user_id: session.user_id || user.value.id,
-          session_id: session.id,
-          started_at: session.started_at,
-          last_saved_at: session.last_saved_at,
-          status: session.status,
-          progress: session.progress,
-          completed_at: session.completed_at,
-          missing_count: session.missing_count,
-          duration_seconds: session.duration_seconds
+      // set_id 유효성 검증
+      if (!session.set_id) {
+        throw new Error('set_id가 없습니다. 세션을 다시 생성해주세요.')
+      }
+
+      // set_id가 lego_sets 테이블에 존재하는지 확인
+      const { data: setExists, error: checkError } = await supabase
+        .from('lego_sets')
+        .select('id')
+        .eq('id', session.set_id)
+        .maybeSingle()
+
+      if (checkError) {
+        console.warn('[syncToServer] set_id 확인 실패:', checkError)
+        // 확인 실패해도 계속 진행 (네트워크 문제일 수 있음)
+      } else if (!setExists) {
+        throw new Error(`set_id ${session.set_id}가 lego_sets 테이블에 존재하지 않습니다.`)
+      }
+
+      const now = new Date().toISOString()
+      const sessionPayload = {
+        id: session.id,
+        set_id: session.set_id,
+        user_id: session.user_id || user.value.id,
+        status: session.status,
+        progress: session.progress,
+        started_at: session.started_at || now,
+        last_saved_at: session.last_saved_at || now,
+        completed_at: session.completed_at || null,
+        updated_at: now
+      }
+
+      const { error: sessionError } = await supabase
+        .from('inspection_sessions')
+        .upsert(sessionPayload, { onConflict: 'id' })
+
+      if (sessionError) {
+        console.error('[syncToServer] 세션 저장 실패:', sessionError)
+        // 외래 키 제약 조건 위반인 경우 더 명확한 메시지
+        if (sessionError.message.includes('foreign key constraint') || sessionError.message.includes('fkey')) {
+          throw new Error(`세트 정보가 데이터베이스에 없습니다. set_id: ${session.set_id}`)
         }
-      })
+        throw new Error(sessionError.message)
+      }
 
       // forceFullSync일 때는 모든 아이템을 전송
       if (dirtyItems.length > 0 || forceFullSync) {
@@ -669,13 +746,26 @@ export function useInspectionSession() {
             return
           }
 
-          await callInspectionApi({
-            method: 'PUT',
-            body: {
-              session_id: session.id,
-              items: itemsPayload
-            }
-          })
+          const sanitizedItems = itemsPayload.map(item => ({
+            id: item.id,
+            session_id: session.id,
+            part_id: item.part_id,
+            color_id: item.color_id,
+            element_id: item.element_id,
+            checked_count: item.checked_count,
+            total_count: item.total_count,
+            status: item.status,
+            notes: item.notes,
+            updated_at: item.updated_at
+          }))
+
+          const { error: itemsError } = await supabase
+            .from('inspection_items')
+            .upsert(sanitizedItems, { onConflict: 'id' })
+
+          if (itemsError) {
+            throw new Error(itemsError.message)
+          }
 
           itemsToSync.forEach(item => {
             item.is_dirty = false

@@ -147,7 +147,13 @@
               <div class="timeline-marker" :class="`status-${session.status}`"></div>
               <div class="timeline-content">
                 <div class="timeline-header">
-                  <span class="timeline-set-name">{{ session.set_name }}</span>
+                  <span class="timeline-set-name">
+                    <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                    <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                    <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                    <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name }}</span>
+                    <span v-else>{{ session.set_name }}</span>
+                  </span>
                   <span class="timeline-date">{{ formatDateShort(session.started_at) }}</span>
                 </div>
                 <div class="timeline-stats">
@@ -184,7 +190,13 @@
                   @click="session.status !== 'completed' ? viewSession(session.id) : null"
                   :class="['table-row', { 'table-row-clickable': session.status !== 'completed', 'table-row-completed': session.status === 'completed' }]"
                 >
-                  <td>{{ session.set_name }}</td>
+                  <td>
+                    <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                    <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                    <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                    <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name }}</span>
+                    <span v-else>{{ session.set_name }}</span>
+                  </td>
                   <td>
                     <span class="status-badge" :class="`status-${session.status}`">
                       {{ statusLabel(session.status) }}
@@ -363,7 +375,9 @@ export default {
             last_saved_at,
             completed_at,
             lego_sets:set_id (
-              name
+              name,
+              set_num,
+              theme_id
             )
           `)
 
@@ -390,6 +404,20 @@ export default {
           .limit(1000)
 
         if (sessionsError) throw sessionsError
+
+        // theme 정보를 별도로 조회
+        const themeIds = [...new Set((sessionsData || []).map(s => s.lego_sets?.theme_id).filter(Boolean))]
+        let themesMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+          
+          if (themesData) {
+            themesMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
 
         const sessionIds = (sessionsData || []).map(s => s.id)
         let itemsData = []
@@ -440,10 +468,15 @@ export default {
               }, {}))
           }
 
+          const legoSet = session.lego_sets
+          const themeName = legoSet?.theme_id ? themesMap.get(legoSet.theme_id) : null
+          
           return {
             id: session.id,
             set_id: session.set_id,
-            set_name: session.lego_sets?.name || '세트명 없음',
+            set_name: legoSet?.name || '세트명 없음',
+            set_num: legoSet?.set_num || null,
+            theme_name: themeName || null,
             status: session.status,
             progress: session.progress || 0,
             started_at: session.started_at,
@@ -515,6 +548,12 @@ export default {
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
       return `${year}. ${month}. ${day}.`
+    }
+
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
     }
 
     const viewSession = (sessionId) => {
@@ -604,6 +643,7 @@ export default {
       formatDateShort,
       formatDuration,
       formatDateDisplay,
+      formatSetNum,
       viewSession,
       isAdmin,
       viewMode,
@@ -827,6 +867,38 @@ export default {
   font-weight: 600;
   color: #111827;
   font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.timeline-set-name .set-num,
+td .set-num {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.timeline-set-name .separator,
+td .separator {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.timeline-set-name .theme-name,
+td .theme-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.timeline-set-name .set-name,
+td .set-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
 }
 
 .timeline-date {

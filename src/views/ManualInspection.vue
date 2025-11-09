@@ -9,29 +9,19 @@
         <header v-else class="panel-header session-header">
           <div class="header-left">
             <div class="session-title">
-              <h1>{{ session.set_name }}</h1>
+              <h1>
+                <div class="set-info-row">
+                  <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                  <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                  <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                </div>
+                <div class="set-name">{{ session.set_name }}</div>
+              </h1>
               <div class="session-stats">
                 <span class="stat-badge progress">{{ progress }}%</span>
                 <span class="stat-badge missing">{{ missingCount }}개 누락</span>
                 <span class="stat-badge time">{{ formatTime(session.last_saved_at) }}</span>
               </div>
-            </div>
-          </div>
-          <div v-if="session.id" class="sync-section"><!-- // 🔧 수정됨 -->
-            <div
-              v-if="syncStatusMessage"
-              class="sync-status"
-              :class="{ error: lastSyncError, syncing: syncInProgress, offline: isOffline }"
-            >
-              <span class="sync-text">{{ syncStatusMessage }}</span>
-              <button
-                type="button"
-                class="sync-action"
-                @click="triggerManualSync"
-                :disabled="syncInProgress || isOffline"
-              >
-                {{ isOffline ? '오프라인' : (syncInProgress ? '동기화 중...' : '지금 동기화') }}
-              </button>
             </div>
           </div>
         </header>
@@ -128,11 +118,6 @@
           </div>
 
           <div v-else class="inspection-workspace">
-
-            <div v-if="qaReminder.visible" class="qa-reminder" :class="qaReminder.level"><!-- // 🔧 수정됨 -->
-              <div class="qa-reminder-title">QA 리마인더</div>
-              <p class="qa-reminder-message">{{ qaReminder.message }}</p>
-            </div>
 
             <div v-if="session.id" class="workspace-controls">
               <div class="mode-controls">
@@ -1055,46 +1040,6 @@ export default {
       }
     }
 
-    const qaReminder = computed(() => { // 🔧 수정됨
-      if (!session.id) {
-        return { visible: false, level: '', message: '' }
-      }
-      const missing = statusCounts.value.missing || 0
-      const hold = statusCounts.value.hold || 0
-      const pending = statusCounts.value.pending || 0
-      if (missing > 0) {
-        return {
-          visible: true,
-          level: 'alert',
-          message: `누락 부품 ${missing}개가 확인되었습니다. 누락 사유를 기록하고 QA 재검수를 진행하세요.`
-        }
-      }
-      if (hold > 0) {
-        return {
-          visible: true,
-          level: 'warning',
-          message: `보류 상태 부품 ${hold}개가 남아 있습니다. QA 체크리스트에 따라 추가 검토가 필요합니다.`
-        }
-      }
-      if (pending === 0 && progress.value >= 80) {
-        return {
-          visible: true,
-          level: 'info',
-          message: '검수 완료 단계입니다. QA 최종 점검표를 실행한 뒤 세션을 종료하세요.'
-        }
-      }
-      const elapsedMinutes = Math.floor(elapsedSeconds.value / 60)
-      if (elapsedMinutes >= 45 && pending > 0) {
-        return {
-          visible: true,
-          level: 'info',
-          message: `검수 시간이 ${elapsedMinutes}분을 초과했습니다. QA 항목 중 중간 품질 확인을 수행하세요.`
-        }
-      }
-      return { visible: false, level: '', message: '' }
-    })
-
-
     const loadAvailableSets = async () => {
       try {
         const { data, error: err } = await supabase
@@ -1787,21 +1732,20 @@ export default {
             })
           }
 
-          // 2. part_images에 없으면 기존 part_img_url 사용 (Rebrickable API 호출 최소화)
-          itemsWithElementId.forEach(item => {
-            if (!imageUrlMap[item.id] && item.part_img_url) {
-              // 기존에 로드된 part_img_url 사용 (이미 element_id 기반으로 로드됨)
-              imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(item.part_img_url)}`
-            }
-          })
-          
-          // 3. part_img_url도 없으면 Supabase Storage에서 element_id 기반 파일명으로 시도
+          // 2. Supabase Storage에서 element_id 기반 파일명으로 시도
           itemsWithElementId.forEach(item => {
             if (!imageUrlMap[item.id] && item.element_id) {
               const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
               const bucketName = 'lego_parts_images'
               const fileName = `${item.element_id}.webp`
               imageUrlMap[item.id] = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+            }
+          })
+          
+          // 3. Supabase Storage에도 없으면 원본 URL 직접 사용 (프록시 불필요)
+          itemsWithElementId.forEach(item => {
+            if (!imageUrlMap[item.id] && item.part_img_url) {
+              imageUrlMap[item.id] = item.part_img_url
             }
           })
         }
@@ -1833,13 +1777,6 @@ export default {
             })
           }
 
-          // Rebrickable URL 사용
-          partKeys.forEach(item => {
-            if (!imageUrlMap[item.id] && item.part_img_url) {
-              imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(item.part_img_url)}`
-            }
-          })
-
           // Supabase Storage URL 시도
           partKeys.forEach(item => {
             if (!imageUrlMap[item.id]) {
@@ -1847,6 +1784,13 @@ export default {
               const bucketName = 'lego_parts_images'
               const fileName = `${item.part_id}_${item.color_id}.webp`
               imageUrlMap[item.id] = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+            }
+          })
+
+          // Supabase Storage에도 없으면 원본 URL 직접 사용 (프록시 불필요)
+          partKeys.forEach(item => {
+            if (!imageUrlMap[item.id] && item.part_img_url) {
+              imageUrlMap[item.id] = item.part_img_url
             }
           })
         }
@@ -2053,6 +1997,12 @@ export default {
       const hours = Math.floor(minutes / 60)
       if (hours < 24) return `${hours}시간 전`
       return formatDate(dateString)
+    }
+
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
     }
 
     const syncStatusMessage = computed(() => {
@@ -2314,6 +2264,7 @@ export default {
       swipeState,
       formatDate,
       formatTime,
+      formatSetNum,
       syncStatusMessage,
       syncInProgress,
       syncErrorToast,
@@ -2333,7 +2284,6 @@ export default {
       missingRateLabel,
       statusChartData,
       statusChartOptions,
-      qaReminder,
       showPartInfo,
       showPartInfoModal,
       selectedPart,
@@ -2381,14 +2331,27 @@ export default {
 
 .panel-header {
   position: relative;
-  background: #ffffff;
-  border-bottom: 1px solid #e5e7eb;
   padding: 1.5rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 1rem;
+}
+
+.session-header {
+  text-align: center;
+}
+
+.session-header .header-left {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.session-title {
+  width: 100%;
+  text-align: center;
 }
 
 .page-header {
@@ -2418,34 +2381,84 @@ export default {
 
 .session-title h1 {
   margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.session-title h1 .set-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.session-title h1 .set-num {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+}
+
+.session-title h1 .separator {
+  font-size: 1.125rem;
+  font-weight: 400;
+  color: #6b7280;
+  margin: 0;
+  padding: 0 0.125rem;
+}
+
+.session-title h1 .theme-name {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+  margin: 0;
+  padding: 0;
+}
+
+.session-title h1 .set-name {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: #111827;
+  text-align: center;
+  font-family: 'Montserrat', sans-serif;
 }
 
 .session-stats {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.375rem;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .stat-badge {
   padding: 0.375rem 0.75rem;
-  border-radius: 6px;
+  border-radius: 999px;
   font-size: 0.875rem;
   font-weight: 500;
+  color: #ffffff;
 }
 
 .stat-badge.progress {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #1e40af;
+  color: #ffffff;
 }
 
 .stat-badge.missing {
-  background: #fee2e2;
-  color: #991b1b;
+  background: #dc2626;
+  color: #ffffff;
 }
 
 .stat-badge.time {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: #374151;
+  color: #ffffff;
 }
 
 .header-actions {
@@ -3081,37 +3094,6 @@ export default {
 .status-chart {
   width: 100%;
   height: 220px;
-}
-
-.qa-reminder {
-  border-radius: 12px;
-  padding: 1.25rem;
-  border: 1px solid #fee2e2;
-  background: #fef2f2;
-  color: #991b1b;
-}
-
-.qa-reminder.warning {
-  border-color: #fef3c7;
-  background: #fffbeb;
-  color: #92400e;
-}
-
-.qa-reminder.info {
-  border-color: #bfdbfe;
-  background: #eff6ff;
-  color: #1e3a8a;
-}
-
-.qa-reminder-title {
-  font-size: 0.875rem;
-  font-weight: 700;
-  margin-bottom: 0.35rem;
-}
-
-.qa-reminder-message {
-  font-size: 0.9375rem;
-  line-height: 1.5;
 }
 
 .workspace-controls {

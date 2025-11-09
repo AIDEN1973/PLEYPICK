@@ -57,6 +57,20 @@ class ImageDuplicateCache {
 
 const imageDuplicateCache = new ImageDuplicateCache()
 
+// 파일명 생성 헬퍼 함수: element_id 우선, 없으면 part_num_color_id
+export const generateImageFilename = (partNum, colorId, elementId = null) => {
+  console.log(`[generateImageFilename] 입력: partNum=${partNum}, colorId=${colorId}, elementId=${elementId}, elementId 타입=${typeof elementId}, elementId truthy=${!!elementId}`)
+  // elementId가 null, undefined, 빈 문자열이 아닌 경우에만 사용
+  if (elementId !== null && elementId !== undefined && elementId !== '') {
+    const filename = `${elementId}.webp`
+    console.log(`[generateImageFilename] elementId 사용: ${filename}`)
+    return filename
+  }
+  const filename = `${partNum}_${colorId}.webp`
+  console.log(`[generateImageFilename] partNum_colorId 사용: ${filename}`)
+  return filename
+}
+
 export function useImageManager() {
   const uploading = ref(false)
   const downloading = ref(false)
@@ -347,7 +361,11 @@ export function useImageManager() {
 
   // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수 (파일명 기반 중복 검사)
   const processRebrickableImage = async (imageUrl, partNum, colorId = null, options = {}) => {
-    const elementId = options?.elementId || null
+    // elementId가 실제로 존재하는지 확인 (0이나 빈 문자열도 유효한 값일 수 있음)
+    const elementId = (options?.elementId !== null && options?.elementId !== undefined && options?.elementId !== '') 
+      ? options.elementId 
+      : null
+    console.log(`[processRebrickableImage] 입력값: partNum=${partNum}, colorId=${colorId}, options.elementId=${options?.elementId}, 최종 elementId=${elementId}, elementId 타입=${typeof elementId}`)
     try {
       // 원본 URL에서 파일명 추출
       const originalFilename = extractOriginalFilename(imageUrl)
@@ -408,15 +426,16 @@ export function useImageManager() {
         
         URL.revokeObjectURL(img.src)
         
-        // 파일명을 partNum_colorId.webp 형식으로 통일
-        const fileName = `${partNum}_${colorId}.webp`
+        // 파일명 생성: element_id 우선, 없으면 partNum_colorId
+        const fileName = generateImageFilename(partNum, colorId, elementId)
+        console.log(`📝 파일명 생성: partNum=${partNum}, colorId=${colorId}, elementId=${elementId}, fileName=${fileName}`)
         const file = new File([webpBlob], fileName, { type: 'image/webp' })
         
         // Supabase Storage에 직접 업로드
         const bucketName = 'lego_parts_images'
         const filePath = `images/${fileName}`
         
-        console.log(`📤 Supabase Storage 업로드 시도: ${filePath}`)
+        console.log(`📤 Supabase Storage 업로드 시도: ${filePath} (elementId: ${elementId || '없음'})`)
         const { data, error: uploadError } = await supabase.storage
           .from(bucketName)
           .upload(filePath, file, {
@@ -469,7 +488,8 @@ export function useImageManager() {
           }
           
           const proxyBlob = new Blob([proxyResponse.data])
-          const fileName = `${partNum}_${colorId}.webp`
+          // 파일명 생성: element_id 우선, 없으면 partNum_colorId
+          const fileName = generateImageFilename(partNum, colorId, elementId)
           const file = new File([proxyBlob], fileName, { type: 'image/webp' })
           
           // Supabase Storage에 직접 업로드
@@ -764,7 +784,7 @@ export function useImageManager() {
         color_id: colorId,
         original_url: uploadedUrl,
         uploaded_url: uploadedUrl,
-        filename: filename || `${partNum}_${colorId}.webp`,
+        filename: filename || generateImageFilename(partNum, colorId, elementId),
         upload_status: 'completed',
         ...(elementId && { element_id: String(elementId) }) // element_id가 있으면 추가
       }
@@ -883,6 +903,7 @@ export function useImageManager() {
     checkBucketExists,
     extractOriginalFilename,
     checkPartImageDuplicate,
+    generateImageFilename, // 파일명 생성 함수 export
     // ✅ 캐시 관리 함수 추가
     clearImageCache: () => imageDuplicateCache.clear(),
     getImageCacheSize: () => imageDuplicateCache.size,

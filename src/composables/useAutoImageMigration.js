@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import { useImageManager } from './useImageManager'
 
 // UPLOAD_PROXY 상수 제거 - 직접 경로 사용
 
@@ -26,7 +27,8 @@ export function useAutoImageMigration() {
    * 부품 이미지 자동 마이그레이션 (캐싱 및 중복 방지)
    */
   const migratePartImage = async (partNum, colorId, originalUrl, options = {}) => {
-    const cacheKey = `${partNum}_${colorId}`
+    const elementId = options?.elementId || null
+    const cacheKey = elementId ? `${elementId}` : `${partNum}_${colorId}`
     
     try {
       // 1. 캐시 확인
@@ -126,7 +128,10 @@ export function useAutoImageMigration() {
       // 4. Supabase Storage에 업로드
       let uploadResult
       try {
-        uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload })
+        uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { 
+          verifyUpload: options.verifyUpload,
+          elementId: options?.elementId || null
+        })
       } catch (uploadError) {
         console.warn(`⚠️ Supabase 업로드 실패, 원본 URL 유지: ${uploadError.message}`)
         migrationStats.value.skipped++
@@ -135,7 +140,7 @@ export function useAutoImageMigration() {
       
       // 5. 데이터베이스에 등록 (실패해도 계속 진행)
       try {
-        await registerInDatabase(partNum, colorId, originalUrl, uploadResult.url)
+        await registerInDatabase(partNum, colorId, originalUrl, uploadResult.url, options?.elementId || null)
       } catch (dbError) {
         console.warn(`⚠️ 데이터베이스 등록 실패하지만 마이그레이션은 성공: ${partNum}`, dbError)
         // 데이터베이스 등록 실패해도 마이그레이션은 성공으로 간주
@@ -439,7 +444,13 @@ export function useAutoImageMigration() {
    * Supabase Storage에 업로드
    */
   const uploadToSupabase = async (partNum, colorId, webpBlob, options = {}) => {
-    const fileName = `${partNum}_${colorId}.webp`
+    const { generateImageFilename } = useImageManager()
+    // elementId가 실제로 존재하는지 확인 (0이나 빈 문자열도 유효한 값일 수 있음)
+    const elementId = (options?.elementId !== null && options?.elementId !== undefined && options?.elementId !== '') 
+      ? options.elementId 
+      : null
+    console.log(`[uploadToSupabase] partNum=${partNum}, colorId=${colorId}, options.elementId=${options?.elementId}, 최종 elementId=${elementId}`)
+    const fileName = generateImageFilename(partNum, colorId, elementId)
     const filePath = `images/${fileName}`
     
     try {
@@ -496,37 +507,56 @@ export function useAutoImageMigration() {
   /**
    * 데이터베이스에 등록 (간단한 방식)
    */
-  const registerInDatabase = async (partNum, colorId, originalUrl, supabaseUrl) => {
+  const registerInDatabase = async (partNum, colorId, originalUrl, supabaseUrl, elementId = null) => {
+    const { generateImageFilename } = useImageManager()
+    const filename = generateImageFilename(partNum, colorId, elementId)
+    
     try {
       // part_images 테이블에 간단히 삽입 시도 (스키마에 맞게 수정)
+      const insertPayload = {
+        part_id: partNum,
+        color_id: colorId,
+        original_url: originalUrl,
+        uploaded_url: supabaseUrl,
+        filename: filename,
+        image_format: 'webp',
+        upload_status: 'completed',
+        download_status: 'completed'
+      }
+      if (elementId) {
+        insertPayload.element_id = String(elementId)
+      }
+      
       const { error: insertError } = await supabase
         .from('part_images')
-        .insert({
-          part_id: partNum,
-          color_id: colorId,
-          original_url: originalUrl,
-          uploaded_url: supabaseUrl,
-          filename: `${partNum}_${colorId}.webp`,
-          image_format: 'webp',
-          upload_status: 'completed',
-          download_status: 'completed'
-        })
+        .insert(insertPayload)
       
       if (insertError) {
         // 삽입 실패 시 업데이트 시도
         console.log(`📝 삽입 실패, 업데이트 시도: ${partNum}_${colorId}`)
-        const { error: updateError } = await supabase
+        const updatePayload = {
+          original_url: originalUrl,
+          uploaded_url: supabaseUrl,
+          filename: filename,
+          image_format: 'webp',
+          upload_status: 'completed',
+          download_status: 'completed'
+        }
+        if (elementId) {
+          updatePayload.element_id = String(elementId)
+        }
+        
+        let updateQuery = supabase
           .from('part_images')
-          .update({
-            original_url: originalUrl,
-            uploaded_url: supabaseUrl,
-            filename: `${partNum}_${colorId}.webp`,
-            image_format: 'webp',
-            upload_status: 'completed',
-            download_status: 'completed'
-          })
-          .eq('part_id', partNum)
-          .eq('color_id', colorId)
+          .update(updatePayload)
+        
+        if (elementId) {
+          updateQuery = updateQuery.eq('element_id', String(elementId))
+        } else {
+          updateQuery = updateQuery.eq('part_id', partNum).eq('color_id', colorId)
+        }
+        
+        const { error: updateError } = await updateQuery
         
         if (updateError) {
           console.warn('part_images 테이블 등록 실패:', updateError)
@@ -546,8 +576,8 @@ export function useAutoImageMigration() {
             color_id: colorId,
             original_url: originalUrl,
             supabase_url: supabaseUrl,
-            file_path: `images/${partNum}_${colorId}.webp`,
-            file_name: `${partNum}_${colorId}.webp`
+            file_path: `images/${filename}`,
+            file_name: filename
             // created_at은 자동으로 설정됨
           })
         
@@ -597,12 +627,16 @@ export function useAutoImageMigration() {
           }
 
           try {
-            console.log(`🔄 [W${workerId}] ${i + 1}/${parts.length} - ${part.lego_parts.part_num}`)
+            console.log(`🔄 [W${workerId}] ${i + 1}/${parts.length} - ${part.lego_parts.part_num}${part.element_id ? ` (element_id: ${part.element_id})` : ''}`)
             const result = await migratePartImage(
               part.lego_parts.part_num,
               part.lego_colors.color_id,
               part.lego_parts.part_img_url,
-              { force: options.force, verifyUpload }
+              { 
+                force: options.force, 
+                verifyUpload,
+                elementId: part.element_id || null
+              }
             )
             results[i] = { part, success: !!result, supabaseUrl: result }
             if (result) migrationStats.value.completed++
@@ -681,7 +715,7 @@ export function useAutoImageMigration() {
       // 단계별 조회로 문제 해결
       const { data: setParts, error: setPartsError } = await supabase
         .from('set_parts')
-        .select('part_id, color_id')
+        .select('part_id, color_id, element_id')
         // ✅ 제한 제거: 모든 부품 마이그레이션
       
       if (setPartsError) {
@@ -710,6 +744,7 @@ export function useAutoImageMigration() {
           return {
             part_id: sp.part_id,
             color_id: sp.color_id,
+            element_id: sp.element_id || null,
             lego_parts: legoPart,
             lego_colors: { color_id: sp.color_id }
           }
@@ -720,9 +755,14 @@ export function useAutoImageMigration() {
       // 2. 배치 마이그레이션 실행 (옵션 전달)
       const results = await batchMigrateImages(parts, options)
       
-      console.log(`✅ 전체 마이그레이션 완료: ${results.filter(r => r.success).length}개 성공`)
+      const successCount = results.filter(r => r && r.success).length
+      console.log(`✅ 전체 마이그레이션 완료: ${successCount}개 성공 / ${results.length}개 전체`)
       
-      return results
+      return {
+        success: successCount,
+        total: results.length,
+        results: results
+      }
     } catch (error) {
       console.error('❌ 전체 마이그레이션 실패:', error)
       throw error
@@ -740,6 +780,7 @@ export function useAutoImageMigration() {
       const { data: parts, error } = await supabase
         .from('set_parts')
         .select(`
+          element_id,
           lego_parts!inner(part_num, part_img_url),
           lego_colors!inner(color_id)
         `)

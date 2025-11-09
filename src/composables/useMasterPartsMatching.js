@@ -120,16 +120,35 @@ export function useMasterPartsMatching() {
   }
 
   // 사용 가능한 세트 목록 가져오기
-  const getAvailableSets = async () => {
+  const getAvailableSets = async (limit = 20) => {
     try {
       const { data, error } = await supabase
         .from('lego_sets')
-        .select('set_num, name')
-        .limit(20)
+        .select('set_num, name, theme_id')
+        .limit(limit)
         .order('set_num')
       
       if (error) throw error
-      return data || []
+      
+      // theme 정보를 별도로 조회
+      const themeIds = [...new Set((data || []).map(s => s.theme_id).filter(Boolean))]
+      let themesMap = new Map()
+      if (themeIds.length > 0) {
+        const { data: themesData } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .in('theme_id', themeIds)
+        
+        if (themesData) {
+          themesMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+        }
+      }
+      
+      // theme_name 추가
+      return (data || []).map(set => ({
+        ...set,
+        theme_name: set.theme_id ? themesMap.get(set.theme_id) : null
+      }))
     } catch (error) {
       console.error('Error fetching available sets:', error)
       return []

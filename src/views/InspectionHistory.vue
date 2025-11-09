@@ -43,7 +43,13 @@
             @click="viewSessionDetail(session.id)"
           >
             <div class="session-card-header">
-              <h3>{{ session.set_name || '세트명 없음' }}</h3>
+              <h3>
+                <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name || '세트명 없음' }}</span>
+                <span v-else>{{ session.set_name || '세트명 없음' }}</span>
+              </h3>
               <span class="session-status" :class="`status-${session.status}`">
                 {{ statusLabel(session.status) }}
               </span>
@@ -155,7 +161,9 @@ export default {
             last_saved_at,
             completed_at,
             lego_sets:set_id (
-              name
+              name,
+              set_num,
+              theme_id
             )
           `)
           .eq('user_id', user.value.id)
@@ -165,16 +173,37 @@ export default {
 
         if (err) throw err
 
-        sessions.value = (data || []).map(session => ({
-          id: session.id,
-          set_id: session.set_id,
-          set_name: session.lego_sets?.name || '세트명 없음',
-          status: session.status,
-          progress: session.progress || 0,
-          started_at: session.started_at,
-          last_saved_at: session.last_saved_at,
-          completed_at: session.completed_at
-        }))
+        // theme 정보를 별도로 조회
+        const themeIds = [...new Set((data || []).map(s => s.lego_sets?.theme_id).filter(Boolean))]
+        let themesMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+          
+          if (themesData) {
+            themesMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
+
+        sessions.value = (data || []).map(session => {
+          const legoSet = session.lego_sets
+          const themeName = legoSet?.theme_id ? themesMap.get(legoSet.theme_id) : null
+          
+          return {
+            id: session.id,
+            set_id: session.set_id,
+            set_name: legoSet?.name || '세트명 없음',
+            set_num: legoSet?.set_num || null,
+            theme_name: themeName || null,
+            status: session.status,
+            progress: session.progress || 0,
+            started_at: session.started_at,
+            last_saved_at: session.last_saved_at,
+            completed_at: session.completed_at
+          }
+        })
       } catch (err) {
         console.error('검수 이력 로드 실패:', err)
         error.value = err.message || '검수 이력을 불러오는데 실패했습니다'
@@ -219,6 +248,12 @@ export default {
       return formatDate(dateString)
     }
 
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
+    }
+
     const resumeSession = async (sessionId) => {
       try {
         await loadSession(sessionId)
@@ -247,6 +282,7 @@ export default {
       statusLabel,
       formatDate,
       formatTime,
+      formatSetNum,
       resumeSession,
       viewSessionDetail
     }
@@ -357,6 +393,34 @@ export default {
   color: #111827;
   margin: 0;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.session-card-header h3 .set-num {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.session-card-header h3 .separator {
+  font-size: 1rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.session-card-header h3 .theme-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.session-card-header h3 .set-name {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
 }
 
 .session-status {

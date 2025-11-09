@@ -707,11 +707,13 @@ const saveSetToMasterPartsDB = async () => {
           
           // 2.5단계: 부품 이미지를 Supabase Storage에 저장
           if (originalPart?.part?.part_img_url) {
-            const { uploadImageFromUrl, saveImageMetadata } = useImageManager()
+            const { uploadImageFromUrl, saveImageMetadata, generateImageFilename } = useImageManager()
+            const elementId = originalPart.element_id || null
+            const filename = generateImageFilename(originalPart.part.part_num, originalPart.color.id, elementId)
             try {
               const imageResult = await uploadImageFromUrl(
                 originalPart.part.part_img_url,
-                `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
+                filename,
                 'lego_parts_images'
               )
               
@@ -720,9 +722,10 @@ const saveSetToMasterPartsDB = async () => {
                 original_url: originalPart.part.part_img_url,
                 supabase_url: imageResult.url,
                 file_path: imageResult.path,
-                file_name: `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
+                file_name: filename,
                 part_num: originalPart.part.part_num,
                 color_id: originalPart.color.id,
+                element_id: elementId,
                 set_num: targetSetNumber.value
               })
               
