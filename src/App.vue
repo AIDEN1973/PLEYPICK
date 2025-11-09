@@ -22,7 +22,7 @@
                   class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                   active-class="nav-menu-active"
                 >
-                  검수 시작
+                  검수시작
                 </router-link>
                 <router-link 
                   v-if="user"
@@ -30,7 +30,7 @@
                   class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                   active-class="nav-menu-active"
                 >
-                  검수 이력
+                  검수이력
                 </router-link>
                 <router-link 
                   v-if="user"
@@ -38,7 +38,7 @@
                   class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                   active-class="nav-menu-active"
                 >
-                  검수 통계
+                  검수통계
                 </router-link>
                 <router-link 
                   v-if="user"
@@ -46,7 +46,7 @@
                   class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                   active-class="nav-menu-active"
                 >
-                  검수 노트
+                  검수노트
                 </router-link>
                 <router-link 
                   v-if="user"
@@ -55,14 +55,6 @@
                   active-class="nav-menu-active"
                 >
                   부품으로 세트찾기
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/alternative-parts-search" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  유사부품 찾기
                 </router-link>
 
                 <!-- 관리 드롭다운 -->

@@ -484,6 +484,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
+  text-align: center;
 }
 
 .page-header h1 {

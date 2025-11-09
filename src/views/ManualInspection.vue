@@ -2,42 +2,19 @@
   <div class="pleyon-layout">
     <div class="layout-container">
       <main class="main-panel">
-        <header class="panel-header" :class="{ 'session-header': session.id, 'start-header': !session.id }">
+        <div v-if="!session.id" class="page-header">
+          <h1>부품검수</h1>
+          <p>레고 세트 부품 검수를 진행할 수 있습니다</p>
+        </div>
+        <header v-else class="panel-header session-header">
           <div class="header-left">
-            <h1 v-if="!session.id" class="start-title">부품검수</h1>
-            <div v-else class="session-title">
+            <div class="session-title">
               <h1>{{ session.set_name }}</h1>
               <div class="session-stats">
                 <span class="stat-badge progress">{{ progress }}%</span>
                 <span class="stat-badge missing">{{ missingCount }}개 누락</span>
                 <span class="stat-badge time">{{ formatTime(session.last_saved_at) }}</span>
               </div>
-            </div>
-          </div>
-          <div class="header-actions" v-if="session.id">
-            <div class="mode-controls">
-              <button 
-                @click="inspectionMode = 'single'"
-                :class="['mode-btn', { active: inspectionMode === 'single' }]"
-              >
-                단일 검수
-              </button>
-              <button 
-                @click="inspectionMode = 'grid'"
-                :class="['mode-btn', { active: inspectionMode === 'grid' }]"
-              >
-                그리드 검수
-              </button>
-            </div>
-            <div v-if="inspectionMode === 'grid'" class="grid-controls">
-              <button 
-                v-for="cols in [1, 2, 3]" 
-                :key="cols"
-                @click="gridColumns = cols"
-                :class="['grid-btn', { active: gridColumns === cols }]"
-              >
-                {{ cols }}열
-              </button>
             </div>
           </div>
           <div v-if="session.id" class="sync-section"><!-- // 🔧 수정됨 -->
@@ -55,23 +32,6 @@
               >
                 {{ isOffline ? '오프라인' : (syncInProgress ? '동기화 중...' : '지금 동기화') }}
               </button>
-              <button
-                type="button"
-                class="analytics-toggle"
-                @click="showAnalytics = !showAnalytics"
-                :aria-expanded="showAnalytics"
-              >
-                <svg 
-                  class="toggle-icon" 
-                  :class="{ rotated: showAnalytics }"
-                  fill="none" 
-                  viewBox="0 0 24 24" 
-                  stroke="currentColor" 
-                  stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
             </div>
           </div>
         </header>
@@ -85,36 +45,39 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label>세트 선택</label>
-                  <div class="custom-select" ref="setDropdownRef">
-                    <button
-                      type="button"
-                      class="custom-select-trigger"
-                      :class="{ open: showSetDropdown }"
-                      @click="toggleSetDropdown"
-                      :disabled="loading"
-                    >
-                      <span class="custom-select-value">{{ selectedSetLabel }}</span>
-                      <svg class="custom-select-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-
-                    <transition name="select-fade">
-                      <div v-if="showSetDropdown" class="custom-select-dropdown">
-                        <button
-                          v-for="set in availableSets"
-                          :key="set.id"
-                          type="button"
-                          class="custom-select-option"
-                          :class="{ active: selectedSetId === set.id }"
-                          @click="handleSelectSet(set)"
-                        >
-                          <div class="option-title">{{ set.name }}</div>
-                          <div class="option-subtitle">{{ set.set_num }}</div>
-                        </button>
+                  <label>레고 번호 검색</label>
+                  <div class="set-search-container">
+                    <div class="search-input-wrapper">
+                      <input
+                        type="text"
+                        v-model="setSearchInput"
+                        @keyup.enter="searchSet"
+                        placeholder="레고 세트 번호를 입력하세요 (예: 10294)"
+                        class="set-search-input"
+                        :disabled="searchingSet"
+                      />
+                      <button
+                        type="button"
+                        @click="searchSet"
+                        :disabled="!setSearchInput || searchingSet"
+                        class="search-button"
+                      >
+                        <svg v-if="!searchingSet" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                          <path d="M9 17C13.4183 17 17 13.4183 17 9C17 4.58172 13.4183 1 9 1C4.58172 1 1 4.58172 1 9C1 13.4183 4.58172 17 9 17Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M19 19L14.65 14.65" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        <span v-else>검색 중...</span>
+                      </button>
+                    </div>
+                    <div v-if="searchedSet" class="search-result">
+                      <div class="search-result-item">
+                        <div class="result-title">{{ searchedSet.name }}</div>
+                        <div class="result-subtitle">레고 번호: {{ searchedSet.set_num }}</div>
                       </div>
-                    </transition>
+                    </div>
+                    <div v-if="setSearchError" class="search-error">
+                      {{ setSearchError }}
+                    </div>
                   </div>
                 </div>
                 <button 
@@ -127,97 +90,44 @@
               </div>
             </div>
 
-            <div v-if="lastSession" class="setup-card resume-card">
-              <div class="card-header">
-                <h3>이전 세션 복원</h3>
-                <p>진행 중이던 검수를 이어서 진행할 수 있습니다</p>
-              </div>
-              <div class="card-body">
-                <div class="resume-info">
-                  <div class="info-row">
-                    <span class="info-label">세트명:</span>
-                    <span class="info-value">{{ lastSession.set_name }}</span>
+            <div v-if="lastSessions.length > 0" class="resume-sessions-section">
+              <h3 class="resume-sessions-title">이전 세션 복원</h3>
+              <p class="resume-sessions-subtitle">진행 중이던 검수를 이어서 진행할 수 있습니다</p>
+              <div class="resume-sessions-list">
+                <div 
+                  v-for="sessionItem in lastSessions" 
+                  :key="sessionItem.id"
+                  class="setup-card resume-card"
+                >
+                  <div class="card-header">
+                    <h4>{{ sessionItem.set_name }}</h4>
+                    <span class="session-status-badge" :class="sessionItem.status">
+                      {{ sessionItem.status === 'in_progress' ? '진행중' : '일시정지' }}
+                    </span>
                   </div>
-                  <div class="info-row">
-                    <span class="info-label">진행률:</span>
-                    <span class="info-value progress-text">{{ lastSession.progress }}%</span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">마지막 저장:</span>
-                    <span class="info-value">{{ formatDate(lastSession.last_saved_at) }}</span>
+                  <div class="card-body">
+                    <div class="resume-info">
+                      <div class="info-row">
+                        <span class="info-label">진행률:</span>
+                        <span class="info-value progress-text">{{ sessionItem.progress }}%</span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">마지막 저장:</span>
+                        <span class="info-value">{{ formatDate(sessionItem.last_saved_at) }}</span>
+                      </div>
+                    </div>
+                    <div class="resume-actions">
+                      <button @click="resumeSession(sessionItem.id)" class="btn-primary">이어하기</button>
+                      <button @click="handleCompleteSession(sessionItem.id)" class="btn-primary">완료</button>
+                      <button @click="handleDeleteSession(sessionItem.id)" class="btn-primary">삭제</button>
+                    </div>
                   </div>
                 </div>
-                <div class="resume-actions">
-                  <button @click="resumeSession" class="btn-primary">이어하기</button>
-                  <button @click="startNewSession" class="btn-secondary">새로 시작</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 희귀부품 알림 패널 -->
-          <div v-if="session.id && rareParts.length > 0" class="rare-parts-panel">
-            <div class="rare-parts-header">
-              <h3>희귀부품 알림</h3>
-              <button @click="showRareParts = !showRareParts" class="toggle-btn">
-                {{ showRareParts ? '숨기기' : '보기' }}
-              </button>
-            </div>
-            <div v-if="showRareParts" class="rare-parts-list">
-              <div
-                v-for="part in rareParts.slice(0, 5)"
-                :key="`${part.part_id}_${part.color_id}`"
-                class="rare-part-item"
-              >
-                <span class="rare-part-name">{{ part.part_name }}</span>
-                <span class="rare-part-badge">희귀도: {{ part.usage_frequency }}</span>
               </div>
             </div>
           </div>
 
           <div v-else class="inspection-workspace">
-            <div v-if="session.id && showAnalytics" class="progress-section"><!-- // 🔧 수정됨 -->
-              <div class="progress-bar-container">
-                <div class="progress-bar-fill" :style="{ width: `${progress}%` }"></div>
-              </div>
-              <div class="progress-stats"><!-- // 🔧 수정됨 -->
-                <div class="stat-item">
-                  <span class="stat-label">완료</span>
-                  <span class="stat-value">{{ items.filter(i => i.status === 'checked').length }} / {{ items.length }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">보류</span>
-                  <span class="stat-value">{{ items.filter(i => i.status === 'hold').length }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">누락</span>
-                  <span class="stat-value error">{{ items.filter(i => i.status === 'missing').length }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="session.id && showAnalytics" class="analytics-panel"><!-- // 🔧 수정됨 -->
-              <section class="metrics-overview"><!-- // 🔧 수정됨 -->
-                <div class="metric-card">
-                  <span class="metric-label">평균 소요시간</span>
-                  <span class="metric-value">{{ averageDurationLabel }}</span>
-                  <span class="metric-hint">총 {{ elapsedDurationLabel }}</span>
-                </div>
-                <div class="metric-card">
-                  <span class="metric-label">완료 부품</span>
-                  <span class="metric-value">{{ statusCounts.checked }} / {{ totalItems }}</span>
-                  <span class="metric-hint">완료율 {{ progress }}%</span>
-                </div>
-                <div class="metric-card">
-                  <span class="metric-label">누락 · 보류</span>
-                  <span class="metric-value error">{{ statusCounts.missing }} / {{ statusCounts.hold }}</span>
-                  <span class="metric-hint">누락률 {{ missingRateLabel }}</span>
-                </div>
-              </section>
-              <section class="status-chart-panel"><!-- // 🔧 수정됨 -->
-                <Bar :data="statusChartData" :options="statusChartOptions" class="status-chart" />
-              </section>
-            </div>
 
             <div v-if="qaReminder.visible" class="qa-reminder" :class="qaReminder.level"><!-- // 🔧 수정됨 -->
               <div class="qa-reminder-title">QA 리마인더</div>
@@ -225,6 +135,60 @@
             </div>
 
             <div v-if="session.id" class="workspace-controls">
+              <div class="mode-controls">
+                <button
+                  type="button"
+                  class="mode-toggle-button"
+                  :class="{ active: inspectionMode === 'single' }"
+                  @click="inspectionMode = 'single'"
+                  title="단일 검수"
+                >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M3 4C3 3.44772 3.44772 3 4 3H16C16.5523 3 17 3.44772 17 4V16C17 16.5523 16.5523 17 16 17H4C3.44772 17 3 16.5523 3 16V4Z" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                  <span class="button-text-full">단일 검수</span>
+                  <span class="button-text-mobile">단일</span>
+                </button>
+                <button
+                  type="button"
+                  class="mode-toggle-button"
+                  :class="{ active: inspectionMode === 'grid' }"
+                  @click="inspectionMode = 'grid'"
+                  title="그리드 검수"
+                >
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M3 4C3 3.44772 3.44772 3 4 3H9C9.55228 3 10 3.44772 10 4V9C10 9.55228 9.55228 10 9 10H4C3.44772 10 3 9.55228 3 9V4Z" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M11 4C11 3.44772 11.4477 3 12 3H16C16.5523 3 17 3.44772 17 4V9C17 9.55228 16.5523 10 16 10H12C11.4477 10 11 9.55228 11 9V4Z" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M3 11C3 10.4477 3.44772 10 4 10H9C9.55228 10 10 10.4477 10 11V16C10 16.5523 9.55228 17 9 17H4C3.44772 17 3 16.5523 3 16V11Z" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M11 11C11 10.4477 11.4477 10 12 10H16C16.5523 10 17 10.4477 17 11V16C17 16.5523 16.5523 17 16 17H12C11.4477 17 11 16.5523 11 16V11Z" stroke="currentColor" stroke-width="1.5"/>
+                  </svg>
+                  <span class="button-text-full">그리드 검수</span>
+                  <span class="button-text-mobile">그리드</span>
+                </button>
+                <div v-if="inspectionMode === 'grid'" class="grid-columns-controls">
+                  <div class="grid-columns-buttons">
+                    <button
+                      v-for="cols in [1, 2, 3]"
+                      :key="cols"
+                      type="button"
+                      class="grid-column-button"
+                      :class="{ active: gridColumns === cols }"
+                      @click="gridColumns = cols"
+                      :title="`${cols}열`"
+                    >
+                      {{ cols }}열
+                    </button>
+                  </div>
+                  <select
+                    v-model="gridColumns"
+                    class="grid-columns-select"
+                  >
+                    <option :value="1">1열</option>
+                    <option :value="2">2열</option>
+                    <option :value="3">3열</option>
+                  </select>
+                </div>
+              </div>
               <div class="status-filter-group">
                 <button
                   v-for="option in statusOptions"
@@ -248,7 +212,7 @@
             </div>
 
             <div class="items-container">
-              <div v-if="inspectionMode === 'single' && displayedItems.length > 0" class="single-card-navigation">
+              <div v-if="displayedItems.length > 0 && inspectionMode === 'single'" class="single-card-navigation">
                 <div class="card-counter">
                   <div class="counter-content">
                     <span class="counter-current">{{ currentItemIndex + 1 }}</span>
@@ -261,33 +225,35 @@
                 </div>
               </div>
               <div 
-                class="items-grid" 
+                class="items-grid"
                 :class="{ 'single-mode': inspectionMode === 'single' }"
-                :style="inspectionMode === 'grid' ? { gridTemplateColumns: `repeat(${gridColumns}, 1fr)` } : {}"
+                :style="inspectionMode === 'grid' ? { gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` } : {}"
               >
-                <template v-if="inspectionMode === 'single'">
-                  <div 
-                    v-if="displayedItems.length > 0"
-                    class="part-card-wrapper"
-                  >
-                    <button
-                      class="card-nav-arrow card-nav-arrow-left"
-                      @click="goToPrevItem"
-                      :disabled="currentItemIndex === 0"
-                      aria-label="이전 카드"
+                <template v-if="displayedItems.length > 0">
+                  <!-- 단일 검수 모드 -->
+                  <template v-if="inspectionMode === 'single'">
+                    <div 
+                      v-if="displayedItems.length > 0"
+                      class="part-card-wrapper"
                     >
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </button>
-                    <Transition 
-                      :name="`slide-${slideDirection}`"
-                      mode="out-in"
-                    >
-                      <div 
-                        :key="displayedItems[0].id || `${displayedItems[0].part_id}-${displayedItems[0].color_id}`"
-                        class="part-card"
-                        :class="getCardStatusClass(displayedItems[0].status)"
+                      <button
+                        class="card-nav-arrow card-nav-arrow-left"
+                        @click="goToPrevItem"
+                        :disabled="currentItemIndex === 0"
+                        aria-label="이전 카드"
+                      >
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </button>
+                      <Transition 
+                        :name="`slide-${slideDirection}`"
+                        mode="out-in"
+                      >
+                        <div 
+                          :key="displayedItems[0].id || `${displayedItems[0].part_id}-${displayedItems[0].color_id}`"
+                          class="part-card"
+                          :class="getCardStatusClass(displayedItems[0].status)"
                         :style="swipeState.isSwiping ? { 
                           transform: `translateX(${swipeState.currentX - swipeState.startX}px)`,
                           transition: 'none'
@@ -327,12 +293,16 @@
                         <div class="card-body">
                           <div class="part-image-section">
                             <img
-                              :src="partImageUrls[displayedItems[0].id] || ''"
+                              v-if="partImageUrls[displayedItems[0].id]"
+                              :src="partImageUrls[displayedItems[0].id]"
                               :alt="`${displayedItems[0].part_name} (${displayedItems[0].color_name})`"
                               class="part-image"
                               @error="handleImageError($event)"
                               @load="handleImageLoad($event)"
                             />
+                            <div v-else class="part-image-placeholder">
+                              이미지 로딩 중...
+                            </div>
                           </div>
 
                           <div class="quantity-section">
@@ -396,14 +366,16 @@
                       </svg>
                     </button>
                   </div>
-                </template>
-                <template v-else>
-                  <div 
-                    v-for="item in displayedItems" 
-                    :key="item.id || `${item.part_id}-${item.color_id}`"
-                    class="part-card"
-                    :class="getCardStatusClass(item.status)"
-                  >
+                  </template>
+                  
+                  <!-- 그리드 검수 모드 -->
+                  <template v-else-if="inspectionMode === 'grid'">
+                    <div
+                      v-for="(item, index) in displayedItems"
+                      :key="item.id || `${item.part_id}-${item.color_id}`"
+                      class="part-card"
+                      :class="getCardStatusClass(item.status)"
+                    >
                       <div class="card-header">
                         <div class="part-info">
                           <div v-if="item.element_id" class="element-id">{{ item.element_id }}</div>
@@ -428,68 +400,89 @@
                         </button>
                       </div>
 
-                    <div class="card-body">
-                      <div class="part-image-section">
-                        <img
-                          :src="partImageUrls[item.id] || ''"
-                          :alt="`${item.part_name} (${item.color_name})`"
-                          class="part-image"
-                          @error="handleImageError($event)"
-                          @load="handleImageLoad($event)"
-                        />
-                      </div>
-
-                      <div class="quantity-section">
-                        <div class="quantity-control">
-                          <button 
-                            @click="decrementCount(item)"
-                            :disabled="item.checked_count <= 0"
-                            class="qty-button minus"
-                          >
-                            <span>−</span>
-                          </button>
-                          <div class="qty-display">
-                            <input 
-                              type="number"
-                              :value="item.checked_count"
-                              @input="updateItemCount(item, $event.target.value)"
-                              :max="item.total_count"
-                              min="0"
-                              class="qty-input"
-                            />
-                            <span class="qty-divider">/</span>
-                            <span class="qty-total">{{ item.total_count }}</span>
+                      <div class="card-body">
+                        <div class="part-image-section">
+                          <img
+                            v-if="partImageUrls[item.id]"
+                            :src="partImageUrls[item.id]"
+                            :alt="`${item.part_name} (${item.color_name})`"
+                            class="part-image"
+                            @error="handleImageError($event)"
+                            @load="handleImageLoad($event)"
+                          />
+                          <div v-else class="part-image-placeholder">
+                            이미지 로딩 중...
                           </div>
-                          <button 
-                            @click="incrementCount(item)"
-                            :disabled="item.checked_count >= item.total_count"
-                            class="qty-button plus"
-                          >
-                            <span>+</span>
-                          </button>
+                        </div>
+
+                        <div class="quantity-section">
+                          <div class="quantity-control">
+                            <button 
+                              @click="decrementCount(item)"
+                              :disabled="item.checked_count <= 0"
+                              class="qty-button minus"
+                            >
+                              <span>−</span>
+                            </button>
+                            <div class="qty-display">
+                              <input 
+                                type="number"
+                                :value="item.checked_count"
+                                @input="updateItemCount(item, $event.target.value)"
+                                :max="item.total_count"
+                                min="0"
+                                class="qty-input"
+                              />
+                              <span class="qty-divider">/</span>
+                              <span class="qty-total">{{ item.total_count }}</span>
+                            </div>
+                            <button 
+                              @click="incrementCount(item)"
+                              :disabled="item.checked_count >= item.total_count"
+                              class="qty-button plus"
+                            >
+                              <span>+</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div class="status-section">
+                          <div class="status-buttons">
+                            <button
+                              @click="setItemStatus(item, 'checked')"
+                              :class="['status-button', 'checked', { active: item.status === 'checked' }]"
+                            >
+                              완료
+                            </button>
+                            <button
+                              @click="setItemStatus(item, 'missing')"
+                              :class="['status-button', 'missing', { active: item.status === 'missing' }]"
+                            >
+                              누락
+                            </button>
+                          </div>
                         </div>
                       </div>
-
-                      <div class="status-section">
-                        <div class="status-buttons">
-                          <button
-                            @click="setItemStatus(item, 'checked')"
-                            :class="['status-button', 'checked', { active: item.status === 'checked' }]"
-                          >
-                            완료
-                          </button>
-                          <button
-                            @click="setItemStatus(item, 'missing')"
-                            :class="['status-button', 'missing', { active: item.status === 'missing' }]"
-                          >
-                            누락
-                          </button>
-                        </div>
-                      </div>
-
                     </div>
-                  </div>
+                  </template>
                 </template>
+              </div>
+
+              <div v-if="session.id" class="session-action-buttons">
+                <button
+                  @click="pauseSession"
+                  :disabled="loading"
+                  class="session-action-btn pause-btn"
+                >
+                  임시저장
+                </button>
+                <button
+                  @click="completeSession"
+                  :disabled="loading"
+                  class="session-action-btn complete-btn"
+                >
+                  검수 완료
+                </button>
               </div>
             </div>
 
@@ -565,11 +558,98 @@
         </div>
       </div>
     </div>
+
+    <!-- 세션 확인 모달 -->
+    <div v-if="showSessionConfirmModal" class="session-confirm-modal-overlay" @click="closeSessionConfirmModal">
+      <div class="session-confirm-modal" @click.stop>
+        <div class="modal-header">
+          <h3>진행 중인 세션 확인</h3>
+        </div>
+        <div class="modal-body">
+          <div class="session-confirm-content">
+            <p v-if="lastSessions.length === 1" class="confirm-message">
+              진행 중인 검수 세션이 있습니다.
+            </p>
+            <p v-else class="confirm-message">
+              진행 중인 검수 세션이 {{ lastSessions.length }}개 있습니다.
+            </p>
+            
+            <div v-if="lastSessions.length === 1" class="session-info-box">
+              <div class="session-info-item">
+                <span class="session-info-label">세트명:</span>
+                <span class="session-info-value">{{ lastSessions[0].set_name }}</span>
+              </div>
+              <div class="session-info-item">
+                <span class="session-info-label">진행률:</span>
+                <span class="session-info-value progress-text">{{ lastSessions[0].progress }}%</span>
+              </div>
+              <div class="session-info-item">
+                <span class="session-info-label">마지막 저장:</span>
+                <span class="session-info-value">{{ formatDate(lastSessions[0].last_saved_at) }}</span>
+              </div>
+            </div>
+            
+            <p class="confirm-question">어떻게 진행하시겠습니까?</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="handleResumeFirstSession" class="modal-btn resume-btn">
+            이전 세션 이어하기
+          </button>
+          <button @click="handleStartNewSession" class="modal-btn new-session-btn">
+            새로운 검수 시작
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 기존 세션 완료 처리 확인 모달 -->
+    <div v-if="showCompleteSessionsModal" class="session-confirm-modal-overlay" @click="closeCompleteSessionsModal">
+      <div class="session-confirm-modal" @click.stop>
+        <div class="modal-header">
+          <h3>기존 세션 완료 처리</h3>
+        </div>
+        <div class="modal-body">
+          <div class="session-confirm-content">
+            <p v-if="lastSessions.length === 1" class="confirm-message">
+              진행 중인 검수 세션 <strong>"{{ lastSessions[0].set_name }}"</strong>을 완료 처리하고 새로운 검수를 시작하시겠습니까?
+            </p>
+            <p v-else class="confirm-message">
+              진행 중인 검수 세션 <strong>{{ lastSessions.length }}개</strong>를 모두 완료 처리하고 새로운 검수를 시작하시겠습니까?
+            </p>
+            
+            <div v-if="lastSessions.length === 1" class="session-info-box">
+              <div class="session-info-item">
+                <span class="session-info-label">세트명:</span>
+                <span class="session-info-value">{{ lastSessions[0].set_name }}</span>
+              </div>
+              <div class="session-info-item">
+                <span class="session-info-label">진행률:</span>
+                <span class="session-info-value progress-text">{{ lastSessions[0].progress }}%</span>
+              </div>
+              <div class="session-info-item">
+                <span class="session-info-label">마지막 저장:</span>
+                <span class="session-info-value">{{ formatDate(lastSessions[0].last_saved_at) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button @click="closeCompleteSessionsModal" class="modal-btn resume-btn">
+            취소
+          </button>
+          <button @click="confirmCompleteSessions" class="modal-btn new-session-btn">
+            완료 처리하고 시작
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
 import { ref, reactive, onMounted, watch, computed, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { Bar } from 'vue-chartjs' // 🔧 수정됨
 import { Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js' // 🔧 수정됨
 import { useInspectionSession } from '../composables/useInspectionSession'
@@ -583,7 +663,8 @@ export default {
   name: 'ManualInspection',
   components: { Bar }, // 🔧 수정됨
   setup() {
-    const { supabase } = useSupabase()
+    const route = useRoute()
+    const { supabase, user, loading: userLoading } = useSupabase()
     const {
       loading,
       error,
@@ -598,6 +679,8 @@ export default {
       pauseSession: pauseSessionAction,
       completeSession: completeSessionAction,
       findLastSession,
+      findLastSessions,
+      deleteSession,
       syncToServer,
       syncInProgress,
       lastSyncError,
@@ -607,30 +690,49 @@ export default {
 
     const selectedSetId = ref('')
     const availableSets = ref([])
-    const lastSession = ref(null)
+    const lastSessions = ref([])
     const showSetDropdown = ref(false)
     const partImageUrls = ref({})
     const setDropdownRef = ref(null)
+    const setSearchInput = ref('')
+    const searchedSet = ref(null)
+    const searchingSet = ref(false)
+    const setSearchError = ref('')
     const syncErrorToast = ref('')
     let syncErrorTimer = null
     const statusFilter = ref('all')
     const selectedSortMode = ref('sequence')
     const isOffline = ref(!navigator.onLine) // 🔧 수정됨
-    const showAnalytics = ref(false) // 🔧 수정됨: 기본값 닫힘
-    const inspectionMode = ref('single') // 🔧 수정됨: 'single' 또는 'grid'
     const currentItemIndex = ref(0) // 🔧 수정됨
     const slideDirection = ref('right') // 슬라이드 방향: 'left' 또는 'right'
+    const inspectionMode = ref('single') // 단일 검수 또는 그리드 검수
+    
+    // 화면 크기에 따라 그리드 열 수 자동 조정
+    const adjustGridColumns = () => {
+      if (inspectionMode.value !== 'grid') return
+      
+      const width = window.innerWidth
+      if (width <= 480) {
+        // 모바일: 1열
+        gridColumns.value = 1
+      } else if (width <= 768) {
+        // 태블릿: 2열
+        gridColumns.value = 2
+      }
+      // 데스크톱: 현재 선택된 값 유지 (1, 2, 3)
+    }
     
     // 부품 검색 기능
-    const { findSetsByPart, findAlternativeParts, findRarePartsInSet } = usePartSearch()
+    const { findSetsByPart, findAlternativeParts } = usePartSearch()
     const showPartInfoModal = ref(false)
     const selectedPart = ref(null)
+    const showSessionConfirmModal = ref(false)
+    const showCompleteSessionsModal = ref(false)
+    const pendingNewSessionSetId = ref(null)
     const partSets = ref([])
     const partSetsLoading = ref(false)
     const alternativeParts = ref([])
     const alternativePartsLoading = ref(false)
-    const rareParts = ref([])
-    const showRareParts = ref(true)
     
     // 색상 RGB 조회 (캐시)
     const colorRgbCache = ref(new Map())
@@ -687,27 +789,14 @@ export default {
           }
           colorRgbCache.value.set(colorId, rgb)
           
-          // 디버깅: 특정 element_id인 경우 로그
-          if (item.element_id === '6335317' || item.element_id === '306923') {
-            console.log(`[getColorRgbSync] element_id ${item.element_id}: color_id=${colorId}, rgb=${rgb}, item.color_rgb=${item.color_rgb}`)
-          }
-          
           return rgb
         } else {
-          // 디버깅: element_id 6335317인 경우 로그
-          if (item.element_id === '6335317') {
-            console.warn(`[getColorRgbSync] element_id 6335317: color_rgb가 유효하지 않습니다:`, { colorId, color_rgb: item.color_rgb, rgb })
-          }
         }
       }
       
       // 캐시 확인
       if (colorRgbCache.value.has(colorId)) {
-        const cachedRgb = colorRgbCache.value.get(colorId)
-        if (item && (item.element_id === '6335317' || item.element_id === '306923')) {
-          console.log(`[getColorRgbSync] element_id ${item.element_id}: 캐시에서 가져옴: color_id=${colorId}, rgb=${cachedRgb}`)
-        }
-        return cachedRgb
+        return colorRgbCache.value.get(colorId)
       }
       
       // items에서 찾기
@@ -720,18 +809,8 @@ export default {
           }
           colorRgbCache.value.set(colorId, rgb)
           
-          // 디버깅: 특정 element_id인 경우 로그
-          if (foundItem.element_id === '6335317' || foundItem.element_id === '306923') {
-            console.log(`[getColorRgbSync] element_id ${foundItem.element_id}: items에서 찾음: color_id=${colorId}, rgb=${rgb}`)
-          }
-          
           return rgb
         }
-      }
-      
-      // 디버깅: 특정 element_id인 경우 로그
-      if (item && (item.element_id === '6335317' || item.element_id === '306923')) {
-        console.warn(`[getColorRgbSync] element_id ${item.element_id}: RGB를 찾을 수 없습니다:`, { colorId, item, foundItem })
       }
       
       // RGB가 없으면 비동기로 조회 시도 (하지만 즉시 반환은 null)
@@ -821,26 +900,25 @@ export default {
           break
       }
 
-      // 단일 카드 모드일 때는 현재 인덱스의 아이템만 반환
-      if (inspectionMode.value === 'single') {
-        if (sorted.length > 0) {
-          // currentItemIndex가 유효한지 확인하고, 범위를 벗어나면 0으로 리셋
-          if (currentItemIndex.value >= sorted.length) {
-            currentItemIndex.value = 0
-          }
-          const currentItem = sorted[currentItemIndex.value]
-          return currentItem ? [currentItem] : []
-        }
-        return []
+      // 그리드 모드일 때는 모든 아이템 반환
+      if (inspectionMode.value === 'grid') {
+        return sorted
       }
 
-      return sorted
+      // 단일 카드 모드일 때는 현재 인덱스의 아이템만 반환
+      if (sorted.length > 0) {
+        // currentItemIndex가 유효한지 확인하고, 범위를 벗어나면 0으로 리셋
+        if (currentItemIndex.value >= sorted.length) {
+          currentItemIndex.value = 0
+        }
+        const currentItem = sorted[currentItemIndex.value]
+        return currentItem ? [currentItem] : []
+      }
+      return []
     })
 
     // 단일 검수 모드에서 pending 아이템 총 개수
     const totalPendingItems = computed(() => {
-      if (inspectionMode.value !== 'single') return 0
-      
       const filtered = statusFilter.value === 'all'
         ? items.value
         : items.value.filter(item => item.status === statusFilter.value)
@@ -1032,28 +1110,194 @@ export default {
       }
     }
 
+    const searchSet = async () => {
+      if (!setSearchInput.value.trim()) {
+        setSearchError.value = '레고 번호를 입력해주세요.'
+        return
+      }
+
+      try {
+        searchingSet.value = true
+        setSearchError.value = ''
+        searchedSet.value = null
+
+        const searchTerm = setSearchInput.value.trim()
+        
+        // 레고 번호로 검색 (정확히 일치하거나 부분 일치)
+        const { data, error: err } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num')
+          .or(`set_num.eq.${searchTerm},set_num.ilike.%${searchTerm}%`)
+          .limit(10)
+
+        if (err) throw err
+
+        if (!data || data.length === 0) {
+          setSearchError.value = `레고 번호 "${searchTerm}"에 해당하는 세트를 찾을 수 없습니다.`
+          selectedSetId.value = ''
+          searchedSet.value = null
+          return
+        }
+
+        // 첫 번째 결과를 선택
+        const foundSet = data[0]
+        searchedSet.value = foundSet
+        selectedSetId.value = foundSet.id
+        setSearchError.value = ''
+      } catch (err) {
+        console.error('세트 검색 실패:', err)
+        setSearchError.value = '세트 검색 중 오류가 발생했습니다.'
+        selectedSetId.value = ''
+        searchedSet.value = null
+      } finally {
+        searchingSet.value = false
+      }
+    }
+
     const startNewSession = async () => {
       if (!selectedSetId.value) return
+      
+      // 진행 중인 세션 확인
+      const existingSessions = await findLastSessions(user.value?.id)
+      console.log('[ManualInspection] startNewSession - 진행 중인 세션:', existingSessions)
+      
+      // 진행 중인 세션이 있는 경우 모달 표시
+      if (existingSessions.length > 0) {
+        lastSessions.value = existingSessions
+        pendingNewSessionSetId.value = selectedSetId.value
+        showSessionConfirmModal.value = true
+        console.log('[ManualInspection] 모달 표시:', showSessionConfirmModal.value)
+        return
+      }
+      
+      // 진행 중인 세션이 없으면 바로 시작
+      await createNewSession(selectedSetId.value)
+    }
+
+    const createNewSession = async (setId) => {
       try {
-        await createSession(selectedSetId.value)
-        lastSession.value = null
-        showSetDropdown.value = false
+        await createSession(setId)
+        lastSessions.value = []
         currentItemIndex.value = 0
+        setSearchInput.value = ''
+        searchedSet.value = null
+        setSearchError.value = ''
       } catch (err) {
         console.error('세션 시작 실패:', err)
       }
     }
 
-    const resumeSession = async () => {
-      if (!lastSession.value) return
+    const handleResumeFirstSession = async () => {
+      closeSessionConfirmModal()
+      if (lastSessions.value.length > 0) {
+        await resumeSession(lastSessions.value[0].id)
+      }
+    }
+
+    const handleCompleteSession = async (sessionId) => {
+      if (!sessionId) return
+      
+      if (!confirm('이 세션을 완료 처리하시겠습니까?')) {
+        return
+      }
+
       try {
-        await loadSession(lastSession.value.id)
+        // 세션을 로드하여 완료 처리
+        await loadSession(sessionId)
+        await completeSessionAction()
+        
+        // lastSessions 목록에서 완료된 세션 제거 (완료된 세션은 in_progress/paused 상태가 아니므로)
+        lastSessions.value = lastSessions.value.filter(s => s.id !== sessionId)
+        
+        // 세션 상태 초기화
+        await resetSessionState({ clearLocal: false })
+        
+        console.log('[ManualInspection] 세션 완료 처리 완료:', sessionId)
+      } catch (err) {
+        console.error('[ManualInspection] 세션 완료 처리 오류:', err)
+        alert('세션 완료 처리 중 오류가 발생했습니다.')
+      }
+    }
+
+    const handleDeleteSession = async (sessionId) => {
+      if (!sessionId) return
+      
+      if (!confirm('이 세션을 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+        return
+      }
+
+      try {
+        const result = await deleteSession(sessionId, user.value?.id)
+        
+        if (result.success) {
+          // lastSessions 목록에서 삭제된 세션 제거
+          lastSessions.value = lastSessions.value.filter(s => s.id !== sessionId)
+          console.log('[ManualInspection] 세션 삭제 완료:', sessionId)
+        } else {
+          alert(`세션 삭제 실패: ${result.error || '알 수 없는 오류'}`)
+        }
+      } catch (err) {
+        console.error('[ManualInspection] 세션 삭제 오류:', err)
+        alert('세션 삭제 중 오류가 발생했습니다.')
+      }
+    }
+
+    const handleStartNewSession = async () => {
+      // 커스텀 모달 표시
+      closeSessionConfirmModal()
+      showCompleteSessionsModal.value = true
+    }
+
+    const closeCompleteSessionsModal = () => {
+      showCompleteSessionsModal.value = false
+    }
+
+    const confirmCompleteSessions = async () => {
+      closeCompleteSessionsModal()
+      
+      // 모든 기존 세션 완료 처리
+      try {
+        for (const sessionItem of lastSessions.value) {
+          try {
+            await loadSession(sessionItem.id)
+            await completeSessionAction()
+            console.log('[ManualInspection] 세션 완료 처리 완료:', sessionItem.id)
+          } catch (err) {
+            console.error(`[ManualInspection] 세션 ${sessionItem.id} 완료 처리 실패:`, err)
+          }
+        }
+        
+        // 세션 상태 초기화
+        await resetSessionState({ clearLocal: false })
+        
+        // lastSessions 목록 초기화
+        lastSessions.value = []
+        
+        // 새 세션 생성
+        if (pendingNewSessionSetId.value) {
+          await createNewSession(pendingNewSessionSetId.value)
+          pendingNewSessionSetId.value = null
+        }
+      } catch (err) {
+        console.error('[ManualInspection] 기존 세션 완료 처리 중 오류:', err)
+        alert('기존 세션 완료 처리 중 오류가 발생했습니다.')
+      }
+    }
+
+    const closeSessionConfirmModal = () => {
+      showSessionConfirmModal.value = false
+      pendingNewSessionSetId.value = null
+    }
+
+    const resumeSession = async (sessionId) => {
+      if (!sessionId) return
+      try {
+        await loadSession(sessionId)
         selectedSetId.value = session.set_id
-        showSetDropdown.value = false
-        lastSession.value = null
+        lastSessions.value = []
         
         // 마지막 검수 완료한 부품 다음 부품으로 이동
-        if (inspectionMode.value === 'single' && items.value.length > 0) {
+        if (items.value.length > 0) {
           // displayedItems와 동일한 정렬 로직 적용
           const filtered = statusFilter.value === 'all'
             ? items.value
@@ -1121,32 +1365,6 @@ export default {
       }
     }
 
-    const selectedSetLabel = computed(() => {
-      if (!selectedSetId.value) {
-        return '세트를 선택하세요'
-      }
-      const match = availableSets.value.find(set => set.id === selectedSetId.value)
-      if (!match) {
-        return '세트를 선택하세요'
-      }
-      return `${match.name} (${match.set_num})`
-    })
-
-    const toggleSetDropdown = () => {
-      if (loading.value) return
-      showSetDropdown.value = !showSetDropdown.value
-    }
-
-    const handleSelectSet = (set) => {
-      selectedSetId.value = set.id
-      showSetDropdown.value = false
-    }
-
-    const handleClickOutsideDropdown = (event) => {
-      if (setDropdownRef.value && !setDropdownRef.value.contains(event.target)) {
-        showSetDropdown.value = false
-      }
-    }
 
     const findItemIndex = (itemId) => items.value.findIndex(i => i.id === itemId)
 
@@ -1163,7 +1381,7 @@ export default {
         })
         
         // 단일 카드 모드에서 수량이 total_count에 도달하면 자동으로 다음 카드로 이동
-        if (inspectionMode.value === 'single' && newStatus === 'checked' && newCount === target.total_count) {
+        if (newStatus === 'checked' && newCount === target.total_count) {
           slideDirection.value = 'right'
           // displayedItems와 동일한 정렬 로직으로 다음 pending 아이템 찾기
           const filtered = statusFilter.value === 'all'
@@ -1260,7 +1478,7 @@ export default {
       })
       
       // 단일 카드 모드에서 수량이 total_count에 도달하면 자동으로 다음 카드로 이동
-      if (inspectionMode.value === 'single' && newStatus === 'checked' && clampedValue === target.total_count) {
+      if (newStatus === 'checked' && clampedValue === target.total_count) {
         slideDirection.value = 'right'
         // displayedItems와 동일한 정렬 로직으로 다음 pending 아이템 찾기
         const filtered = statusFilter.value === 'all'
@@ -1332,10 +1550,19 @@ export default {
     const setItemStatus = (item, status) => {
       const index = findItemIndex(item.id)
       if (index === -1) return
-      updateItem(index, { status })
+      
+      const target = items.value[index]
+      const updateData = { status }
+      
+      // 완료 버튼 클릭 시 재고부품 수량을 자동으로 total_count로 설정
+      if (status === 'checked') {
+        updateData.checked_count = target.total_count
+      }
+      
+      updateItem(index, updateData)
       
       // 단일 카드 모드에서 상태가 'checked'로 변경되면 다음 카드로 자동 이동
-      if (inspectionMode.value === 'single' && status === 'checked') {
+      if (status === 'checked') {
         slideDirection.value = 'right'
         // displayedItems와 동일한 정렬 로직으로 다음 pending 아이템 찾기
         const filtered = statusFilter.value === 'all'
@@ -1405,134 +1632,130 @@ export default {
     }
     
     const goToNextItem = () => {
-      if (inspectionMode.value === 'single') {
-        // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
-        const currentItem = displayedItems.value[0]
-        if (currentItem) {
-          const itemIndex = findItemIndex(currentItem.id)
-          if (itemIndex !== -1) {
-            const item = items.value[itemIndex]
-            // 수량이 있지만 완료되지 않은 경우 누락 상태로 변경
-            if (item.checked_count > 0 && item.checked_count < item.total_count && item.status !== 'checked') {
-              updateItem(itemIndex, { status: 'missing' })
-            }
+      // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
+      const currentItem = displayedItems.value[0]
+      if (currentItem) {
+        const itemIndex = findItemIndex(currentItem.id)
+        if (itemIndex !== -1) {
+          const item = items.value[itemIndex]
+          // 수량이 있지만 완료되지 않은 경우 누락 상태로 변경
+          if (item.checked_count > 0 && item.checked_count < item.total_count && item.status !== 'checked') {
+            updateItem(itemIndex, { status: 'missing' })
           }
         }
-        
-        slideDirection.value = 'right'
-        // displayedItems와 동일한 정렬 로직 사용 (모든 아이템 포함)
-        const filtered = statusFilter.value === 'all'
-          ? items.value
-          : items.value.filter(item => item.status === statusFilter.value)
-        const sorted = [...filtered]
-        // 정렬 로직 적용
-        switch (selectedSortMode.value) {
-          case 'color':
-            sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
-            break
-          case 'shape':
-            sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
-            break
-          case 'size':
-            sorted.sort((a, b) => {
-              const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-              const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-              if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-              }
-              return aSize - bSize
-            })
-            break
-          case 'rarity':
-            sorted.sort((a, b) => {
-              const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
-              const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
-              if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-              }
-              return aFreq - bFreq
-            })
-            break
-          case 'name':
-            sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
-            break
-          case 'sequence':
-          default:
-            sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
-            break
-        }
-        // 모든 아이템을 순회 (완료된 부품 포함)
-        if (currentItemIndex.value < sorted.length - 1) {
-          currentItemIndex.value++
-        } else {
-          currentItemIndex.value = 0
-        }
+      }
+      
+      slideDirection.value = 'right'
+      // displayedItems와 동일한 정렬 로직 사용 (모든 아이템 포함)
+      const filtered = statusFilter.value === 'all'
+        ? items.value
+        : items.value.filter(item => item.status === statusFilter.value)
+      const sorted = [...filtered]
+      // 정렬 로직 적용
+      switch (selectedSortMode.value) {
+        case 'color':
+          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          break
+        case 'shape':
+          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          break
+        case 'size':
+          sorted.sort((a, b) => {
+            const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            if (aSize === bSize) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aSize - bSize
+          })
+          break
+        case 'rarity':
+          sorted.sort((a, b) => {
+            const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            if (aFreq === bFreq) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aFreq - bFreq
+          })
+          break
+        case 'name':
+          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          break
+        case 'sequence':
+        default:
+          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          break
+      }
+      // 모든 아이템을 순회 (완료된 부품 포함)
+      if (currentItemIndex.value < sorted.length - 1) {
+        currentItemIndex.value++
+      } else {
+        currentItemIndex.value = 0
       }
     }
     
     const goToPrevItem = () => {
-      if (inspectionMode.value === 'single') {
-        // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
-        const currentItem = displayedItems.value[0]
-        if (currentItem) {
-          const itemIndex = findItemIndex(currentItem.id)
-          if (itemIndex !== -1) {
-            const item = items.value[itemIndex]
-            // 수량이 있지만 완료되지 않은 경우 누락 상태로 변경
-            if (item.checked_count > 0 && item.checked_count < item.total_count && item.status !== 'checked') {
-              updateItem(itemIndex, { status: 'missing' })
-            }
+      // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
+      const currentItem = displayedItems.value[0]
+      if (currentItem) {
+        const itemIndex = findItemIndex(currentItem.id)
+        if (itemIndex !== -1) {
+          const item = items.value[itemIndex]
+          // 수량이 있지만 완료되지 않은 경우 누락 상태로 변경
+          if (item.checked_count > 0 && item.checked_count < item.total_count && item.status !== 'checked') {
+            updateItem(itemIndex, { status: 'missing' })
           }
         }
-        
-        slideDirection.value = 'left'
-        // displayedItems와 동일한 정렬 로직 사용 (모든 아이템 포함)
-        const filtered = statusFilter.value === 'all'
-          ? items.value
-          : items.value.filter(item => item.status === statusFilter.value)
-        const sorted = [...filtered]
-        // 정렬 로직 적용
-        switch (selectedSortMode.value) {
-          case 'color':
-            sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
-            break
-          case 'shape':
-            sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
-            break
-          case 'size':
-            sorted.sort((a, b) => {
-              const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-              const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-              if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-              }
-              return aSize - bSize
-            })
-            break
-          case 'rarity':
-            sorted.sort((a, b) => {
-              const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
-              const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
-              if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-              }
-              return aFreq - bFreq
-            })
-            break
-          case 'name':
-            sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
-            break
-          case 'sequence':
-          default:
-            sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
-            break
-        }
-        // 모든 아이템을 순회 (완료된 부품 포함)
-        if (currentItemIndex.value > 0) {
-          currentItemIndex.value--
-        } else {
-          currentItemIndex.value = Math.max(0, sorted.length - 1)
-        }
+      }
+      
+      slideDirection.value = 'left'
+      // displayedItems와 동일한 정렬 로직 사용 (모든 아이템 포함)
+      const filtered = statusFilter.value === 'all'
+        ? items.value
+        : items.value.filter(item => item.status === statusFilter.value)
+      const sorted = [...filtered]
+      // 정렬 로직 적용
+      switch (selectedSortMode.value) {
+        case 'color':
+          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          break
+        case 'shape':
+          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          break
+        case 'size':
+          sorted.sort((a, b) => {
+            const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            if (aSize === bSize) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aSize - bSize
+          })
+          break
+        case 'rarity':
+          sorted.sort((a, b) => {
+            const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            if (aFreq === bFreq) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aFreq - bFreq
+          })
+          break
+        case 'name':
+          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          break
+        case 'sequence':
+        default:
+          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          break
+      }
+      // 모든 아이템을 순회 (완료된 부품 포함)
+      if (currentItemIndex.value > 0) {
+        currentItemIndex.value--
+      } else {
+        currentItemIndex.value = Math.max(0, sorted.length - 1)
       }
     }
 
@@ -1636,8 +1859,13 @@ export default {
 
     const handleImageError = (event) => {
       // 이미지 로드 실패 시 숨김
-      console.warn('[handleImageError] 이미지 로드 실패:', event.target.src)
-      event.target.style.display = 'none'
+      const imageUrl = event.target?.src
+      if (imageUrl && !imageUrl.includes('data:') && imageUrl !== window.location.href) {
+        console.warn('[handleImageError] 이미지 로드 실패:', imageUrl)
+      }
+      if (event.target) {
+        event.target.style.display = 'none'
+      }
     }
 
     const handleImageLoad = (event) => {
@@ -1682,14 +1910,6 @@ export default {
       }
     }, { immediate: true })
 
-    // 세션이 시작되면 희귀부품 로드
-    watch(() => session.value?.set_id, (setId) => {
-      if (setId) {
-        loadRareParts()
-      } else {
-        rareParts.value = []
-      }
-    })
 
     const pauseSession = async () => {
       await pauseSessionAction()
@@ -1706,14 +1926,19 @@ export default {
     const resetView = () => {
       selectedSetId.value = ''
       showSetDropdown.value = false
-      gridColumns.value = 1
       currentItemIndex.value = 0
     }
 
     const finalizeSessionReset = async () => {
       await resetSessionState()
       resetView()
-      lastSession.value = await findLastSession()
+      try {
+        const sessions = await findLastSessions(user.value?.id)
+        lastSessions.value = sessions
+      } catch (err) {
+        console.error('세션 로드 실패:', err)
+        lastSessions.value = []
+      }
     }
 
     const getCardStatusClass = (status) => {
@@ -1727,7 +1952,6 @@ export default {
 
     // 스와이프 핸들러
     const handleSwipeStart = (e) => {
-      if (inspectionMode.value !== 'single') return
       const touch = e.touches ? e.touches[0] : e
       swipeState.startX = touch.clientX
       swipeState.startY = touch.clientY
@@ -1737,14 +1961,14 @@ export default {
     }
 
     const handleSwipeMove = (e) => {
-      if (!swipeState.isSwiping || inspectionMode.value !== 'single') return
+      if (!swipeState.isSwiping) return
       const touch = e.touches ? e.touches[0] : e
       swipeState.currentX = touch.clientX
       swipeState.currentY = touch.clientY
     }
 
     const handleSwipeEnd = (e) => {
-      if (!swipeState.isSwiping || inspectionMode.value !== 'single') return
+      if (!swipeState.isSwiping) return
       
       const deltaX = swipeState.currentX - swipeState.startX
       const deltaY = swipeState.currentY - swipeState.startY
@@ -1805,15 +2029,6 @@ export default {
     }
 
     // 세트별 희귀부품 로드
-    const loadRareParts = async () => {
-      if (!session.value?.set_id) return
-      try {
-        const rare = await findRarePartsInSet(session.value.set_id)
-        rareParts.value = rare
-      } catch (err) {
-        console.error('희귀부품 로드 실패:', err)
-      }
-    }
 
     const formatDate = (dateString) => {
       if (!dateString) return '-'
@@ -1883,21 +2098,176 @@ export default {
     })
 
 
+    // lastSessions 로드 함수
+    const loadLastSessions = async () => {
+      // user 로딩이 완료되고, 세션이 없고, user가 있을 때만 로드
+      if (userLoading.value) {
+        console.log('[ManualInspection] userLoading이 true입니다. 대기 중...')
+        return
+      }
+      
+      if (session.value?.id) {
+        console.log('[ManualInspection] 활성 세션이 있습니다. lastSessions 로드 스킵')
+        lastSessions.value = []
+        return
+      }
+      
+      if (!user.value?.id) {
+        console.log('[ManualInspection] user가 없습니다. lastSessions 초기화')
+        lastSessions.value = []
+        return
+      }
+      
+      try {
+        console.log('[ManualInspection] lastSessions 로드 시작... userId:', user.value.id)
+        // userId를 명시적으로 전달하여 useInspectionSession 내부의 user ref와 무관하게 동작
+        const sessions = await findLastSessions(user.value.id)
+        console.log('[ManualInspection] 로드된 세션:', sessions)
+        lastSessions.value = sessions
+      } catch (err) {
+        console.error('[ManualInspection] 세션 로드 실패:', err)
+        lastSessions.value = []
+      }
+    }
+
+    // userLoading이 false가 되면 무조건 로드
+    watch(() => userLoading.value, async (loading) => {
+      console.log('[ManualInspection] userLoading 변경:', loading)
+      if (!loading) {
+        await loadLastSessions()
+      }
+    }, { immediate: true })
+
+    // user가 변경되면 로드
+    watch(() => user.value?.id, async (userId) => {
+      console.log('[ManualInspection] user 변경:', userId)
+      if (!userLoading.value) {
+        await loadLastSessions()
+      }
+    }, { immediate: true })
+
+    // session이 변경되면 업데이트
+    watch(() => session.value?.id, async (sessionId) => {
+      console.log('[ManualInspection] session 변경:', sessionId)
+      if (!sessionId && !userLoading.value && user.value?.id) {
+        await loadLastSessions()
+      } else if (sessionId) {
+        lastSessions.value = []
+      }
+    })
+
+    // 화면 크기 변경 감지
+    const handleResize = () => {
+      adjustGridColumns()
+    }
+
+    // inspectionMode 변경 감지
+    watch(() => inspectionMode.value, () => {
+      adjustGridColumns()
+    })
+
+    // 마지막 검수 부품의 다음 부품으로 이동하는 함수
+    const moveToNextAfterLastChecked = () => {
+      if (items.value.length === 0) return
+      
+      // displayedItems와 동일한 정렬 로직 적용
+      const filtered = statusFilter.value === 'all'
+        ? items.value
+        : items.value.filter(item => item.status === statusFilter.value)
+      const sorted = [...filtered]
+      
+      // 정렬 로직 적용 (displayedItems와 동일)
+      switch (selectedSortMode.value) {
+        case 'color':
+          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          break
+        case 'shape':
+          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          break
+        case 'size':
+          sorted.sort((a, b) => {
+            const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            if (aSize === bSize) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aSize - bSize
+          })
+          break
+        case 'rarity':
+          sorted.sort((a, b) => {
+            const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            if (aFreq === bFreq) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aFreq - bFreq
+          })
+          break
+        case 'name':
+          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          break
+        case 'sequence':
+        default:
+          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          break
+      }
+      
+      // 마지막 완료된 부품 찾기
+      let lastCheckedIndex = -1
+      for (let i = sorted.length - 1; i >= 0; i--) {
+        if (sorted[i].status === 'checked') {
+          lastCheckedIndex = i
+          break
+        }
+      }
+      
+      // 마지막 완료된 부품 다음 인덱스로 설정
+      if (lastCheckedIndex >= 0 && lastCheckedIndex < sorted.length - 1) {
+        currentItemIndex.value = lastCheckedIndex + 1
+      } else if (lastCheckedIndex === -1) {
+        // 완료된 부품이 없으면 첫 번째 부품으로
+        currentItemIndex.value = 0
+      } else {
+        // 모든 부품이 완료되었으면 첫 번째 부품으로
+        currentItemIndex.value = 0
+      }
+    }
+
     onMounted(async () => {
-      await loadAvailableSets()
-      lastSession.value = await findLastSession()
-      document.addEventListener('click', handleClickOutsideDropdown)
+      // URL 쿼리 파라미터에서 세션 ID 확인
+      const sessionIdFromQuery = route.query.session
+      if (sessionIdFromQuery && typeof sessionIdFromQuery === 'string') {
+        try {
+          console.log('[ManualInspection] URL에서 세션 로드:', sessionIdFromQuery)
+          await loadSession(sessionIdFromQuery)
+          // 세션 로드 후 마지막 검수 부품의 다음 부품으로 이동
+          await new Promise(resolve => setTimeout(resolve, 100)) // items가 업데이트될 시간을 줌
+          moveToNextAfterLastChecked()
+        } catch (err) {
+          console.error('[ManualInspection] URL 세션 로드 실패:', err)
+        }
+      }
+      
+      // 초기 로드 시 한 번 더 확인 (watch가 이미 실행되었지만, 확실하게 하기 위해)
+      if (!userLoading.value && !session.value?.id && user.value?.id) {
+        await loadLastSessions()
+      }
+      
       window.addEventListener('online', updateOnlineStatus)
       window.addEventListener('offline', updateOnlineStatus)
+      window.addEventListener('resize', handleResize)
+      adjustGridColumns() // 초기 조정
+      
       if (isOffline.value) {
         showSyncToast('오프라인 상태입니다. 변경사항이 로컬에 저장됩니다.')
       }
     })
 
     onUnmounted(() => {
-      document.removeEventListener('click', handleClickOutsideDropdown)
       window.removeEventListener('online', updateOnlineStatus)
       window.removeEventListener('offline', updateOnlineStatus)
+      window.removeEventListener('resize', handleResize)
       if (syncErrorTimer) {
         clearTimeout(syncErrorTimer)
         syncErrorTimer = null
@@ -1910,16 +2280,17 @@ export default {
       session,
       items,
       gridColumns,
+      inspectionMode,
       progress,
       missingCount,
       selectedSetId,
       availableSets,
-      lastSession,
-      showSetDropdown,
-      selectedSetLabel,
-      toggleSetDropdown,
-      handleSelectSet,
-      setDropdownRef,
+      lastSessions,
+      setSearchInput,
+      searchedSet,
+      searchingSet,
+      setSearchError,
+      searchSet,
       startNewSession,
       resumeSession,
       incrementCount,
@@ -1929,7 +2300,6 @@ export default {
       partImageUrls,
       handleImageError,
       handleImageLoad,
-      inspectionMode,
       currentItemIndex,
       slideDirection,
       goToNextItem,
@@ -1946,7 +2316,6 @@ export default {
       formatTime,
       syncStatusMessage,
       syncInProgress,
-      showAnalytics,
       syncErrorToast,
       lastSyncError,
       isOffline,
@@ -1973,8 +2342,15 @@ export default {
       alternativeParts,
       alternativePartsLoading,
       closePartInfoModal,
-      rareParts,
-      showRareParts,
+      showSessionConfirmModal,
+      showCompleteSessionsModal,
+      handleResumeFirstSession,
+      handleStartNewSession,
+      handleCompleteSession,
+      handleDeleteSession,
+      closeSessionConfirmModal,
+      closeCompleteSessionsModal,
+      confirmCompleteSessions,
       getColorRgbSync
     }
   }
@@ -1984,13 +2360,16 @@ export default {
 <style scoped>
 .pleyon-layout {
   min-height: 100vh;
-  background: transparent;
+  background: #f9fafb;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  padding: 2rem;
 }
 
 .layout-container {
   display: flex;
   min-height: calc(100vh - 0px);
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .main-panel {
@@ -2012,11 +2391,22 @@ export default {
   gap: 1rem;
 }
 
-.panel-header.start-header {
-  background: transparent;
-  border-bottom: none;
-  justify-content: center;
-  padding: 1.5rem 1rem 1rem;
+.page-header {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.page-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.5rem 0;
+}
+
+.page-header p {
+  font-size: 1rem;
+  color: #6b7280;
+  margin: 0;
 }
 
 .panel-header h1 {
@@ -2024,16 +2414,6 @@ export default {
   font-weight: 600;
   color: #111827;
   margin: 0;
-}
-
-.start-title {
-  text-align: center;
-  width: 100%;
-  font-size: 2rem !important;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 0.5rem;
-  line-height: 1.2;
 }
 
 .session-title h1 {
@@ -2074,67 +2454,6 @@ export default {
   gap: 0.75rem;
 }
 
-.mode-controls {
-  display: flex;
-  gap: 0.25rem;
-  background: #f3f4f6;
-  padding: 0.25rem;
-  border-radius: 8px;
-}
-
-.mode-btn {
-  padding: 0.5rem 0.75rem;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #6b7280;
-  transition: all 0.2s;
-}
-
-.mode-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.mode-btn.active {
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.grid-controls {
-  display: flex;
-  gap: 0.25rem;
-  background: #f3f4f6;
-  padding: 0.25rem;
-  border-radius: 8px;
-}
-
-.grid-btn {
-  padding: 0.5rem 0.75rem;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #6b7280;
-  transition: all 0.2s;
-}
-
-.grid-btn:hover {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.grid-btn.active {
-  background: #ffffff;
-  color: #111827;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
 
 .action-btn {
   padding: 0.625rem 1.25rem;
@@ -2206,42 +2525,6 @@ export default {
   border-color: #bfdbfe;
 }
 
-.analytics-toggle {
-  position: absolute;
-  left: 50%;
-  bottom: -20px;
-  transform: translateX(-50%);
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.analytics-toggle:hover {
-  background: #f3f4f6;
-  border-color: #9ca3af;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-icon {
-  width: 20px;
-  height: 20px;
-  color: #6b7280;
-  transition: transform 0.2s ease;
-}
-
-.toggle-icon.rotated {
-  transform: rotate(180deg);
-}
 
 .sync-status.syncing {
   color: #2563eb;
@@ -2275,13 +2558,14 @@ export default {
 
 .panel-content {
   flex: 1;
-  padding: 2rem;
+  padding: 0;
   overflow-y: auto;
 }
 
 .session-setup {
   max-width: 800px;
   margin: 0 auto;
+  padding: 0 2rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -2318,7 +2602,7 @@ export default {
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .form-group label {
@@ -2327,6 +2611,107 @@ export default {
   font-weight: 500;
   color: #374151;
   margin-bottom: 0.5rem;
+}
+
+.set-search-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.search-input-wrapper {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.set-search-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  transition: all 0.2s ease;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-input:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+.set-search-input::placeholder {
+  color: #9ca3af;
+}
+
+.search-button {
+  padding: 0.75rem 1.25rem;
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
+}
+
+.search-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.search-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.search-button svg {
+  color: currentColor;
+}
+
+.search-result {
+  padding: 1rem;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 10px;
+}
+
+.search-result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.result-title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.result-subtitle {
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.search-error {
+  padding: 0.75rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #dc2626;
+  font-size: 0.875rem;
 }
 
 .custom-select {
@@ -2481,9 +2866,68 @@ export default {
   background: #e5e7eb;
 }
 
+.resume-sessions-section {
+  margin-top: 2rem;
+}
+
+.resume-sessions-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 0.5rem;
+}
+
+.resume-sessions-subtitle {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-bottom: 1.5rem;
+}
+
+.resume-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 .resume-card {
   border-color: #dbeafe;
   background: #eff6ff;
+}
+
+.resume-card .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #dbeafe;
+}
+
+.resume-card .card-header h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.session-status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.session-status-badge.in_progress {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.session-status-badge.paused {
+  background: #fef3c7;
+  color: #92400e;
 }
 
 .resume-info {
@@ -2519,6 +2963,7 @@ export default {
 .resume-actions {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
 }
 
 .inspection-workspace {
@@ -2676,6 +3121,150 @@ export default {
   align-items: center;
   gap: 1rem;
   margin-bottom: 1.5rem;
+  padding: 0 2rem;
+}
+
+.mode-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.mode-toggle-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-button:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.mode-toggle-button.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+
+.mode-toggle-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.button-text-mobile {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .button-text-full {
+    display: none;
+  }
+
+  .button-text-mobile {
+    display: inline;
+  }
+}
+
+.grid-columns-controls {
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid #e5e7eb;
+}
+
+.grid-columns-buttons {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.grid-columns-select {
+  display: none;
+}
+
+.grid-column-button {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 48px;
+}
+
+.grid-column-button:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
+.grid-column-button.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+}
+
+@media (max-width: 1024px) {
+  .grid-columns-buttons {
+    margin-left: 0.25rem;
+    padding-left: 0.25rem;
+    gap: 0.125rem;
+  }
+
+  .grid-column-button {
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    min-width: 40px;
+  }
+}
+
+@media (max-width: 768px) {
+  .grid-columns-controls {
+    margin-left: 0.25rem;
+    padding-left: 0;
+    border-left: none;
+  }
+
+  .grid-columns-buttons {
+    display: none;
+  }
+
+  .grid-columns-select {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    background: #ffffff;
+    color: #374151;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 80px;
+  }
+
+  .grid-columns-select:hover {
+    border-color: #9ca3af;
+  }
+
+  .grid-columns-select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+  }
 }
 
 .status-filter-group {
@@ -2732,7 +3321,11 @@ export default {
 .items-container {
   background: transparent;
   border: none;
-  padding: 0;
+  padding: 0 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
 }
 
 .items-grid {
@@ -2741,8 +3334,11 @@ export default {
 }
 
 .items-grid.single-mode {
-  grid-template-columns: 1fr;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   max-width: 600px;
+  width: 100%;
   margin: 0 auto;
   position: relative;
   overflow: visible;
@@ -2752,7 +3348,58 @@ export default {
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.items-grid.single-mode .part-card-wrapper {
+  width: 100%;
+  max-width: 100%;
+}
+
+.session-action-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1.5rem;
+}
+
+.session-action-btn {
+  padding: 0.75rem 2rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 120px;
+}
+
+.session-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pause-btn {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.pause-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.complete-btn {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.complete-btn:hover:not(:disabled) {
+  background: #1d4ed8;
 }
 
 /* 슬라이드 애니메이션 */
@@ -2880,6 +3527,16 @@ export default {
   user-select: none;
   -webkit-user-select: none;
   flex: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.items-grid.single-mode .part-card {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .part-card:hover {
@@ -2924,18 +3581,18 @@ export default {
 }
 
 .part-card.card-checked {
-  background: #f0fdf4;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 2px solid #10b981;
 }
 
 .part-card.card-hold {
-  background: #fffbeb;
+  background: #ffffff;
   border: 1px solid #e5e7eb;
 }
 
 .part-card.card-missing {
-  background: #fef2f2;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 2px solid #ef4444;
 }
 
 
@@ -2971,6 +3628,9 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .element-id {
@@ -2985,6 +3645,10 @@ export default {
   font-weight: 500;
   color: #111827;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .color-badge {
@@ -3086,6 +3750,7 @@ export default {
 .status-buttons {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: nowrap;
 }
 
 .status-button {
@@ -3152,6 +3817,18 @@ export default {
   border-radius: 4px;
 }
 
+.part-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  color: #9ca3af;
+  font-size: 0.875rem;
+  background: #f9fafb;
+  border-radius: 4px;
+  border: 1px dashed #e5e7eb;
+}
+
 
 
 .error-toast {
@@ -3189,6 +3866,29 @@ export default {
     max-width: 100%;
   }
 
+  .items-grid.single-mode {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100%;
+    padding: 0 1rem;
+    margin: 0 auto;
+  }
+
+  .part-card-wrapper {
+    gap: 0.75rem;
+    justify-content: center;
+  }
+
+  .card-nav-arrow {
+    width: 40px;
+    height: 40px;
+  }
+
+  .card-nav-arrow svg {
+    width: 20px;
+    height: 20px;
+  }
 
   .nav-btn {
     min-width: 100px;
@@ -3242,16 +3942,6 @@ export default {
     align-items: stretch;
   }
 
-  .grid-controls {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .grid-btn {
-    flex: 1;
-    padding: 0.5rem;
-    font-size: 0.8125rem;
-  }
 
   .action-btn {
     width: 100%;
@@ -3268,12 +3958,46 @@ export default {
     gap: 1rem;
   }
 
+  /* 태블릿에서 그리드 모드: 최대 2열 */
+  .items-grid:not(.single-mode) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .items-grid.single-mode {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100%;
+    padding: 0;
+    margin: 0 auto;
+  }
+
   .items-container {
     padding: 0;
   }
 
   .part-card {
     padding: 1rem;
+  }
+
+  /* 태블릿에서 그리드 모드 카드 간격 조정 */
+  .items-grid:not(.single-mode) .part-card {
+    padding: 0.875rem;
+  }
+
+  .part-card-wrapper {
+    gap: 0.5rem;
+    justify-content: center;
+  }
+
+  .card-nav-arrow {
+    width: 36px;
+    height: 36px;
+  }
+
+  .card-nav-arrow svg {
+    width: 18px;
+    height: 18px;
   }
 
   .progress-section {
@@ -3348,7 +4072,16 @@ export default {
   }
 
   .resume-actions {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+
+  .resume-actions .btn-primary {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.875rem;
+    padding: 0.625rem 0.75rem;
   }
 
   .btn-secondary {
@@ -3375,13 +4108,16 @@ export default {
   }
 
   .status-buttons {
-    flex-direction: column;
+    flex-direction: row;
     gap: 0.375rem;
+    flex-wrap: nowrap;
   }
 
   .status-button {
     padding: 0.5rem;
     font-size: 0.8125rem;
+    flex: 1;
+    min-width: 0;
   }
 
   .part-image-section {
@@ -3446,8 +4182,79 @@ export default {
     padding: 0;
   }
 
+  .resume-actions {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+  }
+
+  .resume-actions .btn-primary {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    padding: 0.5rem 0.5rem;
+  }
+
+  .items-grid.single-mode {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    max-width: 100%;
+    padding: 0;
+    margin: 0 auto;
+  }
+
+  /* 모바일에서 그리드 모드: 최대 1열 */
+  .items-grid:not(.single-mode) {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+
+  /* 모바일에서 그리드 모드 카드 패딩 조정 */
+  .items-grid:not(.single-mode) .part-card {
+    padding: 0.75rem;
+  }
+
   .part-card {
     padding: 0.75rem;
+  }
+
+  .status-buttons {
+    flex-direction: row;
+    gap: 0.25rem;
+    flex-wrap: nowrap;
+  }
+
+  .status-button {
+    padding: 0.5rem 0.375rem;
+    font-size: 0.75rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .part-card-wrapper {
+    gap: 0.25rem;
+    justify-content: center;
+  }
+
+  .card-nav-arrow {
+    width: 32px;
+    height: 32px;
+  }
+
+  .card-nav-arrow svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .session-action-buttons {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .session-action-btn {
+    width: 100%;
+    min-width: auto;
   }
 
   .progress-section {
@@ -3492,27 +4299,6 @@ export default {
   font-weight: 600;
   color: #9a3412;
   margin: 0;
-}
-
-.toggle-btn {
-  background: transparent;
-  border: 1px solid #fed7aa;
-  border-radius: 6px;
-  padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
-  color: #9a3412;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.toggle-btn:hover {
-  background: #fed7aa;
-}
-
-.rare-parts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .rare-part-item {
@@ -3603,6 +4389,124 @@ export default {
 
 .modal-body {
   padding: 1.5rem;
+}
+
+/* 세션 확인 모달 */
+.session-confirm-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 1rem;
+}
+
+.session-confirm-modal {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.session-confirm-modal .modal-header {
+  padding: 1.5rem 1.5rem 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.session-confirm-modal .modal-body {
+  padding: 1.5rem;
+}
+
+.session-confirm-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.confirm-message {
+  font-size: 1rem;
+  color: #111827;
+  margin: 0;
+  font-weight: 500;
+}
+
+.session-info-box {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.session-info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.session-info-label {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.session-info-value {
+  font-size: 0.875rem;
+  color: #111827;
+  font-weight: 600;
+}
+
+.confirm-question {
+  font-size: 0.9375rem;
+  color: #374151;
+  margin: 0;
+  font-weight: 500;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+  justify-content: flex-end;
+}
+
+.modal-btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+}
+
+.resume-btn {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.resume-btn:hover {
+  background: #1d4ed8;
+}
+
+.new-session-btn {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.new-session-btn:hover {
+  background: #e5e7eb;
 }
 
 .part-info-content {

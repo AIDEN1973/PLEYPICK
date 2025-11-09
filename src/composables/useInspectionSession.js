@@ -178,28 +178,6 @@ export function useInspectionSession() {
         const partInfo = partsMap.get(part.part_id)
         const colorInfo = colorsMap.get(part.color_id)
         
-        // 디버깅: 특정 element_id인 경우 로그
-        if (part.element_id === '6335317' || part.element_id === '306923') {
-          console.log(`[loadSetParts] element_id ${part.element_id} 발견:`, {
-            part_id: part.part_id,
-            color_id: part.color_id,
-            colorInfo: colorInfo,
-            rgb: colorInfo?.rgb,
-            color_name: colorInfo?.name,
-            rawPart: part // 원본 데이터 확인
-          })
-          
-          // 같은 part_id를 가진 다른 color_id가 있는지 확인
-          const samePartDifferentColor = partsData.filter(p => 
-            p.part_id === part.part_id && p.color_id !== part.color_id
-          )
-          if (samePartDifferentColor.length > 0) {
-            console.warn(`[loadSetParts] element_id ${part.element_id}: 같은 part_id(${part.part_id})에 다른 color_id가 있습니다:`, 
-              samePartDifferentColor.map(p => ({ element_id: p.element_id, color_id: p.color_id }))
-            )
-          }
-        }
-        
         return createItemState({
           part_id: part.part_id,
           color_id: part.color_id,
@@ -684,7 +662,12 @@ export function useInspectionSession() {
             acc[item.status] = (acc[item.status] || 0) + 1
             return acc
           }, {})
-          console.log(`[동기화] 세션 ${session.id.substring(0, 8)}... ${itemsPayload.length}개 아이템 전송 (forceFullSync: ${forceFullSync}), 상태 분포:`, statusCounts)
+          console.log(`[동기화] 세션 ${session.id?.substring(0, 8) || 'unknown'}... ${itemsPayload.length}개 아이템 전송 (forceFullSync: ${forceFullSync}), 상태 분포:`, statusCounts)
+
+          if (!session.id) {
+            console.warn('[동기화] session.id가 없어서 아이템 동기화를 건너뜁니다.')
+            return
+          }
 
           await callInspectionApi({
             method: 'PUT',
@@ -796,33 +779,113 @@ export function useInspectionSession() {
     notes.value = []
   }
 
-  const findLastSession = async () => {
+  const deleteSession = async (sessionId, userId = null) => {
     try {
-      if (!user.value) return null
+      const targetUserId = userId || user.value?.id
+      
+      if (!targetUserId) {
+        console.error('[deleteSession] user가 없습니다')
+        return { success: false, error: 'user가 없습니다' }
+      }
+
+      if (!sessionId) {
+        console.error('[deleteSession] sessionId가 없습니다')
+        return { success: false, error: 'sessionId가 없습니다' }
+      }
+
+      console.log('[deleteSession] 세션 삭제 시작:', sessionId)
+
+      // 1. 로컬 IndexedDB에서 삭제
+      try {
+        await sessionStore.removeItem(sessionId)
+        await itemsStore.removeItem(sessionId)
+        console.log('[deleteSession] 로컬 세션 삭제 완료')
+      } catch (localErr) {
+        console.warn('[deleteSession] 로컬 세션 삭제 실패:', localErr)
+      }
+
+      // 2. 서버에서 삭제
+      try {
+        // 서버에서 세션 아이템 먼저 삭제
+        const { error: itemsError } = await supabase
+          .from('inspection_items')
+          .delete()
+          .eq('session_id', sessionId)
+
+        if (itemsError) {
+          console.warn('[deleteSession] 서버 아이템 삭제 실패:', itemsError)
+        } else {
+          console.log('[deleteSession] 서버 아이템 삭제 완료')
+        }
+
+        // 서버에서 세션 삭제
+        const { error: sessionError } = await supabase
+          .from('inspection_sessions')
+          .delete()
+          .eq('id', sessionId)
+          .eq('user_id', targetUserId)
+
+        if (sessionError) {
+          console.error('[deleteSession] 서버 세션 삭제 실패:', sessionError)
+          return { success: false, error: sessionError.message }
+        } else {
+          console.log('[deleteSession] 서버 세션 삭제 완료')
+        }
+      } catch (serverErr) {
+        console.error('[deleteSession] 서버 삭제 실패:', serverErr)
+        return { success: false, error: serverErr.message }
+      }
+
+      // 현재 세션이 삭제된 세션이면 상태 초기화
+      if (session.id === sessionId) {
+        await resetSessionState({ clearLocal: false })
+      }
+
+      return { success: true }
+    } catch (err) {
+      console.error('[deleteSession] 세션 삭제 실패:', err)
+      return { success: false, error: err.message }
+    }
+  }
+
+  const findLastSessions = async (userId = null) => {
+    try {
+      // userId 파라미터가 있으면 사용, 없으면 user.value 사용
+      const targetUserId = userId || user.value?.id
+      
+      if (!targetUserId) {
+        console.log('[findLastSessions] user가 없습니다. userId:', userId, 'user.value?.id:', user.value?.id)
+        return []
+      }
+
+      console.log('[findLastSessions] 사용할 userId:', targetUserId)
+
+      const sessionMap = new Map()
 
       // 1. 로컬 IndexedDB에서 먼저 확인
       const keys = await sessionStore.keys()
+      console.log('[findLastSessions] 로컬 IndexedDB 키 개수:', keys.length)
+      
       if (keys.length > 0) {
         const sessions = await Promise.all(
           keys.map(key => sessionStore.getItem(key))
         )
 
+        console.log('[findLastSessions] 로컬 세션 총 개수:', sessions.length)
+        
         const userSessions = sessions.filter(s => 
-          s && s.user_id === user.value?.id
+          s && s.user_id === targetUserId && (s.status === 'in_progress' || s.status === 'paused')
         )
 
-        if (userSessions.length > 0) {
-          const lastSession = userSessions
-            .filter(s => s.status === 'in_progress' || s.status === 'paused')
-            .sort((a, b) => new Date(b.last_saved_at || b.started_at) - new Date(a.last_saved_at || a.started_at))[0]
+        console.log('[findLastSessions] 필터링된 로컬 세션 개수 (in_progress/paused):', userSessions.length)
+        console.log('[findLastSessions] 필터링된 로컬 세션 상태:', userSessions.map(s => ({ id: s.id, status: s.status, set_name: s.set_name })))
 
-          if (lastSession) {
-            return lastSession
-          }
-        }
+        userSessions.forEach(session => {
+          sessionMap.set(session.id, session)
+        })
       }
 
-      // 2. 로컬에 없으면 서버에서 진행 중인 세션 확인 (다른 단말기 동기화)
+      // 2. 서버에서 진행 중인 세션 확인 (다른 단말기 동기화)
       try {
         const { data: serverSessions, error: serverError } = await supabase
           .from('inspection_sessions')
@@ -839,41 +902,61 @@ export function useInspectionSession() {
               set_num
             )
           `)
-          .eq('user_id', user.value.id)
+          .eq('user_id', targetUserId)
           .in('status', ['in_progress', 'paused'])
           .order('last_saved_at', { ascending: false })
-          .limit(1)
 
-        if (!serverError && serverSessions && serverSessions.length > 0) {
-          const serverSession = serverSessions[0]
-          const sessionData = {
-            id: serverSession.id,
-            set_id: serverSession.set_id,
-            set_name: serverSession.lego_sets?.name || '세트명 없음',
-            user_id: user.value.id,
-            status: serverSession.status,
-            progress: serverSession.progress || 0,
-            started_at: serverSession.started_at,
-            last_saved_at: serverSession.last_saved_at,
-            completed_at: serverSession.completed_at,
-            is_synced: true,
-            updated_at: serverSession.last_saved_at || serverSession.started_at
-          }
+        if (serverError) {
+          console.warn('[findLastSessions] 서버 에러:', serverError)
+        } else {
+          console.log('[findLastSessions] 서버 세션 개수:', serverSessions?.length || 0)
+        }
 
-          // 서버에서 찾은 세션을 로컬에도 저장
-          await sessionStore.setItem(sessionData.id, sessionData)
+        if (!serverError && serverSessions) {
+          serverSessions.forEach(serverSession => {
+            const sessionData = {
+              id: serverSession.id,
+              set_id: serverSession.set_id,
+              set_name: serverSession.lego_sets?.name || '세트명 없음',
+              user_id: targetUserId,
+              status: serverSession.status,
+              progress: serverSession.progress || 0,
+              started_at: serverSession.started_at,
+              last_saved_at: serverSession.last_saved_at,
+              completed_at: serverSession.completed_at,
+              is_synced: true,
+              updated_at: serverSession.last_saved_at || serverSession.started_at
+            }
 
-          return sessionData
+            // 서버에서 찾은 세션을 로컬에도 저장
+            sessionStore.setItem(sessionData.id, sessionData).catch(() => {})
+            
+            // 중복 제거 (로컬과 서버에 모두 있는 경우 서버 데이터 우선)
+            sessionMap.set(sessionData.id, sessionData)
+          })
         }
       } catch (serverErr) {
-        console.warn('서버에서 세션 찾기 실패:', serverErr)
+        console.warn('[findLastSessions] 서버에서 세션 찾기 실패:', serverErr)
       }
 
-      return null
+      // 최신순으로 정렬하여 반환
+      const result = Array.from(sessionMap.values())
+        .sort((a, b) => new Date(b.last_saved_at || b.started_at) - new Date(a.last_saved_at || a.started_at))
+      
+      console.log('[findLastSessions] 최종 반환 세션 개수:', result.length)
+      console.log('[findLastSessions] 최종 반환 세션:', result.map(s => ({ id: s.id, status: s.status, set_name: s.set_name })))
+      
+      return result
     } catch (err) {
-      console.error('마지막 세션 찾기 실패:', err)
-      return null
+      console.error('[findLastSessions] 세션 찾기 실패:', err)
+      return []
     }
+  }
+
+  // 하위 호환성을 위한 함수
+  const findLastSession = async () => {
+    const sessions = await findLastSessions()
+    return sessions.length > 0 ? sessions[0] : null
   }
 
   const progress = computed(() => session.progress)
@@ -967,6 +1050,8 @@ export function useInspectionSession() {
     deleteSetNote,
     resetSessionState,
     findLastSession,
+    findLastSessions,
+    deleteSession,
     saveToLocal,
     syncToServer,
     syncInProgress,

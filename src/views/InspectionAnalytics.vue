@@ -18,39 +18,85 @@
         <div class="filters-section">
           <div class="filter-group">
             <label class="filter-label">통계 범위</label>
-            <select v-model="viewMode" @change="loadAnalytics" class="filter-select">
-              <option value="my">내 통계</option>
-              <option v-if="isAdmin" value="all">전체 통계</option>
-            </select>
+            <div class="custom-dropdown" @click="toggleViewModeDropdown" v-click-outside="closeViewModeDropdown">
+              <div class="dropdown-trigger">
+                <span>{{ viewMode === 'my' ? '내 통계' : '전체 통계' }}</span>
+                <svg class="dropdown-arrow" :class="{ 'open': showViewModeDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div v-if="showViewModeDropdown" class="dropdown-menu">
+                <div class="dropdown-item" :class="{ 'active': viewMode === 'my' }" @click="selectViewMode('my')">
+                  내 통계
+                </div>
+                <div v-if="isAdmin" class="dropdown-item" :class="{ 'active': viewMode === 'all' }" @click="selectViewMode('all')">
+                  전체 통계
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="filter-group">
             <label class="filter-label">기간</label>
             <div class="date-range">
-              <input
-                type="date"
-                v-model="dateFrom"
-                @change="loadAnalytics"
-                class="filter-input"
-              />
+              <div class="date-input-wrapper">
+                <input
+                  type="date"
+                  v-model="dateFrom"
+                  @change="loadAnalytics"
+                  class="custom-date-input"
+                />
+                <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
+                <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
               <span class="date-separator">~</span>
-              <input
-                type="date"
-                v-model="dateTo"
-                @change="loadAnalytics"
-                class="filter-input"
-              />
+              <div class="date-input-wrapper">
+                <input
+                  type="date"
+                  v-model="dateTo"
+                  @change="loadAnalytics"
+                  class="custom-date-input"
+                />
+                <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
+                <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
             </div>
           </div>
 
           <div class="filter-group">
             <label class="filter-label">세트</label>
-            <select v-model="selectedSetId" @change="loadAnalytics" class="filter-select">
-              <option value="">전체</option>
-              <option v-for="set in availableSets" :key="set.id" :value="set.id">
-                {{ set.name }}
-              </option>
-            </select>
+            <div class="custom-dropdown" @click="toggleSetDropdown" v-click-outside="closeSetDropdown">
+              <div class="dropdown-trigger">
+                <span>{{ selectedSetName || '전체' }}</span>
+                <svg class="dropdown-arrow" :class="{ 'open': showSetDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div v-if="showSetDropdown" class="dropdown-menu dropdown-menu-scrollable">
+                <div class="dropdown-item" :class="{ 'active': selectedSetId === '' }" @click="selectSet('', '전체')">
+                  전체
+                </div>
+                <div 
+                  v-for="set in availableSets" 
+                  :key="set.id" 
+                  class="dropdown-item" 
+                  :class="{ 'active': selectedSetId === set.id }" 
+                  @click="selectSet(set.id, set.name)"
+                >
+                  {{ set.name }}
+                </div>
+              </div>
+            </div>
           </div>
 
           <button @click="resetFilters" class="filter-reset-btn">초기화</button>
@@ -86,22 +132,6 @@
             </div>
             <div class="metric-value error">{{ totalMissingParts }}</div>
             <div class="metric-hint">누락률: {{ missingRate.toFixed(1) }}%</div>
-          </div>
-        </div>
-
-        <div class="charts-section">
-          <div class="chart-card">
-            <h3>세션별 진행률</h3>
-            <div class="chart-container">
-              <Bar :data="progressChartData" :options="chartOptions" />
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <h3>상태별 부품 분포</h3>
-            <div class="chart-container">
-              <Bar :data="statusChartData" :options="chartOptions" />
-            </div>
           </div>
         </div>
 
@@ -151,8 +181,8 @@
                 <tr
                   v-for="session in recentSessions"
                   :key="session.id"
-                  @click="viewSession(session.id)"
-                  class="table-row"
+                  @click="session.status !== 'completed' ? viewSession(session.id) : null"
+                  :class="['table-row', { 'table-row-clickable': session.status !== 'completed', 'table-row-completed': session.status === 'completed' }]"
                 >
                   <td>{{ session.set_name }}</td>
                   <td>
@@ -160,7 +190,7 @@
                       {{ statusLabel(session.status) }}
                     </span>
                   </td>
-                  <td>
+                  <td class="progress-column">
                     <div class="progress-cell">
                       <div class="progress-bar-small">
                         <div class="progress-fill-small" :style="{ width: `${session.progress || 0}%` }"></div>
@@ -182,17 +212,27 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bar } from 'vue-chartjs'
-import { Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
 import { useSupabase } from '../composables/useSupabase'
-
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 export default {
   name: 'InspectionAnalytics',
-  components: { Bar },
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = (event) => {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value(event)
+          }
+        }
+        document.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.removeEventListener('click', el.clickOutsideEvent)
+      }
+    }
+  },
   setup() {
     const router = useRouter()
     const { supabase, user } = useSupabase()
@@ -208,6 +248,9 @@ export default {
     const dateFrom = ref('')
     const dateTo = ref('')
     const selectedSetId = ref('')
+    const selectedSetName = ref('전체')
+    const showViewModeDropdown = ref(false)
+    const showSetDropdown = ref(false)
 
     const totalSessions = computed(() => sessions.value.length)
     const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
@@ -255,79 +298,6 @@ export default {
         .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at))
         .slice(0, 20)
     })
-
-    const progressChartData = computed(() => {
-      const labels = sessions.value
-        .slice(0, 10)
-        .map(s => s.set_name || '세트명 없음')
-        .slice(0, 10)
-
-      const data = sessions.value
-        .slice(0, 10)
-        .map(s => s.progress || 0)
-
-      return {
-        labels,
-        datasets: [
-          {
-            label: '진행률 (%)',
-            data,
-            backgroundColor: '#2563eb'
-          }
-        ]
-      }
-    })
-
-    const statusChartData = computed(() => {
-      const statusCounts = items.value.reduce((acc, item) => {
-        const status = item.status || 'pending'
-        acc[status] = (acc[status] || 0) + 1
-        return acc
-      }, { pending: 0, checked: 0, missing: 0, hold: 0 })
-
-      return {
-        labels: ['완료', '미확인', '누락', '보류'],
-        datasets: [
-          {
-            label: '부품 수',
-            data: [
-              statusCounts.checked || 0,
-              statusCounts.pending || 0,
-              statusCounts.missing || 0,
-              statusCounts.hold || 0
-            ],
-            backgroundColor: ['#10b981', '#9ca3af', '#dc2626', '#f59e0b']
-          }
-        ]
-      }
-    })
-
-    const chartOptions = {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.parsed.y ?? 0}${context.dataset.label?.includes('%') ? '%' : '개'}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: { color: '#4b5563' }
-        },
-        y: {
-          beginAtZero: true,
-          ticks: {
-            precision: 0,
-            maxTicksLimit: 10,
-            color: '#6b7280'
-          }
-        }
-      }
-    }
 
     const checkAdminRole = async () => {
       if (!user.value) {
@@ -498,7 +468,7 @@ export default {
         case 'completed':
           return '완료'
         case 'paused':
-          return '임시 저장'
+          return '임시저장'
         case 'in_progress':
           return '진행 중'
         default:
@@ -538,8 +508,48 @@ export default {
       return `${minutes}분`
     }
 
+    const formatDateDisplay = (dateString) => {
+      if (!dateString) return '날짜 선택'
+      const date = new Date(dateString)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}. ${month}. ${day}.`
+    }
+
     const viewSession = (sessionId) => {
       router.push(`/manual-inspection?session=${sessionId}`)
+    }
+
+    const toggleViewModeDropdown = () => {
+      showViewModeDropdown.value = !showViewModeDropdown.value
+      showSetDropdown.value = false
+    }
+
+    const closeViewModeDropdown = () => {
+      showViewModeDropdown.value = false
+    }
+
+    const selectViewMode = (mode) => {
+      viewMode.value = mode
+      showViewModeDropdown.value = false
+      loadAnalytics()
+    }
+
+    const toggleSetDropdown = () => {
+      showSetDropdown.value = !showSetDropdown.value
+      showViewModeDropdown.value = false
+    }
+
+    const closeSetDropdown = () => {
+      showSetDropdown.value = false
+    }
+
+    const selectSet = (setId, setName) => {
+      selectedSetId.value = setId
+      selectedSetName.value = setName
+      showSetDropdown.value = false
+      loadAnalytics()
     }
 
     const resetFilters = () => {
@@ -547,6 +557,9 @@ export default {
       dateFrom.value = ''
       dateTo.value = ''
       selectedSetId.value = ''
+      selectedSetName.value = '전체'
+      showViewModeDropdown.value = false
+      showSetDropdown.value = false
       loadAnalytics()
     }
 
@@ -566,6 +579,15 @@ export default {
       loadAnalytics()
     })
 
+    onUnmounted(() => {
+      if (showViewModeDropdown.value) {
+        showViewModeDropdown.value = false
+      }
+      if (showSetDropdown.value) {
+        showSetDropdown.value = false
+      }
+    })
+
     return {
       loading,
       error,
@@ -577,20 +599,27 @@ export default {
       averageDurationLabel,
       recentSessions,
       timelineSessions,
-      progressChartData,
-      statusChartData,
-      chartOptions,
       statusLabel,
       formatDate,
       formatDateShort,
       formatDuration,
+      formatDateDisplay,
       viewSession,
       isAdmin,
       viewMode,
       dateFrom,
       dateTo,
       selectedSetId,
+      selectedSetName,
       availableSets,
+      showViewModeDropdown,
+      showSetDropdown,
+      toggleViewModeDropdown,
+      closeViewModeDropdown,
+      selectViewMode,
+      toggleSetDropdown,
+      closeSetDropdown,
+      selectSet,
       resetFilters
     }
   }
@@ -606,6 +635,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
+  text-align: center;
 }
 
 .page-header h1 {
@@ -854,7 +884,7 @@ export default {
 
 .sessions-table th {
   padding: 0.75rem 1rem;
-  text-align: left;
+  text-align: center;
   font-size: 0.875rem;
   font-weight: 600;
   color: #374151;
@@ -866,15 +896,23 @@ export default {
   font-size: 0.875rem;
   color: #111827;
   border-bottom: 1px solid #f3f4f6;
+  text-align: center;
 }
 
 .table-row {
-  cursor: pointer;
   transition: background 0.2s ease;
 }
 
-.table-row:hover {
+.table-row-clickable {
+  cursor: pointer;
+}
+
+.table-row-clickable:hover {
   background: #f9fafb;
+}
+
+.table-row-completed {
+  cursor: default;
 }
 
 .status-badge {
@@ -886,23 +924,28 @@ export default {
 }
 
 .status-badge.status-completed {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #10b981;
+  color: #ffffff;
 }
 
 .status-badge.status-paused {
-  background: #fef3c7;
-  color: #92400e;
+  background: #f59e0b;
+  color: #ffffff;
 }
 
 .status-badge.status-in_progress {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.progress-column {
+  text-align: right;
 }
 
 .progress-cell {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 
@@ -951,33 +994,157 @@ export default {
   color: #374151;
 }
 
-.filter-select,
-.filter-input {
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.date-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.date-input-wrapper:focus-within .date-icon {
+  color: #2563eb;
+}
+
+.custom-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.date-display {
+  width: 100%;
+  padding: 0.5rem 0.75rem 0.5rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.date-display:empty::before {
+  content: '날짜 선택';
+  color: #9ca3af;
+}
+
+.date-input-wrapper:hover .date-display {
+  border-color: #9ca3af;
+}
+
+.date-input-wrapper:focus-within .date-display {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.date-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+  z-index: 1;
+}
+
+.custom-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0.5rem 0.75rem;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   font-size: 0.875rem;
   color: #111827;
   background: #ffffff;
-  transition: border-color 0.2s ease;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 38px;
 }
 
-.filter-select:focus,
-.filter-input:focus {
-  outline: none;
+.dropdown-trigger:hover {
+  border-color: #9ca3af;
+}
+
+.dropdown-trigger:focus-within {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.dropdown-arrow {
+  transition: transform 0.2s ease;
+  color: #6b7280;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.dropdown-arrow.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.dropdown-menu-scrollable {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: #111827;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background: #f3f4f6;
+}
+
+.dropdown-item.active {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
 }
 
 .date-separator {
   color: #6b7280;
   font-size: 0.875rem;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
 .filter-reset-btn {
