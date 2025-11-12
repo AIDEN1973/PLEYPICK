@@ -31,10 +31,7 @@ import ManualInspection from './views/ManualInspection.vue'
 import InspectionAnalytics from './views/InspectionAnalytics.vue'
 import InspectionNotes from './views/InspectionNotes.vue'
 import PartToSetSearch from './views/PartToSetSearch.vue'
-<<<<<<< HEAD
 import MissingParts from './views/MissingParts.vue'
-=======
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -65,12 +62,8 @@ const routes = [
   { path: '/manual-inspection', name: 'ManualInspection', component: ManualInspection },
   { path: '/inspection-history', name: 'InspectionHistory', component: InspectionAnalytics },
   { path: '/inspection-notes', name: 'InspectionNotes', component: InspectionNotes },
-<<<<<<< HEAD
   { path: '/part-to-set-search', name: 'PartToSetSearch', component: PartToSetSearch },
   { path: '/missing-parts', name: 'MissingParts', component: MissingParts }
-=======
-  { path: '/part-to-set-search', name: 'PartToSetSearch', component: PartToSetSearch }
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 ]
 
 const router = createRouter({

@@ -1,121 +1,3 @@
-.set-search-field {
-  position: relative;
-}
-
-.set-search-field {
-  position: relative;
-}
-
-.set-search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.set-search-input {
-  width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  height: 44px;
-  box-sizing: border-box;
-}
-
-.set-search-input:hover {
-  border-color: #9ca3af;
-}
-
-.set-search-input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.set-search-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #6b7280;
-  pointer-events: none;
-  transition: color 0.2s ease;
-}
-
-.set-search-input:focus ~ .set-search-icon {
-  color: #2563eb;
-}
-
-.set-search-clear {
-  position: absolute;
-  right: 0.85rem;
-  top: 50%;
-  transform: translateY(-50%);
-  background: transparent;
-  border: none;
-  font-size: 1.25rem;
-  line-height: 1;
-  color: #9ca3af;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.set-search-clear:hover {
-  color: #4b5563;
-}
-
-.set-search-dropdown {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  right: 0;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
-  z-index: 50;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.set-search-option {
-  padding: 0.75rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.set-search-option:hover,
-.set-search-option.active {
-  background: #f3f4f6;
-}
-
-.set-search-option.selected {
-  background: #e0f2fe;
-}
-
-.option-title {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #111827;
-}
-
-.option-subtitle {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
 <template>
   <div class="inspection-analytics-page">
     <div class="page-header">
@@ -131,29 +13,6 @@
       <div v-else class="analytics-dashboard">
         <div class="filters-section">
           <div class="filter-group">
-<<<<<<< HEAD
-=======
-            <label class="filter-label">통계 범위</label>
-            <div class="custom-dropdown" @click="toggleViewModeDropdown" v-click-outside="closeViewModeDropdown">
-              <div class="dropdown-trigger">
-                <span>{{ viewMode === 'my' ? '내 통계' : '전체 통계' }}</span>
-                <svg class="dropdown-arrow" :class="{ 'open': showViewModeDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-              <div v-if="showViewModeDropdown" class="dropdown-menu">
-                <div class="dropdown-item" :class="{ 'active': viewMode === 'my' }" @click="selectViewMode('my')">
-                  내 통계
-                </div>
-                <div v-if="isAdmin" class="dropdown-item" :class="{ 'active': viewMode === 'all' }" @click="selectViewMode('all')">
-                  전체 통계
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="filter-group">
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
             <label class="filter-label">기간</label>
             <div class="date-range">
               <div class="date-input-wrapper">
@@ -162,19 +21,6 @@
                   v-model="dateFrom"
                   @change="loadAnalytics"
                   class="custom-date-input"
-<<<<<<< HEAD
-                  ref="dateFromInput"
-                />
-                <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
-                <button type="button" class="date-trigger-btn" @click="focusDateInput('from')" aria-label="시작 날짜 선택"><!-- // 🔧 수정됨 -->
-                  <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-=======
                 />
                 <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
                 <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -183,7 +29,6 @@
                   <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
               </div>
               <span class="date-separator">~</span>
               <div class="date-input-wrapper">
@@ -192,19 +37,6 @@
                   v-model="dateTo"
                   @change="loadAnalytics"
                   class="custom-date-input"
-<<<<<<< HEAD
-                  ref="dateToInput"
-                />
-                <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
-                <button type="button" class="date-trigger-btn" @click="focusDateInput('to')" aria-label="종료 날짜 선택"><!-- // 🔧 수정됨 -->
-                  <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-=======
                 />
                 <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
                 <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -213,23 +45,23 @@
                   <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
               </div>
             </div>
           </div>
 
           <div class="filter-group">
-<<<<<<< HEAD
-            <label class="filter-label">레고번호</label>
-            <div class="set-search-field" ref="setSearchRef">
+            <label class="filter-label">세트</label>
+            <div class="set-search-field" ref="setDropdownRef">
               <div class="set-search-input-row">
                 <div class="set-search-input-wrapper">
                   <input
                     type="text"
                     v-model="setSearchQuery"
-                    @keydown.enter.prevent="handleSetSearch"
-                    placeholder="예: 76917"
+                    @keyup.enter="handleSearchEnter"
+                    @blur="handleSearchBlur"
+                    placeholder="예 : 76917"
                     class="set-search-input"
+                    :disabled="loading"
                   />
                   <svg class="set-search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
                     <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -238,37 +70,41 @@
                 </div>
                 <button
                   type="button"
-                  @click="handleSetSearch"
+                  @click="handleSearchEnter"
                   class="set-search-button"
                   :disabled="loading"
                 >
                   검색
                 </button>
-                <button @click="resetFilters" class="filter-reset-btn">초기화</button>
-=======
-            <label class="filter-label">세트</label>
-            <div class="custom-dropdown" @click="toggleSetDropdown" v-click-outside="closeSetDropdown">
-              <div class="dropdown-trigger">
-                <span>{{ selectedSetName || '전체' }}</span>
-                <svg class="dropdown-arrow" :class="{ 'open': showSetDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
-              </div>
-              <div v-if="showSetDropdown" class="dropdown-menu dropdown-menu-scrollable">
-                <div class="dropdown-item" :class="{ 'active': selectedSetId === '' }" @click="selectSet('', '전체')">
-                  전체
-                </div>
-                <div 
-                  v-for="set in availableSets" 
-                  :key="set.id" 
-                  class="dropdown-item" 
-                  :class="{ 'active': selectedSetId === set.id }" 
-                  @click="selectSet(set.id, set.name)"
+                <button
+                  type="button"
+                  @click="handleResetSet"
+                  class="filter-reset-btn"
+                  :disabled="!selectedSetId"
                 >
-                  {{ set.name }}
-                </div>
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
+                  초기화
+                </button>
               </div>
+
+              <transition name="select-fade">
+                <div v-if="showSetDropdown && searchResults.length > 0" :key="`dropdown-${searchResultsKey}`" class="set-search-dropdown">
+                  <div
+                    v-for="(set, index) in searchResults"
+                    :key="`${set.id}-${set.set_num}-${searchResultsKey}-${index}`"
+                    class="set-search-option"
+                    :class="{ active: selectedSetId === set.id }"
+                    @click="handleSelectSet(set)"
+                  >
+                    <div class="option-row option-row-meta">
+                      <span class="option-value option-set-display">{{ formatSetDisplay(set.set_num, set.theme_name, set.name) }}</span>
+                    </div>
+                    <div class="option-row">
+                      <span class="option-label">제품명:</span>
+                      <span class="option-value">{{ set.name || '' }}</span>
+                    </div>
+                  </div>
+                </div>
+              </transition>
             </div>
           </div>
         </div>
@@ -327,8 +163,6 @@
           </div>
         </div>
 
-<<<<<<< HEAD
-=======
         <div class="timeline-section">
           <h3>검수 타임라인</h3>
           <div class="timeline-container">
@@ -363,7 +197,6 @@
           </div>
         </div>
 
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
         <div class="sessions-table-section">
           <h3>최근 검수이력</h3>
           <div class="table-container">
@@ -382,12 +215,6 @@
                 <tr
                   v-for="session in recentSessions"
                   :key="session.id"
-<<<<<<< HEAD
-                  @click="handleRowClick(session)"
-                  :class="['table-row', { 'table-row-disabled': session.status === 'completed' }]"
-                >
-                  <td class="set-name-cell">{{ formatSetDisplay(session.set_num, session.theme_name, session.set_name) }}</td> <!-- // 🔧 수정됨 -->
-=======
                   @click="session.status !== 'completed' ? viewSession(session.id) : null"
                   :class="['table-row', { 'table-row-clickable': session.status !== 'completed', 'table-row-completed': session.status === 'completed' }]"
                 >
@@ -398,7 +225,6 @@
                     <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name }}</span>
                     <span v-else>{{ session.set_name }}</span>
                   </td>
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
                   <td>
                     <span class="status-badge" :class="`status-${session.status}`">
                       {{ statusLabel(session.status) }}
@@ -429,16 +255,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
-<<<<<<< HEAD
 import { formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
 
 export default {
-  name: 'InspectionHistory', // 🔧 수정됨
-=======
-
-export default {
   name: 'InspectionAnalytics',
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
   directives: {
     'click-outside': {
       mounted(el, binding) {
@@ -468,16 +288,13 @@ export default {
     const dateFrom = ref('')
     const dateTo = ref('')
     const selectedSetId = ref('')
-<<<<<<< HEAD
-    const setSearchQuery = ref('')
-    const setSearchRef = ref(null)
-    const dateFromInput = ref(null)
-    const dateToInput = ref(null)
-=======
     const selectedSetName = ref('전체')
-    const showViewModeDropdown = ref(false)
+    const selectedSet = ref(null)
+    const setSearchQuery = ref('')
+    const searchResults = ref([])
+    const searchResultsKey = ref(0)
     const showSetDropdown = ref(false)
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
+    const setDropdownRef = ref(null)
 
     const totalSessions = computed(() => sessions.value.length)
     const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
@@ -520,15 +337,12 @@ export default {
         .slice(0, 10)
     })
 
-<<<<<<< HEAD
-=======
     const timelineSessions = computed(() => {
       return [...sessions.value]
         .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at))
         .slice(0, 20)
     })
 
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     const checkAdminRole = async () => {
       if (!user.value) {
         isAdmin.value = false
@@ -719,15 +533,9 @@ export default {
           return {
             id: session.id,
             set_id: session.set_id,
-<<<<<<< HEAD
-            set_name: session.lego_sets?.name || meta.set_name || '세트명 없음',
-            set_num: meta.set_num || null,
-            theme_name: meta.theme_name || null,
-=======
             set_name: legoSet?.name || '세트명 없음',
             set_num: legoSet?.set_num || null,
             theme_name: themeName || null,
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
             status: session.status,
             progress: session.progress || 0,
             started_at: session.started_at,
@@ -772,6 +580,15 @@ export default {
       })
     }
 
+    const formatDateShort = (dateString) => {
+      if (!dateString) return '-'
+      const date = new Date(dateString)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}.${month}.${day}`
+    }
+
     const formatDuration = (seconds) => {
       if (!seconds || seconds === 0) return '-'
       const hours = Math.floor(seconds / 3600)
@@ -789,83 +606,6 @@ export default {
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
       return `${year}. ${month}. ${day}.`
-<<<<<<< HEAD
-    }
-
-    const handleRowClick = (sessionData) => { // 🔧 수정됨
-      if (!sessionData || sessionData.status === 'completed') return // 🔧 수정됨
-      viewSession(sessionData)
-    } // 🔧 수정됨
-
-    const viewSession = (targetSession) => { // 🔧 수정됨
-      if (!targetSession || !targetSession.id) return // 🔧 수정됨
-      router.push({ path: '/manual-inspection', query: { session: targetSession.id } }) // 🔧 수정됨
-    }
-
-    const handleSetSearch = async () => {
-      if (!setSearchQuery.value || !setSearchQuery.value.trim()) {
-        selectedSetId.value = ''
-        await loadAnalytics()
-        return
-      }
-
-      try {
-        const query = setSearchQuery.value.trim()
-        const { data, error } = await supabase
-          .from('lego_sets')
-          .select('id, name, set_num, theme_id')
-          .ilike('set_num', `%${query}%`)
-          .order('name', { ascending: true })
-          .limit(1)
-
-        if (error) throw error
-
-        if (data && data.length > 0) {
-          const set = data[0]
-          const themeIds = set.theme_id ? [set.theme_id] : []
-          let themeName = null
-
-          if (themeIds.length > 0) {
-            const { data: themesData } = await supabase
-              .from('lego_themes')
-              .select('theme_id, name')
-              .in('theme_id', themeIds)
-              .maybeSingle()
-            themeName = themesData?.name || null
-          }
-
-          selectedSetId.value = set.id
-          console.log('[검색] 세트 ID 설정:', set.id, 'set_num:', set.set_num)
-          await loadAnalytics()
-        } else {
-          selectedSetId.value = ''
-          console.log('[검색] 검색 결과 없음, 필터 초기화')
-          await loadAnalytics()
-        }
-      } catch (err) {
-        console.error('세트 검색 실패:', err)
-        selectedSetId.value = ''
-        await loadAnalytics()
-      }
-    }
-
-    const focusDateInput = (target) => {
-      if (target === 'from' && dateFromInput.value) {
-        dateFromInput.value.showPicker?.()
-        dateFromInput.value.focus()
-      } else if (target === 'to' && dateToInput.value) {
-        dateToInput.value.showPicker?.()
-        dateToInput.value.focus()
-      }
-    }
-
-    const resetFilters = async () => {
-      dateFrom.value = ''
-      dateTo.value = ''
-      selectedSetId.value = ''
-      setSearchQuery.value = ''
-      await loadAnalytics()
-=======
     }
 
     const formatSetNum = (setNum) => {
@@ -878,47 +618,156 @@ export default {
       router.push(`/manual-inspection?session=${sessionId}`)
     }
 
-    const toggleViewModeDropdown = () => {
-      showViewModeDropdown.value = !showViewModeDropdown.value
+    const searchSets = async () => {
+      if (!setSearchQuery.value.trim()) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
+
+      try {
+        const query = setSearchQuery.value.trim()
+        const mainSetNum = query.split('-')[0]
+        let results = []
+        
+        // 1단계: 정확한 매칭 시도
+        const { data: exactMatch, error: exactError } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id')
+          .eq('set_num', query)
+          .limit(20)
+
+        if (!exactError && exactMatch && exactMatch.length > 0) {
+          results = exactMatch
+        } else {
+          // 2단계: 메인 세트 번호로 정확히 일치
+          const { data: mainMatch, error: mainError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id')
+            .eq('set_num', mainSetNum)
+            .limit(20)
+
+          if (!mainError && mainMatch && mainMatch.length > 0) {
+            results = mainMatch
+          } else {
+            // 3단계: LIKE 패턴으로 검색
+            const { data: likeMatch, error: likeError } = await supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id')
+              .ilike('set_num', `${mainSetNum}%`)
+              .order('set_num')
+              .limit(20)
+
+            if (!likeError && likeMatch && likeMatch.length > 0) {
+              // 하이픈이 없는 메인 세트만 필터링
+              results = likeMatch.filter(set => set.set_num === mainSetNum)
+              
+              if (results.length === 0 && likeMatch.length > 0) {
+                const withoutHyphen = likeMatch.filter(set => !set.set_num.includes('-'))
+                if (withoutHyphen.length > 0) {
+                  results = [withoutHyphen.sort((a, b) => a.set_num.length - b.set_num.length)[0]]
+                } else {
+                  results = [likeMatch[0]]
+                }
+              }
+            }
+          }
+        }
+
+        // 테마 정보 조회
+        if (results.length > 0) {
+          const themeIds = [...new Set(results.map(set => set.theme_id).filter(Boolean))]
+          
+          if (themeIds.length > 0) {
+            const { data: themesData, error: themesError } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .in('theme_id', themeIds)
+
+            if (!themesError && themesData && themesData.length > 0) {
+              const themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
+              
+              results = results.map(set => ({
+                ...set,
+                theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null
+              }))
+            } else {
+              results = results.map(set => ({ ...set, theme_name: null }))
+            }
+          } else {
+            results = results.map(set => ({ ...set, theme_name: null }))
+          }
+        }
+
+        // 검색 결과 업데이트
+        searchResults.value = results
+        searchResultsKey.value++
+        
+        if (searchResults.value.length > 0) {
+          showSetDropdown.value = true
+        } else {
+          showSetDropdown.value = false
+        }
+      } catch (err) {
+        console.error('세트 검색 실패:', err)
+        searchResults.value = []
+        showSetDropdown.value = false
+      }
+    }
+
+    const handleSearchEnter = async () => {
+      if (!setSearchQuery.value.trim()) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
+      
+      await searchSets()
+      
+      if (searchResults.value.length === 1) {
+        handleSelectSet(searchResults.value[0])
+      } else if (searchResults.value.length > 0) {
+        showSetDropdown.value = true
+      }
+    }
+
+    const handleSearchBlur = () => {
+      // blur 이벤트가 드롭다운 클릭보다 먼저 발생할 수 있으므로 약간의 지연
+      setTimeout(() => {
+        showSetDropdown.value = false
+      }, 200)
+    }
+
+    const handleSelectSet = (set) => {
+      selectedSet.value = set
+      selectedSetId.value = set.id
+      selectedSetName.value = set.name
+      setSearchQuery.value = ''
+      searchResults.value = []
       showSetDropdown.value = false
-    }
-
-    const closeViewModeDropdown = () => {
-      showViewModeDropdown.value = false
-    }
-
-    const selectViewMode = (mode) => {
-      viewMode.value = mode
-      showViewModeDropdown.value = false
       loadAnalytics()
     }
 
-    const toggleSetDropdown = () => {
-      showSetDropdown.value = !showSetDropdown.value
-      showViewModeDropdown.value = false
-    }
-
-    const closeSetDropdown = () => {
-      showSetDropdown.value = false
-    }
-
-    const selectSet = (setId, setName) => {
-      selectedSetId.value = setId
-      selectedSetName.value = setName
+    const handleResetSet = () => {
+      selectedSet.value = null
+      selectedSetId.value = ''
+      selectedSetName.value = '전체'
+      setSearchQuery.value = ''
+      searchResults.value = []
       showSetDropdown.value = false
       loadAnalytics()
     }
 
     const resetFilters = () => {
-      viewMode.value = 'my'
       dateFrom.value = ''
       dateTo.value = ''
       selectedSetId.value = ''
       selectedSetName.value = '전체'
-      showViewModeDropdown.value = false
+      selectedSet.value = null
+      setSearchQuery.value = ''
+      searchResults.value = []
       showSetDropdown.value = false
       loadAnalytics()
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     }
 
     const initializeDateRange = () => {
@@ -938,9 +787,6 @@ export default {
     })
 
     onUnmounted(() => {
-      if (showViewModeDropdown.value) {
-        showViewModeDropdown.value = false
-      }
       if (showSetDropdown.value) {
         showSetDropdown.value = false
       }
@@ -956,52 +802,228 @@ export default {
       missingRate,
       averageDurationLabel,
       recentSessions,
-<<<<<<< HEAD
-=======
       timelineSessions,
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
       statusLabel,
       formatDate,
+      formatDateShort,
       formatDuration,
       formatDateDisplay,
-<<<<<<< HEAD
-=======
       formatSetNum,
       viewSession,
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
       isAdmin,
       dateFrom,
       dateTo,
       selectedSetId,
-<<<<<<< HEAD
-      setSearchQuery,
-      handleSetSearch,
-      resetFilters,
-      formatSetDisplay,
-      handleRowClick,
-      setSearchRef,
-      focusDateInput,
-      dateFromInput,
-      dateToInput
-=======
       selectedSetName,
-      availableSets,
-      showViewModeDropdown,
+      selectedSet,
+      setSearchQuery,
+      searchResults,
       showSetDropdown,
-      toggleViewModeDropdown,
-      closeViewModeDropdown,
-      selectViewMode,
-      toggleSetDropdown,
-      closeSetDropdown,
-      selectSet,
+      setDropdownRef,
+      handleSearchEnter,
+      handleSearchBlur,
+      handleSelectSet,
+      handleResetSet,
       resetFilters
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     }
   }
 }
 </script>
 
 <style scoped>
+.set-search-field {
+  position: relative;
+}
+
+.set-search-input-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.set-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.set-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.set-search-input:focus ~ .set-search-icon {
+  color: #2563eb;
+}
+
+.set-search-clear {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.set-search-clear:hover {
+  color: #4b5563;
+}
+
+.set-search-button {
+  padding: 0.75rem 1.5rem;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  height: 44px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.set-search-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.set-search-button:active:not(:disabled) {
+  background: #1e40af;
+}
+
+.set-search-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.set-search-dropdown {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  z-index: 50;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.set-search-option {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.set-search-option:hover,
+.set-search-option.active {
+  background: #f3f4f6;
+}
+
+.set-search-option.selected {
+  background: #e0f2fe;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.option-row-meta {
+  margin-bottom: 0.25rem;
+}
+
+.option-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.option-value {
+  font-size: 0.875rem;
+  color: #111827;
+  font-weight: 400;
+}
+
+.option-set-display {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.option-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.option-subtitle {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.select-fade-enter-active,
+.select-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.select-fade-enter-from,
+.select-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
 .inspection-analytics-page {
   min-height: 100vh;
   background: #f9fafb;
@@ -1127,8 +1149,6 @@ export default {
   position: relative;
 }
 
-<<<<<<< HEAD
-=======
 .timeline-section {
   background: #ffffff;
   border: 1px solid #e5e7eb;
@@ -1275,7 +1295,6 @@ td .set-name {
   color: #6b7280;
 }
 
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 .sessions-table-section {
   background: #ffffff;
   border: 1px solid #e5e7eb;
@@ -1305,11 +1324,7 @@ td .set-name {
 }
 
 .sessions-table th {
-<<<<<<< HEAD
-  padding: 1.1rem 1rem;
-=======
   padding: 0.75rem 1rem;
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
   text-align: center;
   font-size: 0.875rem;
   font-weight: 600;
@@ -1324,41 +1339,12 @@ td .set-name {
   color: #111827;
   border-bottom: 1px solid #f3f4f6;
   text-align: center;
-<<<<<<< HEAD
-}
-
-.set-name-cell { /* // 🔧 수정됨 */
-  max-width: 360px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-=======
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .table-row {
   transition: background 0.2s ease;
 }
 
-<<<<<<< HEAD
-.table-row-disabled { /* // 🔧 수정됨 */
-  cursor: default; /* // 🔧 수정됨 */
-  pointer-events: none; /* // 🔧 수정됨 */
-  color: #9ca3af; /* // 🔧 수정됨 */
-}
-
-.table-row:hover {
-  background: #f9fafb;
-}
-
-.table-row-disabled:hover { /* // 🔧 수정됨 */
-  background: #ffffff; /* // 🔧 수정됨 */
-}
-
-.table-row-disabled .status-badge { /* // 🔧 수정됨 */
-  background: #e5e7eb; /* // 🔧 수정됨 */
-  color: #6b7280; /* // 🔧 수정됨 */
-=======
 .table-row-clickable {
   cursor: pointer;
 }
@@ -1369,7 +1355,6 @@ td .set-name {
 
 .table-row-completed {
   cursor: default;
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .status-badge {
@@ -1455,281 +1440,6 @@ td .set-name {
   color: #374151;
 }
 
-<<<<<<< HEAD
-.set-search-field {
-  position: relative;
-}
-
-.set-search-field {
-  position: relative;
-}
-
-.set-search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.set-search-input {
-  width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  height: 44px;
-  box-sizing: border-box;
-}
-
-.set-search-input:hover {
-  border-color: #9ca3af;
-}
-
-.set-search-input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.set-search-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #6b7280;
-  pointer-events: none;
-  transition: color 0.2s ease;
-}
-
-.set-search-input:focus ~ .set-search-icon {
-  color: #2563eb;
-}
-
-.set-search-input-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-start;
-  position: relative;
-}
-
-.set-search-input-wrapper {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: 1;
-}
-
-.set-search-button {
-  padding: 0.75rem 1.5rem;
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  border-radius: 10px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  white-space: nowrap;
-  height: 44px;
-  box-sizing: border-box;
-}
-
-.set-search-button:hover {
-  background: #1d4ed8;
-}
-
-.set-search-button:active {
-  background: #1e40af;
-}
-
-.set-search-button:disabled {
-  background: #9ca3af;
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.set-search-dropdown {
-  position: absolute;
-  top: calc(100% + 0.25rem);
-  left: 0;
-  right: 0;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
-  z-index: 50;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.set-search-option {
-  padding: 0.75rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.set-search-option:hover,
-.set-search-option.active {
-  background: #f3f4f6;
-}
-
-.set-search-option.selected {
-  background: #e0f2fe;
-}
-
-.option-title {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #111827;
-}
-
-.option-subtitle {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-=======
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.date-input-wrapper {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-
-<<<<<<< HEAD
-.custom-date-input {
-  position: absolute;
-  inset: 0;
-=======
-.date-input-wrapper:focus-within .date-icon {
-  color: #2563eb;
-}
-
-.custom-date-input {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
-  opacity: 0;
-  cursor: pointer;
-  z-index: 2;
-}
-
-.date-display {
-  width: 100%;
-<<<<<<< HEAD
-  padding: 0.75rem 2.5rem 0.75rem 1rem;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  font-size: 0.9375rem;
-  color: #111827;
-  background: #ffffff;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  pointer-events: none;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  display: flex;
-  align-items: center;
-  font-weight: 500;
-  height: 44px;
-  box-sizing: border-box;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-=======
-  padding: 0.5rem 0.75rem 0.5rem 2.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  color: #111827;
-  background: #ffffff;
-  transition: all 0.2s ease;
-  cursor: pointer;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
-  min-height: 38px;
-  display: flex;
-  align-items: center;
-  pointer-events: none;
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
-}
-
-.date-display:empty::before {
-  content: '날짜 선택';
-  color: #9ca3af;
-}
-
-.date-input-wrapper:hover .date-display {
-  border-color: #9ca3af;
-}
-
-.date-input-wrapper:focus-within .date-display {
-  border-color: #2563eb;
-<<<<<<< HEAD
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
-}
-
-.date-trigger-btn {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  background: transparent;
-  border: none;
-  padding: 0.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #6b7280;
-  z-index: 3;
-  border-radius: 6px;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-
-.date-trigger-btn:hover {
-  background: #f3f4f6;
-  color: #2563eb;
-}
-
-.date-trigger-btn:focus-visible {
-  outline: 2px solid #2563eb;
-  outline-offset: 2px;
-}
-
-.date-icon {
-  width: 1rem;
-  height: 1rem;
-  pointer-events: none;
-=======
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-}
-
-.date-icon {
-  position: absolute;
-  left: 0.75rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: #6b7280;
-  pointer-events: none;
-  flex-shrink: 0;
-  transition: color 0.2s ease;
-  z-index: 1;
->>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
-}
 
 .custom-dropdown {
   position: relative;
@@ -1805,6 +1515,62 @@ td .set-name {
   background: #eff6ff;
   color: #2563eb;
   font-weight: 600;
+}
+
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.date-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.date-display {
+  padding: 0.5rem 0.75rem;
+  padding-right: 2rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  height: 44px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-icon {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.date-input-wrapper:focus-within .date-display {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .date-separator {
