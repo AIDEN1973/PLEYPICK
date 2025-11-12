@@ -131,6 +131,29 @@
       <div v-else class="analytics-dashboard">
         <div class="filters-section">
           <div class="filter-group">
+<<<<<<< HEAD
+=======
+            <label class="filter-label">통계 범위</label>
+            <div class="custom-dropdown" @click="toggleViewModeDropdown" v-click-outside="closeViewModeDropdown">
+              <div class="dropdown-trigger">
+                <span>{{ viewMode === 'my' ? '내 통계' : '전체 통계' }}</span>
+                <svg class="dropdown-arrow" :class="{ 'open': showViewModeDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div v-if="showViewModeDropdown" class="dropdown-menu">
+                <div class="dropdown-item" :class="{ 'active': viewMode === 'my' }" @click="selectViewMode('my')">
+                  내 통계
+                </div>
+                <div v-if="isAdmin" class="dropdown-item" :class="{ 'active': viewMode === 'all' }" @click="selectViewMode('all')">
+                  전체 통계
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="filter-group">
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
             <label class="filter-label">기간</label>
             <div class="date-range">
               <div class="date-input-wrapper">
@@ -139,6 +162,7 @@
                   v-model="dateFrom"
                   @change="loadAnalytics"
                   class="custom-date-input"
+<<<<<<< HEAD
                   ref="dateFromInput"
                 />
                 <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
@@ -150,6 +174,16 @@
                     <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </button>
+=======
+                />
+                <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
+                <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
               </div>
               <span class="date-separator">~</span>
               <div class="date-input-wrapper">
@@ -158,6 +192,7 @@
                   v-model="dateTo"
                   @change="loadAnalytics"
                   class="custom-date-input"
+<<<<<<< HEAD
                   ref="dateToInput"
                 />
                 <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
@@ -169,11 +204,22 @@
                     <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                   </svg>
                 </button>
+=======
+                />
+                <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
+                <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
               </div>
             </div>
           </div>
 
           <div class="filter-group">
+<<<<<<< HEAD
             <label class="filter-label">레고번호</label>
             <div class="set-search-field" ref="setSearchRef">
               <div class="set-search-input-row">
@@ -199,6 +245,29 @@
                   검색
                 </button>
                 <button @click="resetFilters" class="filter-reset-btn">초기화</button>
+=======
+            <label class="filter-label">세트</label>
+            <div class="custom-dropdown" @click="toggleSetDropdown" v-click-outside="closeSetDropdown">
+              <div class="dropdown-trigger">
+                <span>{{ selectedSetName || '전체' }}</span>
+                <svg class="dropdown-arrow" :class="{ 'open': showSetDropdown }" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <div v-if="showSetDropdown" class="dropdown-menu dropdown-menu-scrollable">
+                <div class="dropdown-item" :class="{ 'active': selectedSetId === '' }" @click="selectSet('', '전체')">
+                  전체
+                </div>
+                <div 
+                  v-for="set in availableSets" 
+                  :key="set.id" 
+                  class="dropdown-item" 
+                  :class="{ 'active': selectedSetId === set.id }" 
+                  @click="selectSet(set.id, set.name)"
+                >
+                  {{ set.name }}
+                </div>
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
               </div>
             </div>
           </div>
@@ -258,6 +327,43 @@
           </div>
         </div>
 
+<<<<<<< HEAD
+=======
+        <div class="timeline-section">
+          <h3>검수 타임라인</h3>
+          <div class="timeline-container">
+            <div
+              v-for="session in timelineSessions"
+              :key="session.id"
+              class="timeline-item"
+              @click="viewSession(session.id)"
+            >
+              <div class="timeline-marker" :class="`status-${session.status}`"></div>
+              <div class="timeline-content">
+                <div class="timeline-header">
+                  <span class="timeline-set-name">
+                    <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                    <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                    <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                    <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name }}</span>
+                    <span v-else>{{ session.set_name }}</span>
+                  </span>
+                  <span class="timeline-date">{{ formatDateShort(session.started_at) }}</span>
+                </div>
+                <div class="timeline-stats">
+                  <span class="stat-item">진행률: {{ session.progress || 0 }}%</span>
+                  <span class="stat-item" v-if="session.duration_seconds">소요: {{ formatDuration(session.duration_seconds) }}</span>
+                  <span class="stat-item error-text" v-if="session.missing_count">누락: {{ session.missing_count }}개</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="timelineSessions.length === 0" class="timeline-empty">
+              <p>검수 세션이 없습니다</p>
+            </div>
+          </div>
+        </div>
+
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
         <div class="sessions-table-section">
           <h3>최근 검수이력</h3>
           <div class="table-container">
@@ -276,10 +382,23 @@
                 <tr
                   v-for="session in recentSessions"
                   :key="session.id"
+<<<<<<< HEAD
                   @click="handleRowClick(session)"
                   :class="['table-row', { 'table-row-disabled': session.status === 'completed' }]"
                 >
                   <td class="set-name-cell">{{ formatSetDisplay(session.set_num, session.theme_name, session.set_name) }}</td> <!-- // 🔧 수정됨 -->
+=======
+                  @click="session.status !== 'completed' ? viewSession(session.id) : null"
+                  :class="['table-row', { 'table-row-clickable': session.status !== 'completed', 'table-row-completed': session.status === 'completed' }]"
+                >
+                  <td>
+                    <span v-if="session.set_num" class="set-num">{{ formatSetNum(session.set_num) }}</span>
+                    <span v-if="session.set_num && session.theme_name" class="separator">|</span>
+                    <span v-if="session.theme_name" class="theme-name">{{ session.theme_name }}</span>
+                    <span v-if="session.set_num || session.theme_name" class="set-name">{{ session.set_name }}</span>
+                    <span v-else>{{ session.set_name }}</span>
+                  </td>
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
                   <td>
                     <span class="status-badge" :class="`status-${session.status}`">
                       {{ statusLabel(session.status) }}
@@ -310,10 +429,16 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+<<<<<<< HEAD
 import { formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
 
 export default {
   name: 'InspectionHistory', // 🔧 수정됨
+=======
+
+export default {
+  name: 'InspectionAnalytics',
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
   directives: {
     'click-outside': {
       mounted(el, binding) {
@@ -343,10 +468,16 @@ export default {
     const dateFrom = ref('')
     const dateTo = ref('')
     const selectedSetId = ref('')
+<<<<<<< HEAD
     const setSearchQuery = ref('')
     const setSearchRef = ref(null)
     const dateFromInput = ref(null)
     const dateToInput = ref(null)
+=======
+    const selectedSetName = ref('전체')
+    const showViewModeDropdown = ref(false)
+    const showSetDropdown = ref(false)
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 
     const totalSessions = computed(() => sessions.value.length)
     const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
@@ -389,6 +520,15 @@ export default {
         .slice(0, 10)
     })
 
+<<<<<<< HEAD
+=======
+    const timelineSessions = computed(() => {
+      return [...sessions.value]
+        .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at))
+        .slice(0, 20)
+    })
+
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     const checkAdminRole = async () => {
       if (!user.value) {
         isAdmin.value = false
@@ -469,7 +609,9 @@ export default {
             last_saved_at,
             completed_at,
             lego_sets:set_id (
-              name
+              name,
+              set_num,
+              theme_id
             )
           `)
 
@@ -499,6 +641,20 @@ export default {
           .limit(1000)
 
         if (sessionsError) throw sessionsError
+
+        // theme 정보를 별도로 조회
+        const themeIds = [...new Set((sessionsData || []).map(s => s.lego_sets?.theme_id).filter(Boolean))]
+        let themesMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+          
+          if (themesData) {
+            themesMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
 
         const sessionIds = (sessionsData || []).map(s => s.id)
         let itemsData = []
@@ -557,12 +713,21 @@ export default {
               }, {}))
           }
 
+          const legoSet = session.lego_sets
+          const themeName = legoSet?.theme_id ? themesMap.get(legoSet.theme_id) : null
+          
           return {
             id: session.id,
             set_id: session.set_id,
+<<<<<<< HEAD
             set_name: session.lego_sets?.name || meta.set_name || '세트명 없음',
             set_num: meta.set_num || null,
             theme_name: meta.theme_name || null,
+=======
+            set_name: legoSet?.name || '세트명 없음',
+            set_num: legoSet?.set_num || null,
+            theme_name: themeName || null,
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
             status: session.status,
             progress: session.progress || 0,
             started_at: session.started_at,
@@ -624,6 +789,7 @@ export default {
       const month = String(date.getMonth() + 1).padStart(2, '0')
       const day = String(date.getDate()).padStart(2, '0')
       return `${year}. ${month}. ${day}.`
+<<<<<<< HEAD
     }
 
     const handleRowClick = (sessionData) => { // 🔧 수정됨
@@ -699,6 +865,60 @@ export default {
       selectedSetId.value = ''
       setSearchQuery.value = ''
       await loadAnalytics()
+=======
+    }
+
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
+    }
+
+    const viewSession = (sessionId) => {
+      router.push(`/manual-inspection?session=${sessionId}`)
+    }
+
+    const toggleViewModeDropdown = () => {
+      showViewModeDropdown.value = !showViewModeDropdown.value
+      showSetDropdown.value = false
+    }
+
+    const closeViewModeDropdown = () => {
+      showViewModeDropdown.value = false
+    }
+
+    const selectViewMode = (mode) => {
+      viewMode.value = mode
+      showViewModeDropdown.value = false
+      loadAnalytics()
+    }
+
+    const toggleSetDropdown = () => {
+      showSetDropdown.value = !showSetDropdown.value
+      showViewModeDropdown.value = false
+    }
+
+    const closeSetDropdown = () => {
+      showSetDropdown.value = false
+    }
+
+    const selectSet = (setId, setName) => {
+      selectedSetId.value = setId
+      selectedSetName.value = setName
+      showSetDropdown.value = false
+      loadAnalytics()
+    }
+
+    const resetFilters = () => {
+      viewMode.value = 'my'
+      dateFrom.value = ''
+      dateTo.value = ''
+      selectedSetId.value = ''
+      selectedSetName.value = '전체'
+      showViewModeDropdown.value = false
+      showSetDropdown.value = false
+      loadAnalytics()
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     }
 
     const initializeDateRange = () => {
@@ -717,6 +937,15 @@ export default {
       loadAnalytics()
     })
 
+    onUnmounted(() => {
+      if (showViewModeDropdown.value) {
+        showViewModeDropdown.value = false
+      }
+      if (showSetDropdown.value) {
+        showSetDropdown.value = false
+      }
+    })
+
     return {
       loading,
       error,
@@ -727,14 +956,24 @@ export default {
       missingRate,
       averageDurationLabel,
       recentSessions,
+<<<<<<< HEAD
+=======
+      timelineSessions,
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
       statusLabel,
       formatDate,
       formatDuration,
       formatDateDisplay,
+<<<<<<< HEAD
+=======
+      formatSetNum,
+      viewSession,
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
       isAdmin,
       dateFrom,
       dateTo,
       selectedSetId,
+<<<<<<< HEAD
       setSearchQuery,
       handleSetSearch,
       resetFilters,
@@ -744,6 +983,19 @@ export default {
       focusDateInput,
       dateFromInput,
       dateToInput
+=======
+      selectedSetName,
+      availableSets,
+      showViewModeDropdown,
+      showSetDropdown,
+      toggleViewModeDropdown,
+      closeViewModeDropdown,
+      selectViewMode,
+      toggleSetDropdown,
+      closeSetDropdown,
+      selectSet,
+      resetFilters
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
     }
   }
 }
@@ -758,6 +1010,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
+  text-align: center;
 }
 
 .page-header h1 {
@@ -874,6 +1127,155 @@ export default {
   position: relative;
 }
 
+<<<<<<< HEAD
+=======
+.timeline-section {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.timeline-section h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 1rem 0;
+}
+
+.timeline-container {
+  position: relative;
+  padding-left: 2rem;
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.timeline-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: -1.75rem;
+  top: 1.5rem;
+  width: 2px;
+  height: calc(100% - 0.5rem);
+  background: #e5e7eb;
+}
+
+.timeline-item:hover {
+  opacity: 0.8;
+}
+
+.timeline-marker {
+  position: absolute;
+  left: -2rem;
+  top: 0.25rem;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 2px #e5e7eb;
+  z-index: 1;
+}
+
+.timeline-marker.status-completed {
+  background: #10b981;
+  box-shadow: 0 0 0 2px #10b981;
+}
+
+.timeline-marker.status-paused {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px #f59e0b;
+}
+
+.timeline-marker.status-in_progress {
+  background: #2563eb;
+  box-shadow: 0 0 0 2px #2563eb;
+}
+
+.timeline-content {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.timeline-set-name {
+  font-weight: 600;
+  color: #111827;
+  font-size: 0.875rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.timeline-set-name .set-num,
+td .set-num {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.timeline-set-name .separator,
+td .separator {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.timeline-set-name .theme-name,
+td .theme-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.timeline-set-name .set-name,
+td .set-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.timeline-date {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.timeline-stats {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.timeline-stats .stat-item {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.timeline-stats .stat-item.error-text {
+  color: #dc2626;
+}
+
+.timeline-empty {
+  text-align: center;
+  padding: 2rem;
+  color: #6b7280;
+}
+
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 .sessions-table-section {
   background: #ffffff;
   border: 1px solid #e5e7eb;
@@ -903,7 +1305,11 @@ export default {
 }
 
 .sessions-table th {
+<<<<<<< HEAD
   padding: 1.1rem 1rem;
+=======
+  padding: 0.75rem 1rem;
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
   text-align: center;
   font-size: 0.875rem;
   font-weight: 600;
@@ -918,6 +1324,7 @@ export default {
   color: #111827;
   border-bottom: 1px solid #f3f4f6;
   text-align: center;
+<<<<<<< HEAD
 }
 
 .set-name-cell { /* // 🔧 수정됨 */
@@ -925,13 +1332,15 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+=======
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .table-row {
-  cursor: pointer;
   transition: background 0.2s ease;
 }
 
+<<<<<<< HEAD
 .table-row-disabled { /* // 🔧 수정됨 */
   cursor: default; /* // 🔧 수정됨 */
   pointer-events: none; /* // 🔧 수정됨 */
@@ -949,6 +1358,18 @@ export default {
 .table-row-disabled .status-badge { /* // 🔧 수정됨 */
   background: #e5e7eb; /* // 🔧 수정됨 */
   color: #6b7280; /* // 🔧 수정됨 */
+=======
+.table-row-clickable {
+  cursor: pointer;
+}
+
+.table-row-clickable:hover {
+  background: #f9fafb;
+}
+
+.table-row-completed {
+  cursor: default;
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .status-badge {
@@ -1034,6 +1455,7 @@ export default {
   color: #374151;
 }
 
+<<<<<<< HEAD
 .set-search-field {
   position: relative;
 }
@@ -1173,6 +1595,8 @@ export default {
   color: #6b7280;
 }
 
+=======
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 .date-range {
   display: flex;
   align-items: center;
@@ -1185,9 +1609,22 @@ export default {
   min-width: 0;
 }
 
+<<<<<<< HEAD
 .custom-date-input {
   position: absolute;
   inset: 0;
+=======
+.date-input-wrapper:focus-within .date-icon {
+  color: #2563eb;
+}
+
+.custom-date-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
   opacity: 0;
   cursor: pointer;
   z-index: 2;
@@ -1195,6 +1632,7 @@ export default {
 
 .date-display {
   width: 100%;
+<<<<<<< HEAD
   padding: 0.75rem 2.5rem 0.75rem 1rem;
   border: 1px solid #d1d5db;
   border-radius: 10px;
@@ -1212,6 +1650,21 @@ export default {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+=======
+  padding: 0.5rem 0.75rem 0.5rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  color: #111827;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .date-display:empty::before {
@@ -1225,6 +1678,7 @@ export default {
 
 .date-input-wrapper:focus-within .date-display {
   border-color: #2563eb;
+<<<<<<< HEAD
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
 
@@ -1260,6 +1714,21 @@ export default {
   width: 1rem;
   height: 1rem;
   pointer-events: none;
+=======
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.date-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+  z-index: 1;
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b
 }
 
 .custom-dropdown {

@@ -112,8 +112,13 @@
             </div>
           </div>
           <div class="set-info">
-            <h4>{{ set.name }}</h4>
-            <p class="set-number">{{ set.set_num }}</p>
+            <h4>
+              <span v-if="set.set_num" class="set-num">{{ formatSetNum(set.set_num) }}</span>
+              <span v-if="set.set_num && set.theme_name" class="separator">|</span>
+              <span v-if="set.theme_name" class="theme-name">{{ set.theme_name }}</span>
+              <span v-if="set.set_num || set.theme_name" class="set-name">{{ set.name }}</span>
+              <span v-else>{{ set.name }}</span>
+            </h4>
             <p class="set-year">{{ set.year }}년</p>
             <p class="set-pieces">{{ set.num_parts }}개 부품</p>
             <div class="set-actions">
@@ -156,8 +161,14 @@
                   🖼️
                 </div>
               </td>
-              <td>{{ set.set_num }}</td>
-              <td>{{ set.name }}</td>
+              <td>{{ formatSetNum(set.set_num) }}</td>
+              <td>
+                <span v-if="set.set_num && set.theme_name" class="set-num">{{ formatSetNum(set.set_num) }}</span>
+                <span v-if="set.set_num && set.theme_name" class="separator">|</span>
+                <span v-if="set.theme_name" class="theme-name">{{ set.theme_name }}</span>
+                <span v-if="set.set_num || set.theme_name" class="set-name">{{ set.name }}</span>
+                <span v-else>{{ set.name }}</span>
+              </td>
               <td>{{ set.year }}</td>
               <td>{{ set.num_parts }}</td>
               <td>{{ formatDate(set.created_at) }}</td>
@@ -196,7 +207,13 @@
     <div v-if="selectedSet" class="modal-overlay" @click="closeModal">
       <div class="modal-content" @click.stop>
         <div class="modal-header">
-          <h2>{{ selectedSet.name }}</h2>
+          <h2>
+            <span v-if="selectedSet.set_num" class="set-num">{{ formatSetNum(selectedSet.set_num) }}</span>
+            <span v-if="selectedSet.set_num && selectedSet.theme_name" class="separator">|</span>
+            <span v-if="selectedSet.theme_name" class="theme-name">{{ selectedSet.theme_name }}</span>
+            <span v-if="selectedSet.set_num || selectedSet.theme_name" class="set-name">{{ selectedSet.name }}</span>
+            <span v-else>{{ selectedSet.name }}</span>
+          </h2>
           <button @click="closeModal" class="close-btn">&times;</button>
         </div>
         
@@ -814,10 +831,9 @@ export default {
         return part.supabase_image_url
       }
       
-      // 2. Rebrickable CDN URL을 프록시를 통해 로드
+      // 2. Rebrickable CDN URL 직접 사용 (프록시 불필요)
       if (part.lego_parts?.part_img_url) {
-        // 프록시 서버를 통해 이미지 로드
-        return `/api/upload/proxy-image?url=${encodeURIComponent(part.lego_parts.part_img_url)}`
+        return part.lego_parts.part_img_url
       }
       
       // 3. 실제 이미지 로드 시도
@@ -1109,6 +1125,12 @@ export default {
     // 날짜 포맷팅
     const formatDate = (dateString) => {
       return new Date(dateString).toLocaleDateString('ko-KR')
+    }
+
+    const formatSetNum = (setNum) => {
+      if (!setNum) return ''
+      // -1, -2 같은 접미사 제거 및 공백 제거
+      return String(setNum).replace(/-\d+$/, '').trim()
     }
 
     // 이미지 오류 처리
@@ -1510,6 +1532,7 @@ export default {
       deleteSet,
       closeModal,
       formatDate,
+      formatSetNum,
       handleImageError,
       uniquePartsCount,
       toggleMetadata,
@@ -1738,6 +1761,34 @@ export default {
 .set-info h4 {
   font-size: 1.1rem;
   margin-bottom: 0.5rem;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.set-info h4 .set-num {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-info h4 .separator {
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: #6b7280;
+}
+
+.set-info h4 .theme-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.set-info h4 .set-name {
+  font-size: 1.1rem;
+  font-weight: 600;
   color: #333;
 }
 

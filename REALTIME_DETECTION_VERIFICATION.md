@@ -430,3 +430,7 @@ const targetH = Math.round(srcH * (targetW / srcW))
 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b

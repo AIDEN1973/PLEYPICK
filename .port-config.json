@@ -10,7 +10,7 @@
   "manualUploadApi": 3030,
   "monitoring": 3040,
   "trainingExecutor": 3012,
-  "timestamp": "2025-11-12T07:51:21.921Z",
+  "timestamp": "2025-11-09T06:35:12.410Z",
   "services": {
     "frontend": {
       "port": 3000,

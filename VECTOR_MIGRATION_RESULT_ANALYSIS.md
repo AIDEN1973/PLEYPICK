@@ -72,3 +72,7 @@ SELECT * FROM v_embedding_status LIMIT 5;
 
 
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 87039ac2483fb2cfc80115fa29c3e4f844a1454b

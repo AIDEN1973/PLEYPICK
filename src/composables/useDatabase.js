@@ -303,7 +303,46 @@ export function useDatabase() {
     try {
       console.log(`Inserting set-part relationship: set_id=${setId}, part_id=${partId}, color_id=${colorId}, element_id=${elementId}`)
 
-      // 1) 기존 존재 여부 확인 (set_id + part_id + color_id 기준)
+      // 1) element_id가 있는 경우, 전역적으로 element_id 기준으로 중복 체크 (다른 세트에 이미 등록된 경우)
+      if (elementId) {
+        // 먼저 현재 세트에서 동일 element_id가 있는지 확인
+        const { data: existingInSet, error: setElementError } = await supabase
+          .from('set_parts')
+          .select('id, quantity, part_id, color_id')
+          .eq('set_id', setId)
+          .eq('element_id', elementId)
+          .maybeSingle()
+
+        if (setElementError && setElementError.code !== 'PGRST116') {
+          console.warn('Warning checking existing set-part by element_id in set:', setElementError)
+        }
+
+        if (existingInSet) {
+          console.log(`Duplicate set-part detected by element_id=${elementId} in same set, skipping insert`)
+          return { id: existingInSet.id, set_id: setId, part_id: existingInSet.part_id, color_id: existingInSet.color_id, quantity: existingInSet.quantity }
+        }
+
+        // 다른 세트에서 동일 element_id가 이미 등록되어 있는지 확인
+        const { data: existingInOtherSet, error: globalElementError } = await supabase
+          .from('set_parts')
+          .select('id, set_id, part_id, color_id')
+          .eq('element_id', elementId)
+          .neq('set_id', setId)
+          .limit(1)
+          .maybeSingle()
+
+        if (globalElementError && globalElementError.code !== 'PGRST116') {
+          console.warn('Warning checking existing set-part by element_id globally:', globalElementError)
+        }
+
+        if (existingInOtherSet) {
+          console.log(`⚠️ 동일 element_id=${elementId} 부품이 다른 세트(set_id=${existingInOtherSet.set_id})에 이미 등록되어 있습니다. 세트-부품 관계만 저장합니다.`)
+          // 다른 세트에 이미 등록되어 있어도 현재 세트의 set_parts에는 저장해야 함
+          // (세트별 부품 정보는 필요하므로)
+        }
+      }
+
+      // 2) element_id가 없거나 element_id 기준으로 중복이 없는 경우, set_id + part_id + color_id 기준으로 중복 체크
       const { data: existing, error: existError } = await supabase
         .from('set_parts')
         .select('id, quantity')
@@ -419,12 +458,31 @@ export function useDatabase() {
 
       const { data, error: dbError } = await supabase
         .from('lego_sets')
-        .select('*, webp_image_url')
+        .select('*, webp_image_url, theme_id')
         .order('created_at', { ascending: false })
         .range(from, to)
 
       if (dbError) throw dbError
-      return data
+      
+      // theme 정보를 별도로 조회
+      const themeIds = [...new Set((data || []).map(s => s.theme_id).filter(Boolean))]
+      let themesMap = new Map()
+      if (themeIds.length > 0) {
+        const { data: themesData } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .in('theme_id', themeIds)
+        
+        if (themesData) {
+          themesMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+        }
+      }
+      
+      // theme_name 추가
+      return (data || []).map(set => ({
+        ...set,
+        theme_name: set.theme_id ? themesMap.get(set.theme_id) : null
+      }))
     } catch (err) {
       error.value = err.message
       throw err
