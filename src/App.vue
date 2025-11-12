@@ -22,7 +22,7 @@
                     class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                     active-class="nav-menu-active"
                   >
-                    검수시작
+                    부품검수
                   </router-link>
                   <router-link 
                     v-if="user"
@@ -55,6 +55,14 @@
                     active-class="nav-menu-active"
                   >
                     누락부품
+                  </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/set-parts" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    세트부품
                   </router-link>
 
                   <!-- 관리 드롭다운 -->
@@ -175,6 +183,14 @@
                     :class="{ 'mobile-dropdown-item-active': isActiveRoute('/missing-parts') }"
                   >
                     누락부품
+                  </router-link>
+                  <router-link 
+                    to="/set-parts" 
+                    @click="showMobileMenu = false"
+                    class="mobile-dropdown-item"
+                    :class="{ 'mobile-dropdown-item-active': isActiveRoute('/set-parts') }"
+                  >
+                    세트부품
                   </router-link>
                   <div v-if="isAdmin" class="mobile-dropdown-divider">
                     <div class="mobile-dropdown-label">관리</div>

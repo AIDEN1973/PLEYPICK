@@ -46,10 +46,21 @@
 
       <div v-if="searchResult" class="result-section">
         <div class="result-header">
-          <h3>검색 결과</h3>
+          <h3>검색결과</h3>
           <div class="result-info">
-            <span class="part-name">{{ searchResult.part_name }}</span>
-            <span class="part-color">{{ searchResult.color_name }}</span>
+            <div v-if="searchResult.part_image_url" class="result-part-image">
+              <img
+                :src="searchResult.part_image_url"
+                :alt="searchResult.part_name"
+                @error="handlePartImageError"
+              />
+            </div>
+            <div class="result-part-details">
+              <div v-if="searchResult.element_id" class="element-id-badge" :style="{ backgroundColor: getColorRgb(searchResult.color_rgb) || '#f3f4f6', color: getContrastColor(searchResult.color_rgb) }">
+                {{ searchResult.element_id }}
+              </div>
+              <span class="part-name">{{ searchResult.part_name }}</span>
+            </div>
           </div>
         </div>
 
@@ -227,12 +238,47 @@ export default {
         // 색상 정보 가져오기
         const { data: colorInfo, error: colorError } = await supabase
           .from('lego_colors')
-          .select('color_id, name')
+          .select('color_id, name, rgb')
           .eq('color_id', setPart.color_id)
           .maybeSingle()
 
         if (colorError) {
           throw new Error(`색상 정보 조회 실패: ${colorError.message}`)
+        }
+
+        // 부품 이미지 URL 조회: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+        let partImageUrl = null
+        
+        if (elementIdInput.value.trim()) {
+          // element_id로 먼저 조회
+          const { data: partImageByElement, error: elementError } = await supabase
+            .from('part_images')
+            .select('uploaded_url')
+            .eq('element_id', String(elementIdInput.value.trim()))
+            .maybeSingle()
+
+          if (!elementError && partImageByElement?.uploaded_url) {
+            partImageUrl = partImageByElement.uploaded_url
+          }
+        }
+
+        // element_id로 찾지 못했으면 part_id + color_id로 조회
+        if (!partImageUrl) {
+          const { data: partImage, error: partImageError } = await supabase
+            .from('part_images')
+            .select('uploaded_url')
+            .eq('part_id', setPart.part_id)
+            .eq('color_id', setPart.color_id)
+            .maybeSingle()
+
+          if (!partImageError && partImage?.uploaded_url) {
+            partImageUrl = partImage.uploaded_url
+          }
+        }
+
+        // part_images에서 찾지 못했으면 part_img_url 사용
+        if (!partImageUrl && partInfo?.part_img_url) {
+          partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
         }
 
         // 세트 찾기
@@ -308,6 +354,8 @@ export default {
           color_id: setPart.color_id,
           part_name: partInfo?.name || setPart.part_id,
           color_name: colorInfo?.name || `Color ${setPart.color_id}`,
+          color_rgb: colorInfo?.rgb || null,
+          part_image_url: partImageUrl,
           sets: sets,
           alternatives: alternatives
         }
@@ -468,6 +516,7 @@ export default {
       const img = event.target
       const partCard = img.closest('.alternative-part-card')
       if (!partCard) {
+        // 검색 결과 이미지인 경우
         img.style.display = 'none'
         return
       }
@@ -516,13 +565,13 @@ export default {
 }
 
 .page-header {
-  padding-top: 2rem;
-  margin-bottom: 0;
+  margin-bottom: 2rem;
+  padding: 2rem 0 0 0;
 }
 
 .search-content {
   flex: 1;
-  padding: 2rem;
+  padding: 0 2rem 2rem 2rem;
   overflow-y: auto;
 }
 
@@ -547,6 +596,9 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
 }
 
 .setup-card {
@@ -589,6 +641,9 @@ export default {
   font-weight: 500;
   color: #374151;
   margin-bottom: 0.5rem;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
 }
 
 .set-search-input-row {
@@ -671,9 +726,9 @@ export default {
 }
 
 .search-button:disabled {
-  background: #2563eb;
+  background: #9ca3af;
   cursor: not-allowed;
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .error-message {
@@ -709,6 +764,40 @@ export default {
   display: flex;
   gap: 1rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.result-part-image {
+  width: 120px;
+  height: 120px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.result-part-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
+.result-part-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.result-info .element-id-badge {
+  margin-bottom: 0;
+  width: fit-content;
+  align-self: flex-start;
 }
 
 .part-name {
@@ -727,8 +816,15 @@ export default {
 
 .sets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .sets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
 }
 
 .set-card {
@@ -747,8 +843,8 @@ export default {
 
 .set-image {
   width: 100%;
-  height: 200px;
-  background: #f3f4f6;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -756,9 +852,9 @@ export default {
 }
 
 .set-image img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
 }
 
 .no-image {
@@ -909,15 +1005,18 @@ export default {
 
 @media (max-width: 768px) {
   .page-header {
-    padding-top: 1rem;
+    margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
   }
 
   .search-content {
-    padding: 1.5rem;
+    padding: 0 1.5rem 1.5rem 1.5rem;
   }
 
   .search-section {
-    gap: 1rem;
+    max-width: 100%;
+    margin-bottom: 1.5rem;
+    padding: 0;
   }
 
   .setup-card {
@@ -944,6 +1043,14 @@ export default {
   .search-button {
     width: auto;
     white-space: nowrap;
+  }
+
+  .set-search-input {
+    font-size: 0.9375rem !important;
+  }
+
+  .search-button {
+    font-size: 0.875rem !important;
   }
 
   .sets-grid {
@@ -1006,6 +1113,17 @@ export default {
 
   .result-info {
     font-size: 0.875rem !important;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .result-part-image {
+    width: 100px;
+    height: 100px;
+  }
+
+  .result-part-details {
+    width: 100%;
   }
 
   .set-info {

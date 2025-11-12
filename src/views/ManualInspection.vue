@@ -38,7 +38,7 @@
         </header>
 
         <div class="panel-content">
-          <div v-if="!session.id" class="session-setup">
+          <div v-if="!session.id" class="search-section">
             <div class="setup-card">
               <div class="card-body">
                 <div class="form-group">
@@ -95,8 +95,8 @@
                     </div>
                   </div>
                 </div>
-                <button 
-                  @click="handleStartNewSession" 
+                <button
+                  @click="handleStartNewSession"
                   :disabled="!selectedSetId || loading"
                   class="btn-primary"
                 >
@@ -2660,8 +2660,7 @@ export default {
 <style scoped>
 .pleyon-layout {
   min-height: 100vh;
-  background: transparent;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  background: #f9fafb;
   padding: 2rem;
 }
 
@@ -2670,8 +2669,8 @@ export default {
 }
 
 .layout-container {
-  display: flex;
-  min-height: calc(100vh - 0px);
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .main-panel {
@@ -2683,6 +2682,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
+  padding: 0;
 }
 
 .page-header h1 {
@@ -2865,14 +2865,29 @@ export default {
   flex: 1;
   padding: 0;
   overflow-y: auto;
+  background: transparent;
+}
+
+.search-section {
+  max-width: 800px;
+  margin: 0 auto 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
 }
 
 .session-setup {
   max-width: 800px;
-  margin: 0 auto;
+  margin: 0 auto 2rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
 }
 
 .setup-card {
@@ -2916,16 +2931,20 @@ export default {
   margin-bottom: 0rem;
 }
 
-.card-body > .btn-primary {
-  margin-top: 0;
-}
-
 .form-group label {
   display: block;
   font-size: 0.875rem;
   font-weight: 500;
   color: #374151;
   margin-bottom: 0.5rem;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
+}
+
+.card-body > .btn-primary {
+  margin-top: 0;
+  width: 100%;
 }
 
 .set-search-wrapper {
@@ -4439,7 +4458,6 @@ export default {
 
   .pleyon-layout {
     padding: 1rem;
-    padding-bottom: 4.5rem;
   }
 
   .pleyon-layout:has(.grid-mode-bottom-actions) {
@@ -4447,21 +4465,28 @@ export default {
   }
 
   .page-header {
-    margin-bottom: 2rem !important;
+    margin-bottom: 1rem;
+    padding: 0;
   }
 
   .page-header h1 {
     font-size: 1.25rem !important;
-    margin-bottom: 0.5rem !important;
   }
 
   .page-header p {
     font-size: 0.875rem !important;
-    margin: 0 !important;
+  }
+
+  .search-section {
+    max-width: 100%;
+    margin-bottom: 1.5rem;
+    padding: 0;
   }
 
   .session-setup {
-    gap: 1rem;
+    max-width: 100%;
+    margin-bottom: 1.5rem;
+    padding: 0;
   }
 
   .setup-card {

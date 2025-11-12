@@ -32,6 +32,7 @@ import InspectionAnalytics from './views/InspectionAnalytics.vue'
 import InspectionNotes from './views/InspectionNotes.vue'
 import PartToSetSearch from './views/PartToSetSearch.vue'
 import MissingParts from './views/MissingParts.vue'
+import SetParts from './views/SetParts.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -63,7 +64,8 @@ const routes = [
   { path: '/inspection-history', name: 'InspectionHistory', component: InspectionAnalytics },
   { path: '/inspection-notes', name: 'InspectionNotes', component: InspectionNotes },
   { path: '/part-to-set-search', name: 'PartToSetSearch', component: PartToSetSearch },
-  { path: '/missing-parts', name: 'MissingParts', component: MissingParts }
+  { path: '/missing-parts', name: 'MissingParts', component: MissingParts },
+  { path: '/set-parts', name: 'SetParts', component: SetParts }
 ]
 
 const router = createRouter({
