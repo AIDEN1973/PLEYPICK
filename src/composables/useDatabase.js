@@ -360,7 +360,7 @@ export function useDatabase() {
     }
   }
 
-  // 부품 이미지 정보 저장
+  // 부품 이미지 정보 저장 (element_id 지원)
   const savePartImage = async (imageData) => {
     loading.value = true
     error.value = null
@@ -380,7 +380,8 @@ export function useDatabase() {
           image_height: imageData.image_height,
           download_status: imageData.download_status || 'pending',
           upload_status: imageData.upload_status || 'pending',
-          error_message: imageData.error_message
+          error_message: imageData.error_message,
+          ...(imageData.element_id && { element_id: String(imageData.element_id) })
         })
         .select()
 
@@ -548,8 +549,8 @@ export function useDatabase() {
     }
   }
 
-  // 부품 이미지 목록 조회
-  const getPartImages = async (partId, colorId = null) => {
+  // 부품 이미지 목록 조회 (element_id 우선 지원)
+  const getPartImages = async (partId, colorId = null, elementId = null) => {
     loading.value = true
     error.value = null
 
@@ -561,10 +562,16 @@ export function useDatabase() {
           lego_parts(*),
           lego_colors(*)
         `)
-        .eq('part_id', partId)
 
-      if (colorId) {
-        query = query.eq('color_id', colorId)
+      // element_id가 있으면 element_id로 우선 조회
+      if (elementId) {
+        query = query.eq('element_id', String(elementId))
+      } else {
+        // element_id가 없으면 part_id + color_id로 조회
+        query = query.eq('part_id', partId)
+        if (colorId) {
+          query = query.eq('color_id', colorId)
+        }
       }
 
       const { data, error: dbError } = await query

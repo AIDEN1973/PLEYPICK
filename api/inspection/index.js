@@ -66,7 +66,6 @@ async function handleCreateSession(req, res) {
       status: status || 'in_progress',
       started_at: started_at || new Date().toISOString(),
       last_saved_at: last_saved_at || new Date().toISOString(),
-      is_synced: true,
       updated_at: new Date().toISOString()
     }
 
@@ -123,7 +122,6 @@ async function handleUpsertItems(req, res) {
       total_count: item.total_count,
       status: item.status || 'pending',
       notes: item.notes || null,
-      is_dirty: false,
       updated_at: item.updated_at || new Date().toISOString()
     }))
 

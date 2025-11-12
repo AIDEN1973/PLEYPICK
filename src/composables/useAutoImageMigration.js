@@ -26,7 +26,8 @@ export function useAutoImageMigration() {
    * 부품 이미지 자동 마이그레이션 (캐싱 및 중복 방지)
    */
   const migratePartImage = async (partNum, colorId, originalUrl, options = {}) => {
-    const cacheKey = `${partNum}_${colorId}`
+    const elementId = options?.elementId || null
+    const cacheKey = elementId ? `element_${String(elementId)}` : `${partNum}_${colorId}`
     
     try {
       // 1. 캐시 확인
@@ -70,18 +71,19 @@ export function useAutoImageMigration() {
    * 실제 마이그레이션 수행
    */
   const performMigration = async (partNum, colorId, originalUrl, options = {}) => {
+    const elementId = options?.elementId || null
     try {
       // 1. 이미 Supabase Storage에 있는지 확인 (강제 재업로드 옵션)
       const forceReupload = options?.force || false
       if (!forceReupload) {
-        const existingImage = await checkExistingSupabaseImage(partNum, colorId)
+        const existingImage = await checkExistingSupabaseImage(partNum, colorId, elementId)
         if (existingImage) {
-          console.log(`✅ 이미 Supabase Storage에 존재: ${partNum}`)
+          console.log(`✅ 이미 Supabase Storage에 존재: ${partNum}${elementId ? ` (element_id: ${elementId})` : ''}`)
           migrationStats.value.skipped++
           return existingImage
         }
       } else {
-        console.log(`🔄 강제 재업로드 모드: ${partNum}`)
+        console.log(`🔄 강제 재업로드 모드: ${partNum}${elementId ? ` (element_id: ${elementId})` : ''}`)
       }
 
       // 2. 이미지 다운로드 (여러 방법 시도)
@@ -123,10 +125,10 @@ export function useAutoImageMigration() {
         webpBlob = imageBlob
       }
       
-      // 4. Supabase Storage에 업로드
+      // 4. Supabase Storage에 업로드 (element_id 전달)
       let uploadResult
       try {
-        uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload })
+        uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload, elementId })
       } catch (uploadError) {
         console.warn(`⚠️ Supabase 업로드 실패, 원본 URL 유지: ${uploadError.message}`)
         migrationStats.value.skipped++
@@ -135,7 +137,7 @@ export function useAutoImageMigration() {
       
       // 5. 데이터베이스에 등록 (실패해도 계속 진행)
       try {
-        await registerInDatabase(partNum, colorId, originalUrl, uploadResult.url)
+        await registerInDatabase(partNum, colorId, originalUrl, uploadResult.url, elementId)
       } catch (dbError) {
         console.warn(`⚠️ 데이터베이스 등록 실패하지만 마이그레이션은 성공: ${partNum}`, dbError)
         // 데이터베이스 등록 실패해도 마이그레이션은 성공으로 간주
@@ -157,11 +159,40 @@ export function useAutoImageMigration() {
   }
 
   /**
-   * 기존 Supabase Storage 이미지 확인
+   * 기존 Supabase Storage 이미지 확인 (element_id 우선)
    */
-  const checkExistingSupabaseImage = async (partNum, colorId) => {
+  const checkExistingSupabaseImage = async (partNum, colorId, elementId = null) => {
     try {
-      // part_images 테이블에서 확인
+      // 1. element_id가 있으면 element_id로 먼저 확인
+      if (elementId) {
+        const { data: partImageByElement } = await supabase
+          .from('part_images')
+          .select('uploaded_url')
+          .eq('element_id', String(elementId))
+          .not('uploaded_url', 'is', null)
+          .maybeSingle()
+        
+        if (partImageByElement?.uploaded_url) {
+          // JPG는 존재로 간주하지 않음 (webp만 인정)
+          if (!partImageByElement.uploaded_url.toLowerCase().endsWith('.jpg')) {
+            try {
+              const response = await fetch(partImageByElement.uploaded_url, { 
+                method: 'HEAD',
+                signal: AbortSignal.timeout(3000)
+              })
+              const contentType = response.headers.get('content-type')
+              const isJsonError = contentType && contentType.includes('application/json')
+              if (!isJsonError && response.ok) {
+                return partImageByElement.uploaded_url
+              }
+            } catch (error) {
+              // 조용히 실패 처리
+            }
+          }
+        }
+      }
+      
+      // 2. part_images 테이블에서 part_id + color_id로 확인
       const { data: partImage } = await supabase
         .from('part_images')
         .select('uploaded_url')
@@ -225,11 +256,11 @@ export function useAutoImageMigration() {
         }
       }
 
-      // Storage에서 직접 확인 (여러 경로 시도, 조용한 확인)
-      // webp만 인정하여 확인 (표준 경로만 확인)
-      const possiblePaths = [
-        `images/${partNum}_${colorId}.webp`
-      ]
+      // 3. Storage에서 직접 확인 (element_id 우선, 여러 경로 시도)
+      // webp만 인정하여 확인
+      const possiblePaths = elementId
+        ? [`images/${String(elementId)}.webp`, `images/${partNum}_${colorId}.webp`]
+        : [`images/${partNum}_${colorId}.webp`]
 
       for (const path of possiblePaths) {
         try {
@@ -436,10 +467,11 @@ export function useAutoImageMigration() {
   }
 
   /**
-   * Supabase Storage에 업로드
+   * Supabase Storage에 업로드 (element_id 지원)
    */
   const uploadToSupabase = async (partNum, colorId, webpBlob, options = {}) => {
-    const fileName = `${partNum}_${colorId}.webp`
+    const elementId = options?.elementId || null
+    const fileName = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`
     const filePath = `images/${fileName}`
     
     try {
@@ -494,10 +526,12 @@ export function useAutoImageMigration() {
   }
 
   /**
-   * 데이터베이스에 등록 (간단한 방식)
+   * 데이터베이스에 등록 (element_id 지원)
    */
-  const registerInDatabase = async (partNum, colorId, originalUrl, supabaseUrl) => {
+  const registerInDatabase = async (partNum, colorId, originalUrl, supabaseUrl, elementId = null) => {
     try {
+      const fileName = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`
+      
       // part_images 테이블에 간단히 삽입 시도 (스키마에 맞게 수정)
       const { error: insertError } = await supabase
         .from('part_images')
@@ -506,39 +540,70 @@ export function useAutoImageMigration() {
           color_id: colorId,
           original_url: originalUrl,
           uploaded_url: supabaseUrl,
-          filename: `${partNum}_${colorId}.webp`,
+          filename: fileName,
+          ...(elementId && { element_id: String(elementId) }),
           image_format: 'webp',
           upload_status: 'completed',
           download_status: 'completed'
         })
       
       if (insertError) {
-        // 삽입 실패 시 업데이트 시도
-        console.log(`📝 삽입 실패, 업데이트 시도: ${partNum}_${colorId}`)
-        const { error: updateError } = await supabase
-          .from('part_images')
-          .update({
-            original_url: originalUrl,
-            uploaded_url: supabaseUrl,
-            filename: `${partNum}_${colorId}.webp`,
-            image_format: 'webp',
-            upload_status: 'completed',
-            download_status: 'completed'
-          })
-          .eq('part_id', partNum)
-          .eq('color_id', colorId)
+        // 삽입 실패 시 업데이트 시도 (element_id 우선)
+        console.log(`📝 삽입 실패, 업데이트 시도: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`)
         
-        if (updateError) {
-          console.warn('part_images 테이블 등록 실패:', updateError)
-        } else {
-          console.log(`✅ 데이터베이스 업데이트 완료: ${partNum}_${colorId}`)
+        // element_id 우선 업데이트 시도
+        let updated = false
+        if (elementId) {
+          const { error: elementUpdateError } = await supabase
+            .from('part_images')
+            .update({
+              original_url: originalUrl,
+              uploaded_url: supabaseUrl,
+              filename: fileName,
+              element_id: String(elementId),
+              image_format: 'webp',
+              upload_status: 'completed',
+              download_status: 'completed'
+            })
+            .eq('element_id', String(elementId))
+          
+          if (!elementUpdateError) {
+            updated = true
+            console.log(`✅ 데이터베이스 업데이트 완료 (element_id): ${elementId}`)
+          }
+        }
+        
+        // element_id로 업데이트 실패했거나 element_id가 없으면 part_id + color_id로 업데이트
+        if (!updated) {
+          const { error: updateError } = await supabase
+            .from('part_images')
+            .update({
+              original_url: originalUrl,
+              uploaded_url: supabaseUrl,
+              filename: fileName,
+              ...(elementId && { element_id: String(elementId) }),
+              image_format: 'webp',
+              upload_status: 'completed',
+              download_status: 'completed'
+            })
+            .eq('part_id', partNum)
+            .eq('color_id', colorId)
+          
+          if (updateError) {
+            console.warn('part_images 테이블 등록 실패:', updateError)
+          } else {
+            console.log(`✅ 데이터베이스 업데이트 완료: ${partNum}_${colorId}`)
+          }
         }
       } else {
         console.log(`✅ 데이터베이스 등록 완료: ${partNum}_${colorId}`)
       }
       
-      // image_metadata 테이블은 선택적으로만 시도 (스키마에 맞게 수정)
+      // image_metadata 테이블은 선택적으로만 시도 (element_id 지원)
       try {
+        const metadataFileName = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`
+        const metadataFilePath = `images/${metadataFileName}`
+        
         const { error: metadataError } = await supabase
           .from('image_metadata')
           .insert({
@@ -546,18 +611,19 @@ export function useAutoImageMigration() {
             color_id: colorId,
             original_url: originalUrl,
             supabase_url: supabaseUrl,
-            file_path: `images/${partNum}_${colorId}.webp`,
-            file_name: `${partNum}_${colorId}.webp`
+            file_path: metadataFilePath,
+            file_name: metadataFileName,
+            ...(elementId && { element_id: String(elementId) })
             // created_at은 자동으로 설정됨
           })
         
         if (metadataError) {
-          console.log(`📝 image_metadata 삽입 실패, 스킵: ${partNum}_${colorId}`, metadataError)
+          console.log(`📝 image_metadata 삽입 실패, 스킵: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`, metadataError)
         } else {
-          console.log(`✅ image_metadata 등록 완료: ${partNum}_${colorId}`)
+          console.log(`✅ image_metadata 등록 완료: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`)
         }
       } catch (metadataError) {
-        console.log(`📝 image_metadata 테이블 등록 스킵: ${partNum}_${colorId}`)
+        console.log(`📝 image_metadata 테이블 등록 스킵: ${partNum}_${colorId}${elementId ? ` (element_id: ${elementId})` : ''}`)
         // 실패해도 계속 진행
       }
       
@@ -598,11 +664,12 @@ export function useAutoImageMigration() {
 
           try {
             console.log(`🔄 [W${workerId}] ${i + 1}/${parts.length} - ${part.lego_parts.part_num}`)
+            const elementId = part.element_id || part.lego_parts?.element_id || null
             const result = await migratePartImage(
               part.lego_parts.part_num,
               part.lego_colors.color_id,
               part.lego_parts.part_img_url,
-              { force: options.force, verifyUpload }
+              { force: options.force, verifyUpload, elementId }
             )
             results[i] = { part, success: !!result, supabaseUrl: result }
             if (result) migrationStats.value.completed++

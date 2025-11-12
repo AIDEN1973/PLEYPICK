@@ -95,10 +95,11 @@ export function useBatchPartLoading() {
       // 2. 모든 이미지 URL과 메타데이터를 한 번에 조회 (초고속)
       currentStep.value = '이미지 및 메타데이터 조회 중...'
       
-      // 모든 부품의 part_num과 color_id 추출
+      // 모든 부품의 part_num, color_id, element_id 추출
       const partKeys = allParts.map(part => ({
         part_num: part.lego_parts.part_num,
-        color_id: part.lego_colors.color_id
+        color_id: part.lego_colors.color_id,
+        element_id: part.element_id || null
       }))
       
       // 한 번에 모든 이미지 URL 조회
@@ -144,10 +145,11 @@ export function useBatchPartLoading() {
       
       const batchPromises = batch.map(async (part) => {
         try {
-          // Supabase Storage 이미지 URL 조회
+          // Supabase Storage 이미지 URL 조회 (element_id 우선)
           const imageUrl = await getSupabaseImageUrl(
             part.lego_parts.part_num, 
-            part.lego_colors.color_id
+            part.lego_colors.color_id,
+            part.element_id || null
           )
           
           return {
@@ -225,11 +227,25 @@ export function useBatchPartLoading() {
   }
   
   /**
-   * Supabase Storage에서 이미지 URL 조회 (초고속 최적화)
+   * Supabase Storage에서 이미지 URL 조회 (element_id 우선, 초고속 최적화)
    */
-  const getSupabaseImageUrl = async (partNum, colorId) => {
+  const getSupabaseImageUrl = async (partNum, colorId, elementId = null) => {
     try {
-      // 1. part_images 테이블에서 조회 (올바른 컬럼명 사용)
+      // 1. element_id가 있으면 element_id로 먼저 조회
+      if (elementId) {
+        const { data: partImageByElement, error: elementError } = await supabase
+          .from('part_images')
+          .select('uploaded_url')
+          .eq('element_id', String(elementId))
+          .not('uploaded_url', 'is', null)
+          .maybeSingle()
+        
+        if (!elementError && partImageByElement?.uploaded_url) {
+          return partImageByElement.uploaded_url
+        }
+      }
+
+      // 2. part_images 테이블에서 part_id + color_id로 조회
       const { data: partImage, error: partImageError } = await supabase
         .from('part_images')
         .select('uploaded_url')
@@ -242,7 +258,21 @@ export function useBatchPartLoading() {
         return partImage.uploaded_url
       }
 
-      // 2. image_metadata 테이블에서 fallback 조회
+      // 3. image_metadata 테이블에서 fallback 조회 (element_id 우선)
+      if (elementId) {
+        const { data: imageMetadataByElement, error: metadataElementError } = await supabase
+          .from('image_metadata')
+          .select('supabase_url')
+          .eq('element_id', String(elementId))
+          .not('supabase_url', 'is', null)
+          .maybeSingle()
+
+        if (!metadataElementError && imageMetadataByElement?.supabase_url) {
+          return imageMetadataByElement.supabase_url
+        }
+      }
+
+      // element_id로 찾지 못했거나 element_id가 없으면 part_num + color_id로 조회
       const { data: imageMetadata, error: metadataError } = await supabase
         .from('image_metadata')
         .select('supabase_url')
@@ -285,14 +315,33 @@ export function useBatchPartLoading() {
   }
   
   /**
-   * 모든 이미지 URL을 한 번에 조회 (초고속)
+   * 모든 이미지 URL을 한 번에 조회 (element_id 우선, 초고속)
    */
   const batchGetImageUrls = async (partKeys) => {
     try {
-      const partIds = partKeys.map(key => key.part_num)
-      const colorIds = partKeys.map(key => key.color_id)
+      const partIds = partKeys.map(key => key.part_num).filter(Boolean)
+      const colorIds = partKeys.map(key => key.color_id).filter(Boolean)
+      const elementIds = partKeys.map(key => key.element_id).filter(Boolean).map(id => String(id))
       
-      // 1. part_images 테이블에서 조회
+      // 1. element_id가 있는 경우: element_id로 먼저 조회
+      const elementImageMap = new Map()
+      if (elementIds.length > 0) {
+        const { data: elementImages, error: elementImagesError } = await supabase
+          .from('part_images')
+          .select('element_id, uploaded_url')
+          .in('element_id', elementIds)
+          .not('uploaded_url', 'is', null)
+        
+        if (!elementImagesError && elementImages) {
+          elementImages.forEach(img => {
+            if (img.element_id && img.uploaded_url) {
+              elementImageMap.set(String(img.element_id), img.uploaded_url)
+            }
+          })
+        }
+      }
+      
+      // 2. part_images 테이블에서 part_id + color_id로 조회
       const { data: partImages, error: partImagesError } = await supabase
         .from('part_images')
         .select('part_id, color_id, uploaded_url')
@@ -300,7 +349,25 @@ export function useBatchPartLoading() {
         .in('color_id', colorIds)
         .not('uploaded_url', 'is', null)
       
-      // 2. image_metadata 테이블에서 fallback 조회
+      // 3. image_metadata 테이블에서 fallback 조회 (element_id 우선)
+      const elementMetadataMap = new Map()
+      if (elementIds.length > 0) {
+        const { data: elementMetadataImages, error: elementMetadataError } = await supabase
+          .from('image_metadata')
+          .select('element_id, supabase_url')
+          .in('element_id', elementIds)
+          .not('supabase_url', 'is', null)
+        
+        if (!elementMetadataError && elementMetadataImages) {
+          elementMetadataImages.forEach(img => {
+            if (img.element_id && img.supabase_url) {
+              elementMetadataMap.set(String(img.element_id), img.supabase_url)
+            }
+          })
+        }
+      }
+
+      // element_id로 찾지 못한 경우 part_num + color_id로 조회
       const { data: metadataImages, error: metadataError } = await supabase
         .from('image_metadata')
         .select('part_num, color_id, supabase_url')
@@ -308,30 +375,41 @@ export function useBatchPartLoading() {
         .in('color_id', colorIds)
         .not('supabase_url', 'is', null)
       
-      if (partImagesError && metadataError) {
+      if (partImagesError && metadataError && elementIds.length === 0) {
         return new Array(partKeys.length).fill(null)
       }
       
       // part_id와 color_id로 매핑
-      const imageMap = new Map()
+      const partColorImageMap = new Map()
       
       // part_images 결과 추가
       partImages?.forEach(img => {
         const key = `${img.part_id}_${img.color_id}`
-        imageMap.set(key, img.uploaded_url)
+        partColorImageMap.set(key, img.uploaded_url)
       })
       
       // image_metadata 결과 추가 (part_images에 없는 경우만)
       metadataImages?.forEach(img => {
         const key = `${img.part_num}_${img.color_id}`
-        if (!imageMap.has(key)) {
-          imageMap.set(key, img.supabase_url)
+        if (!partColorImageMap.has(key)) {
+          partColorImageMap.set(key, img.supabase_url)
         }
       })
       
       return partKeys.map(key => {
+        // element_id 우선 사용 (part_images 먼저, 없으면 image_metadata)
+        if (key.element_id) {
+          const elementIdStr = String(key.element_id)
+          if (elementImageMap.has(elementIdStr)) {
+            return elementImageMap.get(elementIdStr)
+          }
+          if (elementMetadataMap.has(elementIdStr)) {
+            return elementMetadataMap.get(elementIdStr)
+          }
+        }
+        // element_id가 없거나 찾지 못한 경우 part_id + color_id 사용
         const mapKey = `${key.part_num}_${key.color_id}`
-        return imageMap.get(mapKey) || null
+        return partColorImageMap.get(mapKey) || null
       })
     } catch (error) {
       return new Array(partKeys.length).fill(null)
@@ -440,7 +518,7 @@ export function useBatchPartLoading() {
       // 이미지 URL과 메타데이터 조회
       const partsWithData = await Promise.all(parts.map(async (part) => {
         const [imageUrl, metadata] = await Promise.all([
-          getSupabaseImageUrl(part.lego_parts.part_num, part.lego_colors.color_id),
+          getSupabaseImageUrl(part.lego_parts.part_num, part.lego_colors.color_id, part.element_id || null),
           getPartMetadata(part.lego_parts.part_num, part.lego_colors.color_id)
         ])
         

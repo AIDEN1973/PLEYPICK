@@ -1,64 +1,219 @@
+.set-search-field {
+  position: relative;
+}
+
+.set-search-field {
+  position: relative;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.set-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.set-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.set-search-input:focus ~ .set-search-icon {
+  color: #2563eb;
+}
+
+.set-search-clear {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.set-search-clear:hover {
+  color: #4b5563;
+}
+
+.set-search-dropdown {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  z-index: 50;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.set-search-option {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.set-search-option:hover,
+.set-search-option.active {
+  background: #f3f4f6;
+}
+
+.set-search-option.selected {
+  background: #e0f2fe;
+}
+
+.option-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.option-subtitle {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
 <template>
   <div class="inspection-analytics-page">
     <div class="page-header">
-      <h1>검수 통계</h1>
-      <p>검수 세션 통계 및 분석 대시보드</p>
+      <h1>검수이력</h1><!-- // 🔧 수정됨 -->
+      <p>검수이력을 확인하고 분석할 수 있는 페이지입니다.</p><!-- // 🔧 수정됨 -->
     </div>
 
     <div class="analytics-content">
-      <div v-if="loading" class="loading-state">
-        <span>로딩 중...</span>
-      </div>
-
-      <div v-else-if="error" class="error-state">
+      <div v-if="error" class="error-state">
         <span>{{ error }}</span>
       </div>
 
       <div v-else class="analytics-dashboard">
         <div class="filters-section">
           <div class="filter-group">
-            <label class="filter-label">통계 범위</label>
-            <select v-model="viewMode" @change="loadAnalytics" class="filter-select">
-              <option value="my">내 통계</option>
-              <option v-if="isAdmin" value="all">전체 통계</option>
-            </select>
-          </div>
-
-          <div class="filter-group">
             <label class="filter-label">기간</label>
             <div class="date-range">
-              <input
-                type="date"
-                v-model="dateFrom"
-                @change="loadAnalytics"
-                class="filter-input"
-              />
+              <div class="date-input-wrapper">
+                <input
+                  type="date"
+                  v-model="dateFrom"
+                  @change="loadAnalytics"
+                  class="custom-date-input"
+                  ref="dateFromInput"
+                />
+                <div class="date-display">{{ formatDateDisplay(dateFrom) }}</div>
+                <button type="button" class="date-trigger-btn" @click="focusDateInput('from')" aria-label="시작 날짜 선택"><!-- // 🔧 수정됨 -->
+                  <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
               <span class="date-separator">~</span>
-              <input
-                type="date"
-                v-model="dateTo"
-                @change="loadAnalytics"
-                class="filter-input"
-              />
+              <div class="date-input-wrapper">
+                <input
+                  type="date"
+                  v-model="dateTo"
+                  @change="loadAnalytics"
+                  class="custom-date-input"
+                  ref="dateToInput"
+                />
+                <div class="date-display">{{ formatDateDisplay(dateTo) }}</div>
+                <button type="button" class="date-trigger-btn" @click="focusDateInput('to')" aria-label="종료 날짜 선택"><!-- // 🔧 수정됨 -->
+                  <svg class="date-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M12 2H4C2.89543 2 2 2.89543 2 4V12C2 13.1046 2.89543 14 4 14H12C13.1046 14 14 13.1046 14 12V4C14 2.89543 13.1046 2 12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M10 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M6 1V3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M2 6H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
 
           <div class="filter-group">
-            <label class="filter-label">세트</label>
-            <select v-model="selectedSetId" @change="loadAnalytics" class="filter-select">
-              <option value="">전체</option>
-              <option v-for="set in availableSets" :key="set.id" :value="set.id">
-                {{ set.name }}
-              </option>
-            </select>
+            <label class="filter-label">레고번호</label>
+            <div class="set-search-field" ref="setSearchRef">
+              <div class="set-search-input-row">
+                <div class="set-search-input-wrapper">
+                  <input
+                    type="text"
+                    v-model="setSearchQuery"
+                    @keydown.enter.prevent="handleSetSearch"
+                    placeholder="예: 76917"
+                    class="set-search-input"
+                  />
+                  <svg class="set-search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M14 14L11.1 11.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </div>
+                <button
+                  type="button"
+                  @click="handleSetSearch"
+                  class="set-search-button"
+                  :disabled="loading"
+                >
+                  검색
+                </button>
+                <button @click="resetFilters" class="filter-reset-btn">초기화</button>
+              </div>
+            </div>
           </div>
-
-          <button @click="resetFilters" class="filter-reset-btn">초기화</button>
         </div>
         <div class="metrics-grid">
           <div class="metric-card">
             <div class="metric-header">
               <span class="metric-label">총 검수 세션</span>
+              <svg class="metric-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="16" y1="2" x2="16" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="8" y1="2" x2="8" y2="6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="3" y1="10" x2="21" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 16l2 2 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div class="metric-value">{{ totalSessions }}</div>
             <div class="metric-hint">완료: {{ completedSessions }}건</div>
@@ -67,6 +222,11 @@
           <div class="metric-card">
             <div class="metric-header">
               <span class="metric-label">평균 완료율</span>
+              <svg class="metric-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <line x1="19" y1="5" x2="5" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="17" cy="17" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div class="metric-value">{{ averageProgress.toFixed(1) }}%</div>
             <div class="metric-hint">전체 세션 평균</div>
@@ -75,6 +235,10 @@
           <div class="metric-card">
             <div class="metric-header">
               <span class="metric-label">평균 소요시간</span>
+              <svg class="metric-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <polyline points="12 6 12 12 16 14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div class="metric-value">{{ averageDurationLabel }}</div>
             <div class="metric-hint">세션당 평균</div>
@@ -83,58 +247,19 @@
           <div class="metric-card">
             <div class="metric-header">
               <span class="metric-label">총 누락 부품</span>
+              <svg class="metric-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M10.29 3.86 1.82 18a1 1 0 0 0 .86 1.5h18.64a1 1 0 0 0 .86-1.5L13.71 3.86a1 1 0 0 0-1.72 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div class="metric-value error">{{ totalMissingParts }}</div>
             <div class="metric-hint">누락률: {{ missingRate.toFixed(1) }}%</div>
           </div>
         </div>
 
-        <div class="charts-section">
-          <div class="chart-card">
-            <h3>세션별 진행률</h3>
-            <div class="chart-container">
-              <Bar :data="progressChartData" :options="chartOptions" />
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <h3>상태별 부품 분포</h3>
-            <div class="chart-container">
-              <Bar :data="statusChartData" :options="chartOptions" />
-            </div>
-          </div>
-        </div>
-
-        <div class="timeline-section">
-          <h3>검수 타임라인</h3>
-          <div class="timeline-container">
-            <div
-              v-for="session in timelineSessions"
-              :key="session.id"
-              class="timeline-item"
-              @click="viewSession(session.id)"
-            >
-              <div class="timeline-marker" :class="`status-${session.status}`"></div>
-              <div class="timeline-content">
-                <div class="timeline-header">
-                  <span class="timeline-set-name">{{ session.set_name }}</span>
-                  <span class="timeline-date">{{ formatDateShort(session.started_at) }}</span>
-                </div>
-                <div class="timeline-stats">
-                  <span class="stat-item">진행률: {{ session.progress || 0 }}%</span>
-                  <span class="stat-item" v-if="session.duration_seconds">소요: {{ formatDuration(session.duration_seconds) }}</span>
-                  <span class="stat-item error-text" v-if="session.missing_count">누락: {{ session.missing_count }}개</span>
-                </div>
-              </div>
-            </div>
-            <div v-if="timelineSessions.length === 0" class="timeline-empty">
-              <p>검수 세션이 없습니다</p>
-            </div>
-          </div>
-        </div>
-
         <div class="sessions-table-section">
-          <h3>최근 검수 세션</h3>
+          <h3>최근 검수이력</h3>
           <div class="table-container">
             <table class="sessions-table">
               <thead>
@@ -151,16 +276,16 @@
                 <tr
                   v-for="session in recentSessions"
                   :key="session.id"
-                  @click="viewSession(session.id)"
-                  class="table-row"
+                  @click="handleRowClick(session)"
+                  :class="['table-row', { 'table-row-disabled': session.status === 'completed' }]"
                 >
-                  <td>{{ session.set_name }}</td>
+                  <td class="set-name-cell">{{ formatSetDisplay(session.set_num, session.theme_name, session.set_name) }}</td> <!-- // 🔧 수정됨 -->
                   <td>
                     <span class="status-badge" :class="`status-${session.status}`">
                       {{ statusLabel(session.status) }}
                     </span>
                   </td>
-                  <td>
+                  <td class="progress-column">
                     <div class="progress-cell">
                       <div class="progress-bar-small">
                         <div class="progress-fill-small" :style="{ width: `${session.progress || 0}%` }"></div>
@@ -182,17 +307,28 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bar } from 'vue-chartjs'
-import { Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
 import { useSupabase } from '../composables/useSupabase'
-
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
+import { formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
 
 export default {
-  name: 'InspectionAnalytics',
-  components: { Bar },
+  name: 'InspectionHistory', // 🔧 수정됨
+  directives: {
+    'click-outside': {
+      mounted(el, binding) {
+        el.clickOutsideEvent = (event) => {
+          if (!(el === event.target || el.contains(event.target))) {
+            binding.value(event)
+          }
+        }
+        document.addEventListener('click', el.clickOutsideEvent)
+      },
+      unmounted(el) {
+        document.removeEventListener('click', el.clickOutsideEvent)
+      }
+    }
+  },
   setup() {
     const router = useRouter()
     const { supabase, user } = useSupabase()
@@ -204,10 +340,13 @@ export default {
     const availableSets = ref([])
     const isAdmin = ref(false)
 
-    const viewMode = ref('my')
     const dateFrom = ref('')
     const dateTo = ref('')
     const selectedSetId = ref('')
+    const setSearchQuery = ref('')
+    const setSearchRef = ref(null)
+    const dateFromInput = ref(null)
+    const dateToInput = ref(null)
 
     const totalSessions = computed(() => sessions.value.length)
     const completedSessions = computed(() => sessions.value.filter(s => s.status === 'completed').length)
@@ -250,85 +389,6 @@ export default {
         .slice(0, 10)
     })
 
-    const timelineSessions = computed(() => {
-      return [...sessions.value]
-        .sort((a, b) => new Date(b.started_at || b.created_at) - new Date(a.started_at || a.created_at))
-        .slice(0, 20)
-    })
-
-    const progressChartData = computed(() => {
-      const labels = sessions.value
-        .slice(0, 10)
-        .map(s => s.set_name || '세트명 없음')
-        .slice(0, 10)
-
-      const data = sessions.value
-        .slice(0, 10)
-        .map(s => s.progress || 0)
-
-      return {
-        labels,
-        datasets: [
-          {
-            label: '진행률 (%)',
-            data,
-            backgroundColor: '#2563eb'
-          }
-        ]
-      }
-    })
-
-    const statusChartData = computed(() => {
-      const statusCounts = items.value.reduce((acc, item) => {
-        const status = item.status || 'pending'
-        acc[status] = (acc[status] || 0) + 1
-        return acc
-      }, { pending: 0, checked: 0, missing: 0, hold: 0 })
-
-      return {
-        labels: ['완료', '미확인', '누락', '보류'],
-        datasets: [
-          {
-            label: '부품 수',
-            data: [
-              statusCounts.checked || 0,
-              statusCounts.pending || 0,
-              statusCounts.missing || 0,
-              statusCounts.hold || 0
-            ],
-            backgroundColor: ['#10b981', '#9ca3af', '#dc2626', '#f59e0b']
-          }
-        ]
-      }
-    })
-
-    const chartOptions = {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.parsed.y ?? 0}${context.dataset.label?.includes('%') ? '%' : '개'}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: { color: '#4b5563' }
-        },
-        y: {
-          beginAtZero: true,
-          ticks: {
-            precision: 0,
-            maxTicksLimit: 10,
-            color: '#6b7280'
-          }
-        }
-      }
-    }
-
     const checkAdminRole = async () => {
       if (!user.value) {
         isAdmin.value = false
@@ -359,15 +419,31 @@ export default {
       try {
         const { data, error } = await supabase
           .from('lego_sets')
-          .select('id, name')
+          .select('id, name, set_num, theme_id')
           .order('name', { ascending: true })
           .limit(500)
 
         if (error) throw error
 
+        const themeIds = [...new Set((data || []).map(set => set.theme_id).filter(Boolean))]
+        let themeMap = new Map()
+
+        if (themeIds.length > 0) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (themesError) throw themesError
+          themeMap = new Map((themesData || []).map(theme => [theme.theme_id, theme.name]))
+        }
+
         availableSets.value = (data || []).map(set => ({
           id: set.id,
-          name: set.name || '세트명 없음'
+          name: set.name || '세트명 없음',
+          set_num: set.set_num || '',
+          theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
+          display_name: formatSetDisplay(set.set_num, set.theme_id ? themeMap.get(set.theme_id) : null, set.name || '세트명 없음')
         }))
       } catch (err) {
         console.error('세트 목록 로드 실패:', err)
@@ -397,12 +473,15 @@ export default {
             )
           `)
 
-        if (viewMode.value === 'my' || !isAdmin.value) {
+        if (!isAdmin.value) {
           query = query.eq('user_id', user.value.id)
         }
 
         if (selectedSetId.value) {
+          console.log('[검색] selectedSetId로 필터링:', selectedSetId.value)
           query = query.eq('set_id', selectedSetId.value)
+        } else {
+          console.log('[검색] selectedSetId 없음, 전체 조회')
         }
 
         if (dateFrom.value) {
@@ -448,7 +527,15 @@ export default {
           }
         }
 
+        let metadataMap = new Map()
+        const sessionSetIds = (sessionsData || []).map(session => session.set_id).filter(Boolean)
+
+        if (sessionSetIds.length > 0) {
+          metadataMap = await fetchSetMetadata(supabase, sessionSetIds)
+        }
+
         sessions.value = (sessionsData || []).map(session => {
+          const meta = metadataMap.get(session.set_id) || {}
           // 소요시간 계산: 완료된 경우 completed_at, 그 외에는 last_saved_at 사용
           let duration = null
           if (session.started_at) {
@@ -473,7 +560,9 @@ export default {
           return {
             id: session.id,
             set_id: session.set_id,
-            set_name: session.lego_sets?.name || '세트명 없음',
+            set_name: session.lego_sets?.name || meta.set_name || '세트명 없음',
+            set_num: meta.set_num || null,
+            theme_name: meta.theme_name || null,
             status: session.status,
             progress: session.progress || 0,
             started_at: session.started_at,
@@ -485,6 +574,7 @@ export default {
         })
 
         items.value = itemsData || []
+        console.log('[검색] 데이터 로드 완료 - 세션:', sessions.value.length, '개, 아이템:', items.value.length, '개')
       } catch (err) {
         console.error('통계 데이터 로드 실패:', err)
         error.value = err.message || '통계 데이터를 불러오는데 실패했습니다'
@@ -498,23 +588,12 @@ export default {
         case 'completed':
           return '완료'
         case 'paused':
-          return '임시 저장'
+          return '임시저장'
         case 'in_progress':
           return '진행 중'
         default:
           return status
       }
-    }
-
-    const formatDateShort = (dateString) => {
-      if (!dateString) return '-'
-      const date = new Date(dateString)
-      return date.toLocaleDateString('ko-KR', {
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
     }
 
     const formatDate = (dateString) => {
@@ -538,25 +617,97 @@ export default {
       return `${minutes}분`
     }
 
-    const viewSession = (sessionId) => {
-      router.push(`/manual-inspection?session=${sessionId}`)
+    const formatDateDisplay = (dateString) => {
+      if (!dateString) return '날짜 선택'
+      const date = new Date(dateString)
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}. ${month}. ${day}.`
     }
 
-    const resetFilters = () => {
-      viewMode.value = 'my'
+    const handleRowClick = (sessionData) => { // 🔧 수정됨
+      if (!sessionData || sessionData.status === 'completed') return // 🔧 수정됨
+      viewSession(sessionData)
+    } // 🔧 수정됨
+
+    const viewSession = (targetSession) => { // 🔧 수정됨
+      if (!targetSession || !targetSession.id) return // 🔧 수정됨
+      router.push({ path: '/manual-inspection', query: { session: targetSession.id } }) // 🔧 수정됨
+    }
+
+    const handleSetSearch = async () => {
+      if (!setSearchQuery.value || !setSearchQuery.value.trim()) {
+        selectedSetId.value = ''
+        await loadAnalytics()
+        return
+      }
+
+      try {
+        const query = setSearchQuery.value.trim()
+        const { data, error } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id')
+          .ilike('set_num', `%${query}%`)
+          .order('name', { ascending: true })
+          .limit(1)
+
+        if (error) throw error
+
+        if (data && data.length > 0) {
+          const set = data[0]
+          const themeIds = set.theme_id ? [set.theme_id] : []
+          let themeName = null
+
+          if (themeIds.length > 0) {
+            const { data: themesData } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .in('theme_id', themeIds)
+              .maybeSingle()
+            themeName = themesData?.name || null
+          }
+
+          selectedSetId.value = set.id
+          console.log('[검색] 세트 ID 설정:', set.id, 'set_num:', set.set_num)
+          await loadAnalytics()
+        } else {
+          selectedSetId.value = ''
+          console.log('[검색] 검색 결과 없음, 필터 초기화')
+          await loadAnalytics()
+        }
+      } catch (err) {
+        console.error('세트 검색 실패:', err)
+        selectedSetId.value = ''
+        await loadAnalytics()
+      }
+    }
+
+    const focusDateInput = (target) => {
+      if (target === 'from' && dateFromInput.value) {
+        dateFromInput.value.showPicker?.()
+        dateFromInput.value.focus()
+      } else if (target === 'to' && dateToInput.value) {
+        dateToInput.value.showPicker?.()
+        dateToInput.value.focus()
+      }
+    }
+
+    const resetFilters = async () => {
       dateFrom.value = ''
       dateTo.value = ''
       selectedSetId.value = ''
-      loadAnalytics()
+      setSearchQuery.value = ''
+      await loadAnalytics()
     }
 
     const initializeDateRange = () => {
       const today = new Date()
-      const lastMonth = new Date(today)
-      lastMonth.setMonth(lastMonth.getMonth() - 1)
+      const lastWeek = new Date(today)
+      lastWeek.setDate(lastWeek.getDate() - 7)
 
       dateTo.value = today.toISOString().split('T')[0]
-      dateFrom.value = lastMonth.toISOString().split('T')[0]
+      dateFrom.value = lastWeek.toISOString().split('T')[0]
     }
 
     onMounted(async () => {
@@ -576,22 +727,23 @@ export default {
       missingRate,
       averageDurationLabel,
       recentSessions,
-      timelineSessions,
-      progressChartData,
-      statusChartData,
-      chartOptions,
       statusLabel,
       formatDate,
-      formatDateShort,
       formatDuration,
-      viewSession,
+      formatDateDisplay,
       isAdmin,
-      viewMode,
       dateFrom,
       dateTo,
       selectedSetId,
-      availableSets,
-      resetFilters
+      setSearchQuery,
+      handleSetSearch,
+      resetFilters,
+      formatSetDisplay,
+      handleRowClick,
+      setSearchRef,
+      focusDateInput,
+      dateFromInput,
+      dateToInput
     }
   }
 }
@@ -613,12 +765,14 @@ export default {
   font-weight: 700;
   color: #111827;
   margin: 0 0 0.5rem 0;
+  text-align: center;
 }
 
 .page-header p {
   font-size: 1rem;
   color: #6b7280;
   margin: 0;
+  text-align: center;
 }
 
 .analytics-content {
@@ -645,6 +799,7 @@ export default {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
+  margin-top: -0.85rem; /* // 🔧 수정됨 */
 }
 
 .metric-card {
@@ -655,12 +810,20 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  margin: 0; /* // 🔧 수정됨 */
 }
 
 .metric-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.metric-icon { /* // 🔧 수정됨 */
+  width: 1.5rem;
+  height: 1.5rem;
+  color: #9ca3af;
+  flex-shrink: 0;
 }
 
 .metric-label {
@@ -711,125 +874,12 @@ export default {
   position: relative;
 }
 
-.timeline-section {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.timeline-section h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 1rem 0;
-}
-
-.timeline-container {
-  position: relative;
-  padding-left: 2rem;
-}
-
-.timeline-item {
-  position: relative;
-  padding-bottom: 1.5rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.timeline-item:not(:last-child)::before {
-  content: '';
-  position: absolute;
-  left: -1.75rem;
-  top: 1.5rem;
-  width: 2px;
-  height: calc(100% - 0.5rem);
-  background: #e5e7eb;
-}
-
-.timeline-item:hover {
-  opacity: 0.8;
-}
-
-.timeline-marker {
-  position: absolute;
-  left: -2rem;
-  top: 0.25rem;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid #ffffff;
-  box-shadow: 0 0 0 2px #e5e7eb;
-  z-index: 1;
-}
-
-.timeline-marker.status-completed {
-  background: #10b981;
-  box-shadow: 0 0 0 2px #10b981;
-}
-
-.timeline-marker.status-paused {
-  background: #f59e0b;
-  box-shadow: 0 0 0 2px #f59e0b;
-}
-
-.timeline-marker.status-in_progress {
-  background: #2563eb;
-  box-shadow: 0 0 0 2px #2563eb;
-}
-
-.timeline-content {
-  background: #f9fafb;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-}
-
-.timeline-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-}
-
-.timeline-set-name {
-  font-weight: 600;
-  color: #111827;
-  font-size: 0.875rem;
-}
-
-.timeline-date {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.timeline-stats {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.timeline-stats .stat-item {
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.timeline-stats .stat-item.error-text {
-  color: #dc2626;
-}
-
-.timeline-empty {
-  text-align: center;
-  padding: 2rem;
-  color: #6b7280;
-}
-
 .sessions-table-section {
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   padding: 1.5rem;
+  margin: 0; /* // 🔧 수정됨 */
 }
 
 .sessions-table-section h3 {
@@ -853,19 +903,28 @@ export default {
 }
 
 .sessions-table th {
-  padding: 0.75rem 1rem;
-  text-align: left;
+  padding: 1.1rem 1rem;
+  text-align: center;
   font-size: 0.875rem;
   font-weight: 600;
   color: #374151;
   border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
 }
 
 .sessions-table td {
-  padding: 0.75rem 1rem;
+  padding: 1.1rem 1rem;
   font-size: 0.875rem;
   color: #111827;
   border-bottom: 1px solid #f3f4f6;
+  text-align: center;
+}
+
+.set-name-cell { /* // 🔧 수정됨 */
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .table-row {
@@ -873,8 +932,23 @@ export default {
   transition: background 0.2s ease;
 }
 
+.table-row-disabled { /* // 🔧 수정됨 */
+  cursor: default; /* // 🔧 수정됨 */
+  pointer-events: none; /* // 🔧 수정됨 */
+  color: #9ca3af; /* // 🔧 수정됨 */
+}
+
 .table-row:hover {
   background: #f9fafb;
+}
+
+.table-row-disabled:hover { /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+}
+
+.table-row-disabled .status-badge { /* // 🔧 수정됨 */
+  background: #e5e7eb; /* // 🔧 수정됨 */
+  color: #6b7280; /* // 🔧 수정됨 */
 }
 
 .status-badge {
@@ -886,23 +960,28 @@ export default {
 }
 
 .status-badge.status-completed {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #10b981;
+  color: #ffffff;
 }
 
 .status-badge.status-paused {
-  background: #fef3c7;
-  color: #92400e;
+  background: #f59e0b;
+  color: #ffffff;
 }
 
 .status-badge.status-in_progress {
-  background: #dbeafe;
-  color: #1e40af;
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+.progress-column {
+  text-align: right;
 }
 
 .progress-cell {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
 }
 
@@ -923,6 +1002,10 @@ export default {
 .error-text {
   color: #dc2626;
   font-weight: 600;
+}
+
+.sessions-table td.error-text {
+  color: #dc2626;
 }
 
 .filters-section {
@@ -951,51 +1034,376 @@ export default {
   color: #374151;
 }
 
-.filter-select,
-.filter-input {
+.set-search-field {
+  position: relative;
+}
+
+.set-search-field {
+  position: relative;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.set-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.set-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.set-search-input:focus ~ .set-search-icon {
+  color: #2563eb;
+}
+
+.set-search-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  position: relative;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.set-search-button {
+  padding: 0.75rem 1.5rem;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  height: 44px;
+  box-sizing: border-box;
+}
+
+.set-search-button:hover {
+  background: #1d4ed8;
+}
+
+.set-search-button:active {
+  background: #1e40af;
+}
+
+.set-search-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.set-search-dropdown {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+  z-index: 50;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.set-search-option {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.set-search-option:hover,
+.set-search-option.active {
+  background: #f3f4f6;
+}
+
+.set-search-option.selected {
+  background: #e0f2fe;
+}
+
+.option-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.option-subtitle {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.date-range {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.date-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.custom-date-input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.date-display {
+  width: 100%;
+  padding: 0.75rem 2.5rem 0.75rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 0.9375rem;
+  color: #111827;
+  background: #ffffff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  pointer-events: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+  height: 44px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date-display:empty::before {
+  content: '날짜 선택';
+  color: #9ca3af;
+}
+
+.date-input-wrapper:hover .date-display {
+  border-color: #9ca3af;
+}
+
+.date-input-wrapper:focus-within .date-display {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.date-trigger-btn {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #6b7280;
+  z-index: 3;
+  border-radius: 6px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.date-trigger-btn:hover {
+  background: #f3f4f6;
+  color: #2563eb;
+}
+
+.date-trigger-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.date-icon {
+  width: 1rem;
+  height: 1rem;
+  pointer-events: none;
+}
+
+.custom-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0.5rem 0.75rem;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   font-size: 0.875rem;
   color: #111827;
   background: #ffffff;
-  transition: border-color 0.2s ease;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 38px;
 }
 
-.filter-select:focus,
-.filter-input:focus {
-  outline: none;
+.dropdown-trigger:hover {
+  border-color: #9ca3af;
+}
+
+.dropdown-trigger:focus-within {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.date-range {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.dropdown-arrow {
+  transition: transform 0.2s ease;
+  color: #6b7280;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.dropdown-arrow.open {
+  transform: rotate(180deg);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.dropdown-menu-scrollable {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.dropdown-item {
+  padding: 0.625rem 0.75rem;
+  font-size: 0.875rem;
+  color: #111827;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-item:hover {
+  background: #f3f4f6;
+}
+
+.dropdown-item.active {
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
 }
 
 .date-separator {
   color: #6b7280;
   font-size: 0.875rem;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
 .filter-reset-btn {
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1.5rem;
   background: #f3f4f6;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 0.875rem;
   font-weight: 600;
   color: #374151;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  height: 44px;
+  box-sizing: border-box;
 }
 
 .filter-reset-btn:hover {
   background: #e5e7eb;
   border-color: #9ca3af;
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .inspection-analytics-page {
+    padding: 1rem;
+  }
+
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* 본문 폰트 사이즈 조정 */
+  .set-name-cell {
+    font-size: 0.9375rem !important;
+    max-width: none !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  
+  .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .sessions-table {
+    width: auto;
+    min-width: 100%;
+  }
+  
+  .sessions-table td {
+    white-space: nowrap !important;
+  }
+  
+  .sessions-table th {
+    white-space: nowrap !important;
+  }
+  
+  .progress-bar-small {
+    display: none !important;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1020,8 +1428,143 @@ export default {
     min-width: 100%;
   }
 
-  .filter-reset-btn {
+  .filters-section > .filter-reset-btn {
     width: 100%;
+  }
+
+  .set-search-input-row {
+    flex-wrap: wrap;
+  }
+
+  .set-search-input-wrapper {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .set-search-button,
+  .set-search-input-row .filter-reset-btn {
+    flex: 0 0 auto;
+    min-width: auto;
+  }
+
+  /* 본문 폰트 사이즈 조정 */
+  .set-name-cell {
+    font-size: 0.9375rem !important;
+    max-width: none !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  
+  .table-container {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .sessions-table {
+    width: auto;
+    min-width: 100%;
+  }
+  
+  .sessions-table td {
+    white-space: nowrap !important;
+  }
+  
+  .sessions-table th {
+    white-space: nowrap !important;
+  }
+  
+  .progress-bar-small {
+    display: none !important;
+  }
+
+  .session-date-cell,
+  .session-status-cell {
+    font-size: 0.875rem !important;
+  }
+
+  .metric-label {
+    font-size: 0.8125rem !important;
+  }
+
+  .metric-value {
+    font-size: 1.5rem !important;
+  }
+
+  .metric-hint {
+    font-size: 0.8125rem !important;
+  }
+
+  .chart-card h3,
+  .sessions-table-section h3 {
+    font-size: 1rem !important;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .page-header p {
+    font-size: 0.875rem !important;
+  }
+
+  /* 날짜 필터 텍스트 한 줄 표시 */
+  .date-display {
+    font-size: 0.8125rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .date-range {
+    gap: 0.5rem !important;
+  }
+
+  .date-input-wrapper {
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+  }
+
+  /* 테이블 본문 폰트 사이즈 조정 */
+  .sessions-table th,
+  .sessions-table td {
+    font-size: 0.875rem !important;
+  }
+  
+  .sessions-table th {
+    white-space: nowrap !important;
+  }
+
+  .sessions-table td {
+    font-size: 0.875rem !important;
+  }
+
+  .filter-label {
+    font-size: 0.8125rem !important;
+  }
+
+  .set-search-input {
+    font-size: 0.9375rem !important;
+  }
+
+  .set-search-button {
+    font-size: 0.875rem !important;
+  }
+
+  .filter-reset-btn {
+    font-size: 0.875rem !important;
+  }
+
+  .status-badge {
+    font-size: 0.75rem !important;
+  }
+
+  .dropdown-trigger {
+    font-size: 0.875rem !important;
+  }
+
+  .dropdown-item {
+    font-size: 0.875rem !important;
   }
 }
 </style>

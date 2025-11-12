@@ -662,7 +662,7 @@ export default {
               lego_parts(part_num, name),
               lego_colors(name, rgb)
             `)
-            .eq('element_id', inputValue)
+            .eq('element_id', String(inputValue))
             .limit(1)
           
           if (elementError) {

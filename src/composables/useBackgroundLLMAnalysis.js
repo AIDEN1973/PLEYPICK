@@ -187,40 +187,81 @@ export function useBackgroundLLMAnalysis() {
                 console.log(`🔄 DEV MODE: Re-analyzing existing part ${part.part.part_num}`)
               }
               
-              // 이미지 URL 가져오기 (버킷 이미지 우선 사용)
+              // 이미지 URL 가져오기 (버킷 이미지 우선 사용, element_id 우선)
               let imageUrl = null
               let imageSource = 'unknown'
+              const elementId = part.element_id || null
               
-              // 1. part_images에서 uploaded_url 조회 (최신 버킷 이미지)
-              const { data: partImage } = await supabase
-                .from('part_images')
-                .select('uploaded_url')
-                .eq('part_id', part.part.part_num)
-                .eq('color_id', part.color.id)
-                .maybeSingle()
+              // 1. part_images에서 uploaded_url 조회 (element_id 우선, 최신 버킷 이미지)
+              if (elementId) {
+                const { data: partImageByElement } = await supabase
+                  .from('part_images')
+                  .select('uploaded_url')
+                  .eq('element_id', String(elementId))
+                  .not('uploaded_url', 'is', null)
+                  .maybeSingle()
+                
+                if (partImageByElement?.uploaded_url) {
+                  imageUrl = partImageByElement.uploaded_url
+                  imageSource = 'part_images_element_id'
+                  console.log(`✅ Supabase Storage 버킷 이미지 사용 (element_id): ${imageUrl}`)
+                }
+              }
               
-              if (partImage?.uploaded_url) {
-                imageUrl = partImage.uploaded_url
-                imageSource = 'part_images'
-                console.log(`✅ Supabase Storage 버킷 이미지 사용: ${imageUrl}`)
-              } else {
-                // 2. image_metadata에서 supabase_url 조회 (과거 호환)
-                const { data: imageMeta } = await supabase
-                  .from('image_metadata')
-                  .select('supabase_url')
-                  .eq('part_num', part.part.part_num)
+              // element_id로 찾지 못했거나 element_id가 없으면 part_id + color_id로 조회
+              if (!imageUrl) {
+                const { data: partImage } = await supabase
+                  .from('part_images')
+                  .select('uploaded_url')
+                  .eq('part_id', part.part.part_num)
                   .eq('color_id', part.color.id)
                   .maybeSingle()
                 
-                if (imageMeta?.supabase_url) {
-                  imageUrl = imageMeta.supabase_url
-                  imageSource = 'image_metadata'
-                  console.log(`✅ image_metadata 버킷 이미지 사용: ${imageUrl}`)
-                } else {
+                if (partImage?.uploaded_url) {
+                  imageUrl = partImage.uploaded_url
+                  imageSource = 'part_images'
+                  console.log(`✅ Supabase Storage 버킷 이미지 사용: ${imageUrl}`)
+                }
+              }
+              
+              if (!imageUrl) {
+                // 2. image_metadata에서 supabase_url 조회 (element_id 우선, 과거 호환)
+                if (elementId) {
+                  const { data: imageMetaByElement } = await supabase
+                    .from('image_metadata')
+                    .select('supabase_url')
+                    .eq('element_id', String(elementId))
+                    .not('supabase_url', 'is', null)
+                    .maybeSingle()
+                  
+                  if (imageMetaByElement?.supabase_url) {
+                    imageUrl = imageMetaByElement.supabase_url
+                    imageSource = 'image_metadata_element_id'
+                    console.log(`✅ image_metadata 버킷 이미지 사용 (element_id): ${imageUrl}`)
+                  }
+                }
+                
+                // element_id로 찾지 못했거나 element_id가 없으면 part_num + color_id로 조회
+                if (!imageUrl) {
+                  const { data: imageMeta } = await supabase
+                    .from('image_metadata')
+                    .select('supabase_url')
+                    .eq('part_num', part.part.part_num)
+                    .eq('color_id', part.color.id)
+                    .maybeSingle()
+                  
+                  if (imageMeta?.supabase_url) {
+                    imageUrl = imageMeta.supabase_url
+                    imageSource = 'image_metadata'
+                    console.log(`✅ image_metadata 버킷 이미지 사용: ${imageUrl}`)
+                  }
+                }
+                
+                if (!imageUrl) {
                   // 3. 이미지 마이그레이션 완료 대기 (최대 3초)
                   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
                   const bucketName = 'lego_parts_images'
-                  const fileName = `${part.part.part_num}_${part.color.id}.webp`
+                  const fileName = elementId ? `${String(elementId)}.webp` : `${part.part.part_num}_${part.color.id}.webp`
                   const storageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
                   
                   console.log(`⏳ 이미지 마이그레이션 완료 대기 중... (${part.part.part_num})`)

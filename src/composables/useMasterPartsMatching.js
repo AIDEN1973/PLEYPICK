@@ -333,10 +333,24 @@ export function useMasterPartsMatching() {
     }
   }
 
-  // 부품 이미지 URL 조회 (Storage 직접 접근)
-  const getPartImageUrl = async (partId, colorId) => {
+  // 부품 이미지 URL 조회 (Storage 직접 접근, element_id 우선)
+  const getPartImageUrl = async (partId, colorId, elementId = null) => {
     try {
-      // 먼저 part_images 테이블에서 조회 시도
+      // 1. element_id가 있으면 element_id로 먼저 조회
+      if (elementId) {
+        const { data: partImageByElement, error: elementError } = await supabase
+          .from('part_images')
+          .select('uploaded_url')
+          .eq('element_id', String(elementId))
+          .not('uploaded_url', 'is', null)
+          .limit(1)
+        
+        if (!elementError && partImageByElement?.[0]?.uploaded_url) {
+          return partImageByElement[0].uploaded_url
+        }
+      }
+      
+      // 2. element_id로 찾지 못했거나 element_id가 없으면 part_id + color_id로 조회
       const { data: partImages, error } = await supabase
         .from('part_images')
         .select('uploaded_url')
@@ -349,11 +363,11 @@ export function useMasterPartsMatching() {
         return partImages[0].uploaded_url
       }
       
-      // part_images에 없으면 Storage URL 직접 생성
+      // part_images에 없으면 Storage URL 직접 생성 (element_id 우선)
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
       if (supabaseUrl) {
         const bucketName = 'lego_parts_images'
-        const fileName = `${partId}_${colorId}.webp`
+        const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
         const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
         
         // 이미지 존재 여부 확인
@@ -378,8 +392,9 @@ export function useMasterPartsMatching() {
   // Supabase Storage 이미지와 유사도 계산
   const calculateImageSimilarity = async (capturedImage, targetPart) => {
     try {
-      // part_images 테이블에서 이미지 URL 조회
-      const imageUrl = await getPartImageUrl(targetPart.part_id, targetPart.color_id)
+      // part_images 테이블에서 이미지 URL 조회 (element_id 우선)
+      const elementId = targetPart.element_id || null
+      const imageUrl = await getPartImageUrl(targetPart.part_id, targetPart.color_id, elementId)
       if (!imageUrl) {
         console.log('No reference image available for part:', targetPart.lego_parts?.name)
         return 0.5 // 기본값
@@ -531,7 +546,7 @@ export function useMasterPartsMatching() {
           partName: targetPart.lego_parts?.name,
           colorName: targetPart.lego_colors?.name,
           quantity: targetPart.quantity,
-          imageUrl: await getPartImageUrl(targetPart.part_id, targetPart.color_id)
+          imageUrl: await getPartImageUrl(targetPart.part_id, targetPart.color_id, targetPart.element_id || null)
         }
       }
     } catch (error) {

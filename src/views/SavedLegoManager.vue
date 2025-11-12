@@ -753,10 +753,21 @@ export default {
       }
     }
 
-    // Supabase Storage에서 이미지 URL 조회 (part_images 우선, 다음 image_metadata)
-    const getSupabaseImageUrl = async (partNum, colorId) => {
+    // Supabase Storage에서 이미지 URL 조회 (element_id 우선, part_images 우선, 다음 image_metadata)
+    const getSupabaseImageUrl = async (partNum, colorId, elementId = null) => {
       try {
-        // 1) part_images에서 직접 조회 (올바른 컬럼명 사용)
+        // 1) element_id가 있으면 element_id로 먼저 조회
+        if (elementId) {
+          const { data: piByElement, error: piElementErr } = await supabase
+            .from('part_images')
+            .select('uploaded_url')
+            .eq('element_id', String(elementId))
+            .maybeSingle()
+
+          if (!piElementErr && piByElement?.uploaded_url) return piByElement.uploaded_url
+        }
+
+        // 2) part_images에서 part_id + color_id로 조회
         const { data: pi, error: piErr } = await supabase
           .from('part_images')
           .select('uploaded_url')
@@ -766,12 +777,25 @@ export default {
 
         if (!piErr && pi?.uploaded_url) return pi.uploaded_url
 
-        // 2) 과거 기록 호환: image_metadata.supabase_url 조회
+        // 3) 과거 기록 호환: image_metadata.supabase_url 조회 (element_id 우선)
+        if (elementId) {
+          const { data: imByElement, error: imElementErr } = await supabase
+            .from('image_metadata')
+            .select('supabase_url')
+            .eq('element_id', String(elementId))
+            .not('supabase_url', 'is', null)
+            .maybeSingle()
+
+          if (!imElementErr && imByElement?.supabase_url) return imByElement.supabase_url
+        }
+
+        // element_id로 찾지 못했거나 element_id가 없으면 part_num + color_id로 조회
         const { data: im, error: imErr } = await supabase
           .from('image_metadata')
           .select('supabase_url')
           .eq('part_num', partNum)
           .eq('color_id', colorId)
+          .not('supabase_url', 'is', null)
           .maybeSingle()
 
         if (!imErr && im?.supabase_url) return im.supabase_url

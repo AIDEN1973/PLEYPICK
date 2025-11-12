@@ -111,7 +111,7 @@ export default {
         const { data: setPart, error: setPartError } = await supabase
           .from('set_parts')
           .select('part_id, color_id')
-          .eq('element_id', elementIdInput.value.trim())
+          .eq('element_id', String(elementIdInput.value.trim()))
           .limit(1)
           .maybeSingle()
 

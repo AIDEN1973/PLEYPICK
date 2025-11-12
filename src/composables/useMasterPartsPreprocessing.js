@@ -63,7 +63,7 @@ async function getRealPartIdFromElementId(elementId) {
         lego_parts(part_num, name),
         lego_colors(name, rgb)
       `)
-      .eq('element_id', elementId)
+      .eq('element_id', String(elementId))
       .limit(1)
     
     if (error) {
@@ -137,7 +137,7 @@ async function registerElementIdsToPartsMaster(analysisResults) {
       const { data: existing, error } = await supabase
         .from('parts_master')
         .select('element_id')
-        .eq('element_id', element.element_id)
+        .eq('element_id', String(element.element_id))
         .limit(1)
       
       if (!error && existing && existing.length > 0) {
@@ -159,7 +159,7 @@ async function registerElementIdsToPartsMaster(analysisResults) {
             part_name: element.part_name,
             color: element.color
           })
-          .eq('element_id', element.element_id)
+          .eq('element_id', String(element.element_id))
         
         if (updateError) {
           console.error(`❌ 엘리먼트 ID ${element.element_id} 수정 실패:`, updateError)
@@ -1092,21 +1092,51 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
       finalImageUrl = part.supabase_image_url
       console.log(`✅ Supabase Storage 이미지 사용(객체): ${finalImageUrl}`)
     } else {
-      // 2. DB에서 Supabase URL 조회 시도
+      // 2. DB에서 Supabase URL 조회 시도 (element_id 우선)
       try {
-        const { data: partImage, error: partImageError } = await supabase
-          .from('part_images')
-          .select('uploaded_url')
-          .eq('part_id', partNum)
-          .eq('color_id', colorId)
-          .maybeSingle()
+        let partImage = null
+        let partImageError = null
+        
+        // element_id가 있으면 element_id로 먼저 조회
+        if (elementId) {
+          const { data: partImageByElement, error: elementError } = await supabase
+            .from('part_images')
+            .select('uploaded_url')
+            .eq('element_id', String(elementId))
+            .not('uploaded_url', 'is', null)
+            .maybeSingle()
+          
+          if (!elementError && partImageByElement?.uploaded_url) {
+            partImage = partImageByElement
+            partImageError = null
+          } else {
+            partImageError = elementError
+          }
+        }
+        
+        // element_id로 찾지 못했거나 element_id가 없으면 part_id + color_id로 조회
+        if (!partImage) {
+          const { data: partImageByPartColor, error: partColorError } = await supabase
+            .from('part_images')
+            .select('uploaded_url')
+            .eq('part_id', partNum)
+            .eq('color_id', colorId)
+            .maybeSingle()
+          
+          if (!partColorError && partImageByPartColor?.uploaded_url) {
+            partImage = partImageByPartColor
+            partImageError = null
+          } else {
+            partImageError = partColorError
+          }
+        }
         
         if (!partImageError && partImage?.uploaded_url) {
           finalImageUrl = partImage.uploaded_url
           console.log(`✅ Supabase Storage 이미지 사용(DB): ${finalImageUrl}`)
         } else {
-          // 3. Storage에서 직접 확인 (공개 URL 사용)
-          const fileName = `${partNum}_${colorId}.webp`
+          // 3. Storage에서 직접 확인 (공개 URL 사용, element_id 우선)
+          const fileName = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
           const bucketName = 'lego_parts_images'
           const storageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
@@ -1134,9 +1164,9 @@ export async function analyzePartWithLLM(part, retryCount = 0) {
               if (partImgUrl.includes('cdn.rebrickable.com')) {
                 console.log(`🔄 자동 이미지 마이그레이션 시도 중...`)
                 
-                // 4. 자동 이미지 마이그레이션 시도
+                // 4. 자동 이미지 마이그레이션 시도 (element_id 전달)
                 try {
-                  const migratedUrl = await imageMigration.migratePartImage(partNum, colorId, partImgUrl)
+                  const migratedUrl = await imageMigration.migratePartImage(partNum, colorId, partImgUrl, { elementId })
                   if (migratedUrl) {
                     finalImageUrl = migratedUrl
                     console.log(`✅ 자동 마이그레이션 성공: ${finalImageUrl}`)

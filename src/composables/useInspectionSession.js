@@ -1,32 +1,43 @@
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import { useSupabase } from './useSupabase'
-import localforage from 'localforage'
+import { fetchSetMetadata } from '../utils/setDisplay'
 
-const INSPECTION_DB = 'brickbox_inspection'
-const SESSION_STORE = 'inspection_sessions'
-const ITEMS_STORE = 'inspection_items'
+const applyMetadataToSession = (target, meta) => {
+  if (!target || !meta) return
+  if (meta.set_num && !target.set_num) {
+    target.set_num = meta.set_num
+  }
+  if (meta.theme_name && !target.set_theme_name) {
+    target.set_theme_name = meta.theme_name
+  }
+  if (meta.set_name && !target.set_name) {
+    target.set_name = meta.set_name
+  }
+}
 
-const sessionStore = localforage.createInstance({
-  name: INSPECTION_DB,
-  storeName: SESSION_STORE
-})
-
-const itemsStore = localforage.createInstance({
-  name: INSPECTION_DB,
-  storeName: ITEMS_STORE
-})
+const hydrateSessionSetMetadata = async (supabase, target) => {
+  if (!target?.set_id) return
+  try {
+    const metadataMap = await fetchSetMetadata(supabase, [target.set_id])
+    const meta = metadataMap.get(target.set_id) || null
+    applyMetadataToSession(target, meta)
+  } catch (err) {
+    console.warn('세트 메타데이터 로드 실패:', err)
+  }
+}
 
 const defaultSessionState = () => ({
   id: null,
   set_id: null,
   set_name: null,
+  set_num: null,
+  set_theme_name: null,
   user_id: null,
   status: 'in_progress',
   progress: 0,
   started_at: null,
   last_saved_at: null,
   completed_at: null,
-  is_synced: false,
   updated_at: null
 })
 
@@ -43,7 +54,6 @@ const createItemState = (overrides = {}) => ({
   checked_count: 0,
   status: 'pending',
   notes: '',
-  is_dirty: true,
   updated_at: new Date().toISOString(),
   shape_tag: '',
   expected_stud_count: null,
@@ -51,61 +61,11 @@ const createItemState = (overrides = {}) => ({
   sequence_index: 0,
   part_img_url: null,
   ...overrides
-}) // 🔧 수정됨
+})
 
 const SYNC_INTERVAL_MS = 30000
 const RETRY_DELAY_MS = 15000
 const CHANGE_DEBOUNCE_MS = 2000
-
-const callInspectionApi = async ({ method = 'GET', body = null, query = {} }) => {
-  const searchParams = new URLSearchParams(query)
-  const endpoint = `/api/inspection${searchParams.toString() ? `?${searchParams}` : ''}`
-
-  const response = await fetch(endpoint, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  let payload = null
-  try {
-    payload = await response.json()
-  } catch (_) {
-    payload = null
-  }
-
-  if (!response.ok) {
-    const message = payload?.error || `Inspection API ${method} 실패`
-    throw new Error(message)
-  }
-
-  return payload
-}
-
-const callNotesApi = async ({ method = 'GET', body = null, query = {} }) => {
-  const searchParams = new URLSearchParams(query)
-  const endpoint = `/api/inspection/notes${searchParams.toString() ? `?${searchParams}` : ''}`
-
-  const response = await fetch(endpoint, {
-    method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined
-  })
-
-  let payload = null
-  try {
-    payload = await response.json()
-  } catch (_) {
-    payload = null
-  }
-
-  if (!response.ok) {
-    const message = payload?.error || `Inspection notes API ${method} 실패`
-    throw new Error(message)
-  }
-
-  return payload
-}
 
 export function useInspectionSession() {
   const { supabase, user } = useSupabase()
@@ -133,11 +93,26 @@ export function useInspectionSession() {
 
       const { data: setData, error: setError } = await supabase
         .from('lego_sets')
-        .select('id, name, set_num')
+        .select('id, name, set_num, theme_id')
         .eq('id', setId)
         .single()
 
       if (setError) throw setError
+
+      let themeName = null
+      if (setData?.theme_id) {
+        const { data: themeData, error: themeError } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .eq('theme_id', setData.theme_id)
+          .maybeSingle()
+
+        if (themeError) {
+          console.warn('테마 정보 조회 실패:', themeError)
+        } else {
+          themeName = themeData?.name || null
+        }
+      }
 
       const { data: partsData, error: partsError } = await supabase
         .from('set_parts')
@@ -178,27 +153,6 @@ export function useInspectionSession() {
         const partInfo = partsMap.get(part.part_id)
         const colorInfo = colorsMap.get(part.color_id)
         
-        // 디버깅: 특정 element_id인 경우 로그
-        if (part.element_id === '6335317' || part.element_id === '306923') {
-          console.log(`[loadSetParts] element_id ${part.element_id} 발견:`, {
-            part_id: part.part_id,
-            color_id: part.color_id,
-            colorInfo: colorInfo,
-            rgb: colorInfo?.rgb,
-            color_name: colorInfo?.name,
-            rawPart: part // 원본 데이터 확인
-          })
-          
-          // 같은 part_id를 가진 다른 color_id가 있는지 확인
-          const samePartDifferentColor = partsData.filter(p => 
-            p.part_id === part.part_id && p.color_id !== part.color_id
-          )
-          if (samePartDifferentColor.length > 0) {
-            console.warn(`[loadSetParts] element_id ${part.element_id}: 같은 part_id(${part.part_id})에 다른 color_id가 있습니다:`, 
-              samePartDifferentColor.map(p => ({ element_id: p.element_id, color_id: p.color_id }))
-            )
-          }
-        }
         
         return createItemState({
           part_id: part.part_id,
@@ -212,7 +166,6 @@ export function useInspectionSession() {
           checked_count: 0,
           status: 'pending',
           notes: '',
-          is_dirty: false,
           updated_at: new Date().toISOString(),
           shape_tag: masterMap.get(part.part_id)?.shape_tag || '',
           expected_stud_count: masterMap.get(part.part_id)?.expected_stud_count ?? null,
@@ -222,7 +175,10 @@ export function useInspectionSession() {
       })
 
       return {
-        setInfo: setData,
+        setInfo: {
+          ...setData,
+          theme_name: themeName
+        },
         items: inspectionItems
       }
     } catch (err) {
@@ -354,23 +310,24 @@ export function useInspectionSession() {
 
       if (!user.value) throw new Error('로그인이 필요합니다')
 
-      // 🔧 수정됨: 기존 'in_progress' 세션 확인 및 처리
+      // 동일 제품의 모든 활성 세션을 paused로 변경 (하나의 진행 상태만 유지)
       try {
         const { data: existingSessions, error: checkError } = await supabase
           .from('inspection_sessions')
           .select('id, status')
           .eq('set_id', setId)
           .eq('user_id', user.value.id)
-          .eq('status', 'in_progress')
-          .limit(1)
+          .in('status', ['in_progress', 'paused'])
 
         if (!checkError && existingSessions && existingSessions.length > 0) {
-          const existingSession = existingSessions[0]
-          // 기존 세션을 'paused'로 변경
+          // 모든 활성 세션을 paused로 변경
+          const sessionIds = existingSessions.map(s => s.id)
           await supabase
             .from('inspection_sessions')
             .update({ status: 'paused', updated_at: new Date().toISOString() })
-            .eq('id', existingSession.id)
+            .in('id', sessionIds)
+          
+          console.log(`[세션 생성] 동일 제품의 ${sessionIds.length}개 활성 세션을 paused로 변경`)
         }
       } catch (err) {
         console.warn('기존 세션 확인 실패:', err)
@@ -382,32 +339,28 @@ export function useInspectionSession() {
         id: crypto.randomUUID(),
         set_id: setId,
         set_name: setInfo.name,
+        set_num: setInfo.set_num || null,
+        set_theme_name: setInfo.theme_name || null,
         user_id: user.value.id,
         status: 'in_progress',
         progress: 0,
         started_at: new Date().toISOString(),
         last_saved_at: new Date().toISOString(),
         completed_at: null,
-    is_synced: false,
-    updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString()
       }
 
       Object.assign(session, newSession)
       items.value = setItems.map(item => ({
         ...item,
         session_id: newSession.id,
-        id: crypto.randomUUID()
+        id: crypto.randomUUID(),
       }))
 
-      await saveToLocal()
+      session.last_saved_at = new Date().toISOString()
+      session.updated_at = session.last_saved_at
 
-      try { // 🔧 수정됨
-        await syncToServer({ forceFullSync: true })
-        await loadFromServer(newSession.id)
-      } catch (err) {
-        console.warn('초기 동기화 실패: 오프라인 모드로 전환합니다.', err)
-        lastSyncError.value = err.message
-      }
+      await syncToServer({ forceFullSync: true })
 
       await loadSetNotes(newSession.set_id)
 
@@ -427,26 +380,78 @@ export function useInspectionSession() {
       loading.value = true
       error.value = null
 
-      const localSession = await sessionStore.getItem(sessionId)
-      const localItems = await itemsStore.getItem(sessionId)
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('inspection_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .maybeSingle()
 
-      if (localSession) {
-        const previousSetName = session.set_name
-        Object.assign(session, localSession)
-        if (!session.set_name && previousSetName) {
-          session.set_name = previousSetName
+      if (sessionError) throw sessionError
+      if (!sessionData) {
+        throw new Error('세션을 찾을 수 없습니다')
+      }
+
+      Object.assign(session, defaultSessionState(), sessionData)
+      session.last_saved_at = session.last_saved_at || session.updated_at || new Date().toISOString()
+
+      await hydrateSessionSetMetadata(supabase, session)
+
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('inspection_items')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('updated_at', { ascending: true })
+
+      if (itemsError) throw itemsError
+
+      const normalizedItems = (itemsData || []).map((remoteItem, index) =>
+        createItemState({
+          ...remoteItem,
+          id: remoteItem.id || crypto.randomUUID(),
+          session_id: remoteItem.session_id || sessionId,
+          sequence_index: remoteItem.sequence_index ?? index,
+          updated_at: remoteItem.updated_at || new Date().toISOString()
+        })
+      )
+
+      await enrichItemsMetadata(normalizedItems)
+      items.value = normalizedItems
+
+      // 세션 로드 후 동일 제품의 다른 활성 세션을 paused로 변경 (하나의 진행 상태만 유지)
+      if (session.set_id && user.value) {
+        try {
+          const { data: otherSessions, error: checkError } = await supabase
+            .from('inspection_sessions')
+            .select('id, status')
+            .eq('set_id', session.set_id)
+            .eq('user_id', user.value.id)
+            .in('status', ['in_progress', 'paused'])
+            .neq('id', sessionId)
+
+          if (!checkError && otherSessions && otherSessions.length > 0) {
+            const otherSessionIds = otherSessions.map(s => s.id)
+            await supabase
+              .from('inspection_sessions')
+              .update({ status: 'paused', updated_at: new Date().toISOString() })
+              .in('id', otherSessionIds)
+            
+            console.log(`[세션 로드] 동일 제품의 ${otherSessionIds.length}개 활성 세션을 paused로 변경`)
+          }
+        } catch (err) {
+          console.warn('동일 제품 세션 확인 실패:', err)
         }
       }
 
-      if (localItems) {
-        items.value = localItems.map(item => ({
-          ...item,
-          is_dirty: item.is_dirty ?? false
-        }))
+      try {
+        await loadSetNotes(session.set_id)
+      } catch (err) {
+        // 노트 로드 실패 시 빈 배열로 계속 진행 (조용히 처리)
+        if (import.meta.env.DEV) {
+          console.warn('세트 노트 로드 실패:', err.message)
+        }
+        notes.value = []
       }
 
-      await loadFromServer(sessionId)
-      await loadSetNotes(session.set_id)
       startAutoSyncTimer()
 
       return { session, items: items.value }
@@ -458,91 +463,6 @@ export function useInspectionSession() {
     }
   }
 
-  const loadFromServer = async (sessionId) => {
-    try {
-      const data = await callInspectionApi({ method: 'GET', query: { session_id: sessionId } })
-
-      if (data?.session) {
-        const preservedName = session.set_name
-        const currentUpdatedAt = session.updated_at ? new Date(session.updated_at).getTime() : 0
-        const incomingUpdatedAt = data.session.updated_at ? new Date(data.session.updated_at).getTime() : 0
-
-        if (incomingUpdatedAt >= currentUpdatedAt) {
-          Object.assign(session, data.session)
-        }
-
-        if (!session.set_name && preservedName) {
-          session.set_name = preservedName
-        }
-      }
-
-      if (Array.isArray(data?.items)) {
-        const localMap = new Map(items.value.map(localItem => [`${localItem.part_id}_${localItem.color_id}`, localItem]))
-        const mergedItems = data.items.map(remoteItem => {
-          const key = `${remoteItem.part_id}_${remoteItem.color_id}`
-          const localItem = localMap.get(key)
-
-          if (!localItem) {
-            // 새 아이템인 경우 서버 데이터로 생성하되, 메타데이터 보강 필요
-            return createItemState({
-              ...remoteItem,
-              id: remoteItem.id,
-              session_id: remoteItem.session_id || sessionId,
-              notes: remoteItem.notes || '',
-              is_dirty: false
-            })
-          }
-
-          const remoteUpdated = remoteItem.updated_at ? new Date(remoteItem.updated_at).getTime() : 0
-          const localUpdated = localItem.updated_at ? new Date(localItem.updated_at).getTime() : 0
-
-          if (localItem.is_dirty && localUpdated >= remoteUpdated) {
-            // 로컬이 더 최신이면 로컬 데이터 유지하되, part_id와 color_id는 서버와 일치해야 함
-            return {
-              ...localItem,
-              part_id: remoteItem.part_id, // 서버의 part_id로 확정
-              color_id: remoteItem.color_id, // 서버의 color_id로 확정
-              is_dirty: true
-            }
-          }
-
-          // 서버가 더 최신이거나 동일한 경우, 서버 데이터 우선하되 로컬 메타데이터 보존
-          return {
-            ...localItem,
-            ...remoteItem,
-            // 핵심 식별자: 서버 값으로 확정
-            part_id: remoteItem.part_id,
-            color_id: remoteItem.color_id,
-            // 메타데이터: 로컬이 있으면 유지, 없으면 서버 값 사용
-            part_name: localItem.part_name || remoteItem.part_name || '',
-            color_name: localItem.color_name || remoteItem.color_name || `Color ${remoteItem.color_id}`,
-            color_rgb: localItem.color_rgb || remoteItem.color_rgb || null,
-            notes: remoteItem.notes ?? localItem.notes,
-            shape_tag: localItem.shape_tag || remoteItem.shape_tag || '',
-            expected_stud_count: localItem.expected_stud_count ?? remoteItem.expected_stud_count ?? null,
-            usage_frequency: localItem.usage_frequency ?? remoteItem.usage_frequency ?? null,
-            sequence_index: localItem.sequence_index ?? remoteItem.sequence_index ?? 0,
-            is_dirty: false
-          }
-        })
-
-        const remoteKeys = new Set(data.items.map(item => `${item.part_id}_${item.color_id}`))
-        items.value
-          .filter(localItem => !remoteKeys.has(`${localItem.part_id}_${localItem.color_id}`))
-          .forEach(orphan => {
-            mergedItems.push(orphan)
-          })
-
-        items.value = mergedItems
-        
-        // 병합 후 메타데이터 보강 (색상 정보 포함)
-        await enrichItemsMetadata(items.value)
-      }
-    } catch (err) {
-      console.warn('서버에서 세션 로드 실패:', err)
-    }
-  }
-
   const loadSetNotes = async (setId) => {
     if (!setId) {
       notes.value = []
@@ -550,10 +470,20 @@ export function useInspectionSession() {
     }
 
     try {
-      const data = await callNotesApi({ method: 'GET', query: { set_id: setId } })
-      notes.value = Array.isArray(data?.notes) ? data.notes : []
+      const { data, error: notesError } = await supabase
+        .from('set_inspection_notes')
+        .select('*')
+        .eq('set_id', setId)
+        .order('created_at', { ascending: false })
+
+      if (notesError) throw notesError
+
+      notes.value = Array.isArray(data) ? data : []
     } catch (err) {
-      console.error('세트 노트 로드 실패:', err)
+      // 개발 환경에서만 에러 출력
+      if (import.meta.env.DEV) {
+        console.warn('세트 노트 로드 실패:', err.message)
+      }
       notes.value = []
     }
   }
@@ -566,22 +496,36 @@ export function useInspectionSession() {
       note_type: noteType,
       note_text: noteText,
       part_id: partId || null,
-      created_by: user.value.id
+      created_by: user.value.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
     }
 
-    const data = await callNotesApi({ method: 'POST', body: payload })
+    const { data, error: insertError } = await supabase
+      .from('set_inspection_notes')
+      .insert(payload)
+      .select()
+      .single()
 
-    if (data?.note) {
-      notes.value = [data.note, ...notes.value]
+    if (insertError) throw insertError
+
+    if (data) {
+      notes.value = [data, ...notes.value]
     }
 
-    return data?.note
+    return data
   }
 
   const deleteSetNote = async ({ noteId }) => {
     if (!noteId) return
 
-    await callNotesApi({ method: 'DELETE', query: { note_id: noteId } })
+    const { error: deleteError } = await supabase
+      .from('set_inspection_notes')
+      .delete()
+      .eq('id', noteId)
+
+    if (deleteError) throw deleteError
+
     notes.value = notes.value.filter(note => note.id !== noteId)
   }
 
@@ -590,11 +534,12 @@ export function useInspectionSession() {
     if (!item) return
 
     Object.assign(item, updates, {
-      is_dirty: true,
       updated_at: new Date().toISOString()
     })
+    session.last_active_item_id = item.id
     updateProgress()
-    saveToLocal()
+    session.last_saved_at = new Date().toISOString()
+    session.updated_at = session.last_saved_at
     scheduleDebouncedSync()
   }
 
@@ -602,32 +547,12 @@ export function useInspectionSession() {
     const total = items.value.length
     const checked = items.value.filter(i => i.status === 'checked').length
     session.progress = total > 0 ? Math.round((checked / total) * 100) : 0
-    session.is_dirty = true
     session.updated_at = new Date().toISOString()
-  }
-
-  const saveToLocal = async () => {
-    try {
-      const now = new Date().toISOString()
-      session.last_saved_at = now
-      session.updated_at = now
-
-      const sessionSnapshot = JSON.parse(JSON.stringify(session)) // 🔧 수정됨
-      const itemsSnapshot = items.value.map(item => ({ ...item })) // 🔧 수정됨
-
-      await sessionStore.setItem(session.id, sessionSnapshot)
-      await itemsStore.setItem(session.id, itemsSnapshot)
-    } catch (err) {
-      console.error('로컬 저장 실패:', err)
-    }
   }
 
   const syncToServer = async ({ forceFullSync = false } = {}) => {
     try {
       if (!session.id || !user.value) return
-
-      const dirtyItems = forceFullSync ? items.value : items.value.filter(item => item.is_dirty)
-      if (dirtyItems.length === 0 && !session.is_dirty && !forceFullSync) return
 
       if (syncInProgress.value) {
         pendingSync.value = true
@@ -639,78 +564,86 @@ export function useInspectionSession() {
       lastSyncError.value = null
       clearRetryTimer()
 
-      await callInspectionApi({
-        method: 'POST',
-        body: {
-          set_id: session.set_id,
-          user_id: session.user_id || user.value.id,
-          session_id: session.id,
-          started_at: session.started_at,
-          last_saved_at: session.last_saved_at,
-          status: session.status,
-          progress: session.progress,
-          completed_at: session.completed_at,
-          missing_count: session.missing_count,
-          duration_seconds: session.duration_seconds
-        }
-      })
+      const now = new Date().toISOString()
+      session.last_saved_at = now
+      session.updated_at = now
 
-      // forceFullSync일 때는 모든 아이템을 전송
-      if (dirtyItems.length > 0 || forceFullSync) {
-        const itemsToSync = forceFullSync ? items.value : dirtyItems
-        
-        if (itemsToSync.length === 0) {
-          console.warn(`[동기화] 동기화할 아이템이 없습니다. forceFullSync: ${forceFullSync}, dirtyItems: ${dirtyItems.length}, totalItems: ${items.value.length}`)
-        } else {
-          const itemsPayload = itemsToSync.map(item => {
-            if (!item.id) {
-              item.id = crypto.randomUUID()
-            }
-            return {
-              id: item.id,
-              part_id: item.part_id,
-              color_id: item.color_id,
-              element_id: item.element_id || null,
-              checked_count: item.checked_count,
-              total_count: item.total_count,
-              status: item.status || 'pending',
-              notes: item.notes || null,
-              updated_at: item.updated_at || new Date().toISOString()
-            }
-          })
+      const sessionUserId = session.user_id || user.value.id
+      const sessionPayload = {
+        id: session.id,
+        set_id: session.set_id,
+        user_id: sessionUserId,
+        status: session.status,
+        progress: session.progress,
+        started_at: session.started_at || now,
+        last_saved_at: session.last_saved_at,
+        completed_at: session.completed_at,
+        updated_at: session.updated_at
+      }
 
-          // 디버깅: 전송되는 아이템 상태 확인
-          const statusCounts = itemsPayload.reduce((acc, item) => {
-            acc[item.status] = (acc[item.status] || 0) + 1
-            return acc
-          }, {})
-          console.log(`[동기화] 세션 ${session.id.substring(0, 8)}... ${itemsPayload.length}개 아이템 전송 (forceFullSync: ${forceFullSync}), 상태 분포:`, statusCounts)
+      const { error: sessionError } = await supabase
+        .from('inspection_sessions')
+        .upsert(sessionPayload, { onConflict: 'id' })
 
-          await callInspectionApi({
-            method: 'PUT',
-            body: {
-              session_id: session.id,
-              items: itemsPayload
-            }
-          })
+      if (sessionError) throw sessionError
 
-          itemsToSync.forEach(item => {
-            item.is_dirty = false
-          })
+      session.user_id = sessionUserId
+
+      // 세션 상태가 in_progress로 동기화된 경우, 동일 제품의 다른 활성 세션을 paused로 변경
+      if (session.status === 'in_progress' && session.set_id && user.value) {
+        try {
+          const { data: otherSessions, error: checkError } = await supabase
+            .from('inspection_sessions')
+            .select('id, status')
+            .eq('set_id', session.set_id)
+            .eq('user_id', user.value.id)
+            .in('status', ['in_progress', 'paused'])
+            .neq('id', session.id)
+
+          if (!checkError && otherSessions && otherSessions.length > 0) {
+            const otherSessionIds = otherSessions.map(s => s.id)
+            await supabase
+              .from('inspection_sessions')
+              .update({ status: 'paused', updated_at: new Date().toISOString() })
+              .in('id', otherSessionIds)
+
+            console.log(`[세션 동기화] 동일 제품의 ${otherSessionIds.length}개 활성 세션을 paused로 변경`)
+          }
+        } catch (err) {
+          console.warn('동일 제품 세션 확인 실패:', err)
         }
       }
 
+      if (items.value.length > 0) {
+        const itemsPayload = items.value.map(item => ({
+          id: item.id || crypto.randomUUID(),
+          session_id: session.id,
+          part_id: item.part_id,
+          color_id: item.color_id,
+          element_id: item.element_id || null,
+          checked_count: item.checked_count,
+          total_count: item.total_count,
+          status: item.status || 'pending',
+          notes: item.notes || null,
+          updated_at: item.updated_at || new Date().toISOString()
+        }))
+
+        const { error: itemsError } = await supabase
+          .from('inspection_items')
+          .upsert(itemsPayload, { onConflict: 'id' })
+
+        if (itemsError) throw itemsError
+      }
+
       session.user_id = user.value.id
-      session.is_synced = true
-      session.updated_at = new Date().toISOString()
-      await saveToLocal()
       lastSyncAt.value = session.updated_at
     } catch (err) {
       console.error('서버 동기화 실패:', err)
-      session.is_synced = false
       lastSyncError.value = err.message
-      scheduleRetry()
-      throw err
+      // 프로덕션 모드에서는 재시도 스케줄링하지 않음
+      if (import.meta.env.DEV) {
+        scheduleRetry()
+      }
     } finally {
       syncInProgress.value = false
       if (pendingSync.value) {
@@ -725,23 +658,15 @@ export function useInspectionSession() {
   const pauseSession = async () => {
     try {
       session.status = 'paused'
-      session.is_dirty = true
       session.last_saved_at = new Date().toISOString()
-      
-      // 모든 아이템을 dirty로 표시하여 강제 동기화
-      items.value.forEach(item => {
-        item.is_dirty = true
-      })
-      
-      await saveToLocal()
       
       console.log(`[임시 저장] 세션 ${session.id?.substring(0, 8)}... 시작, 총 아이템: ${items.value.length}`)
       const statusCounts = items.value.reduce((acc, item) => {
         acc[item.status] = (acc[item.status] || 0) + 1
         return acc
       }, {})
-      console.log(`[임시 저장] 로컬 상태 분포:`, statusCounts)
-      
+      console.log(`[임시 저장] 상태 분포:`, statusCounts)
+
       await syncToServer({ forceFullSync: true })
       
       console.log(`[임시 저장] 완료`)
@@ -754,7 +679,6 @@ export function useInspectionSession() {
   const completeSession = async () => {
     session.status = 'completed'
     session.completed_at = new Date().toISOString()
-    session.is_dirty = true
     
     // 최종 progress 계산: (checked_count / total_count) * 100
     updateProgress()
@@ -767,109 +691,108 @@ export function useInspectionSession() {
     const completedAt = new Date(session.completed_at).getTime()
     const durationSeconds = Math.floor((completedAt - startedAt) / 1000)
     
-    // 세션 메타데이터에 저장 (필요시 DB에 추가 컬럼으로 저장 가능)
+    // 세션 메타데이터에 저장
     session.missing_count = missingCount
     session.duration_seconds = durationSeconds
     
-    await saveToLocal()
     await syncToServer({ forceFullSync: true })
   }
 
-  const resetSessionState = async ({ clearLocal = false } = {}) => {
-    const currentId = session.id
+  const completeSessionById = async (sessionId) => {
+    if (!sessionId) return
+
+    try {
+      // 서버에 완료 상태 업데이트
+      const { error } = await supabase
+        .from('inspection_sessions')
+        .update({
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionId)
+
+      if (error) {
+        console.warn('서버 세션 완료 처리 실패:', error)
+      }
+    } catch (err) {
+      console.error('세션 완료 처리 실패:', err)
+      throw err
+    }
+  }
+
+  const resetSessionState = async () => {
     pendingSync.value = false
     syncInProgress.value = false
     lastSyncError.value = null
     lastSyncAt.value = null
-
-    if (clearLocal && currentId) {
-      try {
-        await sessionStore.removeItem(currentId)
-        await itemsStore.removeItem(currentId)
-      } catch (err) {
-        console.warn('로컬 세션 제거 실패:', err)
-      }
-    }
 
     Object.assign(session, defaultSessionState())
     items.value = []
     notes.value = []
   }
 
-  const findLastSession = async () => {
+  const findLastSession = async (userId = null) => {
     try {
-      if (!user.value) return null
+      const targetUserId = userId || user.value?.id
 
-      // 1. 로컬 IndexedDB에서 먼저 확인
-      const keys = await sessionStore.keys()
-      if (keys.length > 0) {
-        const sessions = await Promise.all(
-          keys.map(key => sessionStore.getItem(key))
-        )
-
-        const userSessions = sessions.filter(s => 
-          s && s.user_id === user.value?.id
-        )
-
-        if (userSessions.length > 0) {
-          const lastSession = userSessions
-            .filter(s => s.status === 'in_progress' || s.status === 'paused')
-            .sort((a, b) => new Date(b.last_saved_at || b.started_at) - new Date(a.last_saved_at || a.started_at))[0]
-
-          if (lastSession) {
-            return lastSession
-          }
-        }
+      if (!targetUserId) {
+        return null
       }
 
-      // 2. 로컬에 없으면 서버에서 진행 중인 세션 확인 (다른 단말기 동기화)
-      try {
-        const { data: serverSessions, error: serverError } = await supabase
-          .from('inspection_sessions')
-          .select(`
-            id,
-            set_id,
-            status,
-            progress,
-            started_at,
-            last_saved_at,
-            completed_at,
-            lego_sets:set_id (
-              name,
-              set_num
-            )
-          `)
-          .eq('user_id', user.value.id)
-          .in('status', ['in_progress', 'paused'])
-          .order('last_saved_at', { ascending: false })
-          .limit(1)
+      const currentSessionId = session.id
 
-        if (!serverError && serverSessions && serverSessions.length > 0) {
-          const serverSession = serverSessions[0]
+      let query = supabase
+        .from('inspection_sessions')
+        .select(`
+          id,
+          set_id,
+          status,
+          progress,
+          started_at,
+          last_saved_at,
+          completed_at,
+          lego_sets:set_id (
+            name,
+            set_num
+          )
+        `)
+        .eq('user_id', targetUserId)
+        .in('status', ['in_progress', 'paused'])
+        .order('last_saved_at', { ascending: false })
+        .limit(1)
+
+      if (currentSessionId) {
+        query = query.neq('id', currentSessionId)
+      }
+
+      const { data: serverSessions, error: serverError } = await query
+
+      if (serverError) {
+        console.warn('[findLastSession] 서버 쿼리 오류', serverError)
+        return null
+      }
+
+      if (!serverSessions || serverSessions.length === 0) {
+        return null
+      }
+
+      const serverSession = serverSessions[0]
           const sessionData = {
             id: serverSession.id,
             set_id: serverSession.set_id,
             set_name: serverSession.lego_sets?.name || '세트명 없음',
-            user_id: user.value.id,
+            user_id: targetUserId,
             status: serverSession.status,
             progress: serverSession.progress || 0,
             started_at: serverSession.started_at,
             last_saved_at: serverSession.last_saved_at,
             completed_at: serverSession.completed_at,
-            is_synced: true,
             updated_at: serverSession.last_saved_at || serverSession.started_at
           }
 
-          // 서버에서 찾은 세션을 로컬에도 저장
-          await sessionStore.setItem(sessionData.id, sessionData)
-
-          return sessionData
-        }
-      } catch (serverErr) {
-        console.warn('서버에서 세션 찾기 실패:', serverErr)
-      }
-
-      return null
+      await hydrateSessionSetMetadata(supabase, sessionData)
+      return sessionData
     } catch (err) {
       console.error('마지막 세션 찾기 실패:', err)
       return null
@@ -967,7 +890,7 @@ export function useInspectionSession() {
     deleteSetNote,
     resetSessionState,
     findLastSession,
-    saveToLocal,
+    completeSessionById,
     syncToServer,
     syncInProgress,
     lastSyncError,

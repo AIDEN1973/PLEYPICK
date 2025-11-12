@@ -130,7 +130,7 @@
             >
               <div class="part-image">
                 <img 
-                  :src="part.part.part_img_url" 
+                  :src="getPartImageUrl(part)" 
                   :alt="part.part.name"
                   @error="handleImageError"
                 />
@@ -216,7 +216,7 @@
             >
               <div class="part-image">
                 <img 
-                  :src="part.part.part_img_url" 
+                  :src="getPartImageUrl(part)" 
                   :alt="part.part.name"
                   @error="handleImageError"
                 />
@@ -730,6 +730,12 @@ export default {
       }
     }
 
+    // 부품 이미지 URL 가져오기 (템플릿 표시용)
+    // 실제 저장 시에는 element_id 기반으로 처리되므로, 표시용으로는 part_img_url 사용
+    const getPartImageUrl = (part) => {
+      return part.part?.part_img_url || ''
+    }
+
     const loadSetParts = async () => {
       if (!selectedSet.value) return
       
@@ -745,7 +751,11 @@ export default {
         
         // 부품 정보 처리
         if (partsResult.status === 'fulfilled') {
-          setParts.value = partsResult.value.results || []
+          const parts = partsResult.value.results || []
+          
+          // element_id가 있는 부품에 대해 element_img_url 가져오기 (선택적, 성능 고려)
+          // 템플릿에서 필요할 때만 로드하도록 getPartImageUrl 함수 사용
+          setParts.value = parts
           console.log(`✅ Loaded ${setParts.value.length} parts`)
         } else {
           console.error('❌ Failed to load parts:', partsResult.reason)
@@ -783,10 +793,41 @@ export default {
     const downloadPartImage = async (part) => {
       try {
         console.log(`🖼️ Downloading image for part ${part.part.part_num}...`)
+        
+        // element_id 우선 사용 (가장 정확한 색상 매칭)
+        let imageUrl = null
+        let imageSource = 'unknown'
+        
+        if (part.element_id) {
+          try {
+            const { getElement } = useRebrickable()
+            const elementData = await getElement(part.element_id)
+            if (elementData?.element_img_url) {
+              imageUrl = elementData.element_img_url
+              imageSource = 'element_id'
+              console.log(`✅ element_id ${part.element_id} 기반 이미지 URL 획득`)
+            } else if (elementData?.part_img_url) {
+              imageUrl = elementData.part_img_url
+              imageSource = 'element_id_part_img'
+              console.log(`⚠️ element_id 이미지 없음, part_img_url 사용`)
+            }
+          } catch (elementErr) {
+            console.warn(`⚠️ element_id ${part.element_id} 이미지 조회 실패:`, elementErr)
+          }
+        }
+        
+        // element_id 실패 시 part_img_url 사용 (fallback)
+        if (!imageUrl) {
+          imageUrl = part.part.part_img_url
+          imageSource = 'part_num'
+          console.warn(`⚠️ part_num 기반 이미지 사용 (색상 정보 없을 수 있음)`)
+        }
+        
         const result = await processRebrickableImage(
-          part.part.part_img_url,
+          imageUrl,
           part.part.part_num,
-          part.color.id
+          part.color.id,
+          { elementId: part.element_id || null, imageSource }
         )
         
         console.log(`🖼️ Image processing result:`, result)
@@ -795,12 +836,13 @@ export default {
         if (result.uploadedUrl) {
           console.log(`💾 Saving image metadata for ${part.part.part_num}...`)
           await saveImageMetadata({
-            original_url: part.part.part_img_url,
+            original_url: imageUrl,
             supabase_url: result.uploadedUrl,
             file_path: result.path,
             file_name: result.filename,
             part_num: part.part.part_num,
             color_id: part.color.id,
+            element_id: part.element_id || null,
             set_num: selectedSet.value?.set_num
           })
           console.log(`✅ Image metadata saved for ${part.part.part_num}`)
@@ -852,21 +894,49 @@ export default {
           const batchResults = await Promise.allSettled(
             batch.map(async (part) => {
               try {
+                // element_id 우선 사용 (가장 정확한 색상 매칭)
+                let imageUrl = null
+                let imageSource = 'unknown'
+                
+                if (part.element_id) {
+                  try {
+                    const { getElement } = useRebrickable()
+                    const elementData = await getElement(part.element_id)
+                    if (elementData?.element_img_url) {
+                      imageUrl = elementData.element_img_url
+                      imageSource = 'element_id'
+                    } else if (elementData?.part_img_url) {
+                      imageUrl = elementData.part_img_url
+                      imageSource = 'element_id_part_img'
+                    }
+                  } catch (elementErr) {
+                    console.warn(`⚠️ element_id ${part.element_id} 이미지 조회 실패:`, elementErr)
+                  }
+                }
+                
+                // element_id 실패 시 part_img_url 사용 (fallback)
+                if (!imageUrl) {
+                  imageUrl = part.part.part_img_url
+                  imageSource = 'part_num'
+                }
+                
                 const result = await processRebrickableImage(
-                  part.part.part_img_url,
+                  imageUrl,
                   part.part.part_num,
-                  part.color.id
+                  part.color.id,
+                  { elementId: part.element_id || null, imageSource }
                 )
                 
                 // 이미지 메타데이터를 Supabase에 저장
                 if (result.uploadedUrl) {
                   await saveImageMetadata({
-                    original_url: part.part.part_img_url,
+                    original_url: imageUrl,
                     supabase_url: result.uploadedUrl,
                     file_path: result.path,
                     file_name: result.filename,
                     part_num: part.part.part_num,
                     color_id: part.color.id,
+                    element_id: part.element_id || null,
                     set_num: selectedSet.value?.set_num
                   })
                 }
@@ -1221,26 +1291,40 @@ export default {
                   try {
                     console.log(`🖼️ Uploading image for ${partData.part.part_num} (element_id: ${partData.element_id})...`)
                     
-                    // element_id가 있으면 Rebrickable API에서 element_id 기반 이미지 URL 가져오기
-                    let imageUrl = partData.part.part_img_url
+                    // element_id 우선 사용 (가장 정확한 색상 매칭)
+                    let imageUrl = null
+                    let imageSource = 'unknown'
+                    
                     if (partData.element_id) {
                       try {
                         const { getElement } = useRebrickable()
                         const elementData = await getElement(partData.element_id)
-                        if (elementData?.element_img_url || elementData?.part_img_url) {
-                          imageUrl = elementData.element_img_url || elementData.part_img_url
+                        if (elementData?.element_img_url) {
+                          imageUrl = elementData.element_img_url
+                          imageSource = 'element_id'
                           console.log(`✅ element_id ${partData.element_id} 기반 이미지 URL 획득:`, imageUrl)
+                        } else if (elementData?.part_img_url) {
+                          imageUrl = elementData.part_img_url
+                          imageSource = 'element_id_part_img'
+                          console.log(`⚠️ element_id 이미지 없음, part_img_url 사용`)
                         }
                       } catch (elementErr) {
-                        console.warn(`⚠️ element_id ${partData.element_id} 이미지 URL 가져오기 실패, 기본 part_img_url 사용:`, elementErr)
+                        console.warn(`⚠️ element_id ${partData.element_id} 이미지 조회 실패:`, elementErr)
                       }
+                    }
+                    
+                    // element_id 실패 시 part_img_url 사용 (fallback)
+                    if (!imageUrl) {
+                      imageUrl = partData.part.part_img_url
+                      imageSource = 'part_num'
+                      console.warn(`⚠️ part_num 기반 이미지 사용 (색상 정보 없을 수 있음)`)
                     }
                     
                     const imageResult = await processRebrickableImage(
                       imageUrl,
                       partData.part.part_num,
                       partData.color.id,
-                      { elementId: partData.element_id || null } // element_id 전달
+                      { elementId: partData.element_id || null, imageSource }
                     )
                     
                     if (imageResult.uploadedUrl) {
@@ -1249,7 +1333,7 @@ export default {
                         original_url: imageUrl,
                         supabase_url: imageResult.uploadedUrl,
                         file_path: imageResult.path,
-                        file_name: imageResult.filename || `${partData.part.part_num}_${partData.color.id}.webp`,
+                        file_name: imageResult.filename || (partData.element_id ? `${String(partData.element_id)}.webp` : `${partData.part.part_num}_${partData.color.id}.webp`),
                         part_num: partData.part.part_num,
                         color_id: partData.color.id,
                         element_id: partData.element_id || null,

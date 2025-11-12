@@ -116,7 +116,6 @@ app.post('/api/inspection', async (req, res) => {
       started_at: startedAt || now,
       last_saved_at: lastSavedAt || now,
       completed_at: completedAt || null,
-      is_synced: isSynced,
       device_local_id: deviceLocalId || null,
       updated_at: now
     })

@@ -707,24 +707,55 @@ const saveSetToMasterPartsDB = async () => {
           
           // 2.5단계: 부품 이미지를 Supabase Storage에 저장
           if (originalPart?.part?.part_img_url) {
-            const { uploadImageFromUrl, saveImageMetadata } = useImageManager()
+            const { saveImageMetadata, processRebrickableImage } = useImageManager()
+            const { getElement } = useRebrickable()
             try {
-              const imageResult = await uploadImageFromUrl(
-                originalPart.part.part_img_url,
-                `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
-                'lego_parts_images'
+              // element_id 우선 사용 (가장 정확한 색상 매칭)
+              let imageUrl = null
+              let imageSource = 'unknown'
+              
+              if (originalPart.element_id) {
+                try {
+                  const elementData = await getElement(originalPart.element_id)
+                  if (elementData?.element_img_url) {
+                    imageUrl = elementData.element_img_url
+                    imageSource = 'element_id'
+                  } else if (elementData?.part_img_url) {
+                    imageUrl = elementData.part_img_url
+                    imageSource = 'element_id_part_img'
+                  }
+                } catch (elementErr) {
+                  console.warn(`⚠️ element_id ${originalPart.element_id} 이미지 조회 실패:`, elementErr)
+                }
+              }
+              
+              // element_id 실패 시 part_img_url 사용 (fallback)
+              if (!imageUrl) {
+                imageUrl = originalPart.part.part_img_url
+                imageSource = 'part_num'
+              }
+              
+              // processRebrickableImage 사용 (element_id 기반 파일명 생성 및 중복 검사 포함)
+              const imageResult = await processRebrickableImage(
+                imageUrl,
+                originalPart.part.part_num,
+                originalPart.color.id,
+                { elementId: originalPart.element_id || null, imageSource }
               )
               
               // 이미지 메타데이터 저장
-              await saveImageMetadata({
-                original_url: originalPart.part.part_img_url,
-                supabase_url: imageResult.url,
-                file_path: imageResult.path,
-                file_name: `${originalPart.part.part_num}_${originalPart.color.id}.webp`,
-                part_num: originalPart.part.part_num,
-                color_id: originalPart.color.id,
-                set_num: targetSetNumber.value
-              })
+              if (imageResult.uploadedUrl) {
+                await saveImageMetadata({
+                  original_url: imageUrl,
+                  supabase_url: imageResult.uploadedUrl,
+                  file_path: imageResult.path,
+                  file_name: imageResult.filename,
+                  part_num: originalPart.part.part_num,
+                  color_id: originalPart.color.id,
+                  element_id: originalPart.element_id || null,
+                  set_num: targetSetNumber.value
+                })
+              }
               
               console.log(`부품 이미지 저장 완료: ${originalPart.part.part_num}`)
             } catch (imageError) {

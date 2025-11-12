@@ -1451,7 +1451,7 @@ const loadPartInfo = async () => {
           lego_parts(part_num, name),
           lego_colors(name, rgb)
         `)
-        .eq('element_id', inputValue)
+        .eq('element_id', String(inputValue))
         .limit(1)
       
       if (!elementError && elementData && elementData.length > 0) {
@@ -1476,7 +1476,7 @@ const loadPartInfo = async () => {
           lego_parts(part_num, name),
           lego_colors(name, rgb)
         `)
-        .eq('element_id', inputValue)
+        .eq('element_id', String(inputValue))
         .limit(1)
       
       if (!elementError && elementData && elementData.length > 0) {

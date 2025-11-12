@@ -5,130 +5,207 @@
       <!-- 상단 헤더 -->
       <header class="bg-white sticky top-0 z-50" style="border-bottom: 1px solid #e5e7eb;">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12">
-          <div class="flex items-center justify-between h-16 lg:h-20">
-            <!-- 왼쪽: 로고 및 메뉴 -->
-            <div class="flex items-center flex-1">
-              <!-- 로고 -->
-              <router-link to="/" class="nav-logo flex items-center mr-2 sm:mr-4 flex-shrink-0">
+          <div class="flex items-center h-16 lg:h-20">
+            <!-- 왼쪽: 로고 -->
+            <div class="flex items-center flex-1 justify-start">
+              <router-link to="/" class="nav-logo flex items-center mr-2 sm:mr-4">
                 <span class="text-xl sm:text-2xl font-bold text-gray-800">BrickBox</span>
               </router-link>
+            </div>
 
-              <!-- 데스크톱 메뉴 -->
-              <nav class="hidden lg:flex gap-3 xl:gap-5 items-center ml-4">
+            <!-- 가운데: 데스크톱/태블릿 메뉴 -->
+            <nav class="hidden md:flex gap-3 xl:gap-5 items-center justify-center flex-shrink-0">
                 <!-- 검수 메뉴 -->
                 <router-link 
-                  v-if="user"
-                  to="/manual-inspection" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  검수 시작
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/inspection-history" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  검수 이력
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/inspection-analytics" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  검수 통계
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/inspection-notes" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  검수 노트
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/part-to-set-search" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  부품으로 세트찾기
-                </router-link>
-                <router-link 
-                  v-if="user"
-                  to="/alternative-parts-search" 
-                  class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
-                  active-class="nav-menu-active"
-                >
-                  유사부품 찾기
-                </router-link>
+                    v-if="user"
+                    to="/manual-inspection" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    검수시작
+                  </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/inspection-history" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    검수이력
+                  </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/inspection-notes" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    검수노트
+                  </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/part-to-set-search" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    부품으로 세트찾기
+                  </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/missing-parts" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    누락부품
+                  </router-link>
 
-                <!-- 관리 드롭다운 -->
-                <div v-if="user && isAdmin" class="relative" ref="managementDropdown">
-                  <button
-                    @click="showManagementMenu = !showManagementMenu"
-                    class="text-sm xl:text-base font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
-                  >
-                    관리
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2"
-                      viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                  </button>
-                  <div
-                    v-if="showManagementMenu"
-                    class="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-[80vh] overflow-y-auto"
-                  >
-                    <div class="p-2">
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">레고 관리</div>
-                        <router-link to="/new-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">신규 레고 등록</router-link>
-                        <router-link to="/saved-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">저장된 레고</router-link>
-                      </div>
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">데이터셋</div>
-                        <router-link to="/synthetic-dataset" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">합성 데이터셋</router-link>
-                      </div>
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">AI 학습</div>
-                        <router-link to="/automated-training" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">AI 학습</router-link>
-                      </div>
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">검출</div>
-                        <router-link to="/hybrid-detection" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">부품 검출</router-link>
-                      </div>
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">자동 복구</div>
-                        <router-link to="/synthetic-dataset" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">합성 데이터셋 관리</router-link>
-                        <a href="#" @click.prevent="openAutoRecoveryStatus" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">자동 복구 상태</a>
-                        <a href="#" @click.prevent="openPortManagement" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">포트 관리</a>
-                        <a href="#" @click.prevent="openSystemMonitoring" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">시스템 모니터링</a>
-                      </div>
-                      <div class="mb-2">
-                        <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">시스템 관리</div>
-                        <router-link to="/dashboard" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">대시보드</router-link>
-                        <router-link to="/element-search" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">Element ID 검색</router-link>
-                        <router-link to="/metadata-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">메타데이터 관리</router-link>
-                        <router-link to="/render-optimization" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">렌더링 최적화</router-link>
-                        <router-link to="/dataset-converter" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">데이터셋 변환</router-link>
-                        <router-link to="/store-manager" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">매장 관리</router-link>
-                        <router-link to="/store-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">매장 대시보드</router-link>
-                        <router-link to="/monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">모니터링</router-link>
-                        <router-link to="/model-monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">모델 모니터링</router-link>
-                        <router-link to="/system-monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">시스템 모니터링</router-link>
-                        <router-link to="/quality-healing" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">품질 회복 대시보드</router-link>
-                        <router-link to="/category-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">카테고리 관리</router-link>
+                  <!-- 관리 드롭다운 -->
+                  <div v-if="user && isAdmin" class="relative" ref="managementDropdown">
+                    <button
+                      @click="showManagementMenu = !showManagementMenu"
+                      class="text-sm xl:text-base font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
+                    >
+                      관리
+                      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2"
+                        viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                    </button>
+                    <div
+                      v-if="showManagementMenu"
+                      class="absolute left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-[80vh] overflow-y-auto"
+                    >
+                      <div class="p-2">
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">레고 관리</div>
+                          <router-link to="/new-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">신규 레고 등록</router-link>
+                          <router-link to="/saved-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">저장된 레고</router-link>
+                        </div>
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">데이터셋</div>
+                          <router-link to="/synthetic-dataset" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">합성 데이터셋</router-link>
+                        </div>
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">AI 학습</div>
+                          <router-link to="/automated-training" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">AI 학습</router-link>
+                        </div>
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">검출</div>
+                          <router-link to="/hybrid-detection" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">부품 검출</router-link>
+                        </div>
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">자동 복구</div>
+                          <router-link to="/synthetic-dataset" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">합성 데이터셋 관리</router-link>
+                          <a href="#" @click.prevent="openAutoRecoveryStatus" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">자동 복구 상태</a>
+                          <a href="#" @click.prevent="openPortManagement" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">포트 관리</a>
+                          <a href="#" @click.prevent="openSystemMonitoring" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">시스템 모니터링</a>
+                        </div>
+                        <div class="mb-2">
+                          <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">시스템 관리</div>
+                          <router-link to="/dashboard" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">대시보드</router-link>
+                          <router-link to="/element-search" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">Element ID 검색</router-link>
+                          <router-link to="/metadata-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">메타데이터 관리</router-link>
+                          <router-link to="/render-optimization" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">렌더링 최적화</router-link>
+                          <router-link to="/dataset-converter" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">데이터셋 변환</router-link>
+                          <router-link to="/store-manager" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">매장 관리</router-link>
+                          <router-link to="/store-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">매장 대시보드</router-link>
+                          <router-link to="/monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">모니터링</router-link>
+                          <router-link to="/model-monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">모델 모니터링</router-link>
+                          <router-link to="/system-monitoring" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">시스템 모니터링</router-link>
+                          <router-link to="/quality-healing" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">품질 회복 대시보드</router-link>
+                          <router-link to="/category-management" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">카테고리 관리</router-link>
+                        </div>
                       </div>
                     </div>
                   </div>
+            </nav>
+
+            <!-- 가운데: 모바일 메뉴 (휴대폰만) -->
+            <div v-if="user" class="md:hidden flex items-center justify-center flex-shrink-0 mobile-menu-container">
+              <router-link 
+                to="/manual-inspection" 
+                class="px-3 py-2 text-sm font-bold text-gray-800 transition-colors whitespace-nowrap no-underline"
+                :class="{ 'text-blue-600': isActiveRoute('/manual-inspection') }"
+              >
+                검수시작
+              </router-link>
+              <router-link 
+                to="/inspection-history" 
+                class="px-3 py-2 text-sm font-bold text-gray-800 transition-colors whitespace-nowrap no-underline"
+                :class="{ 'text-blue-600': isActiveRoute('/inspection-history') }"
+              >
+                검수이력
+              </router-link>
+              <div class="relative" ref="mobileMenuDropdown">
+                <button
+                  @click.prevent="handleMobileMenuClick"
+                  class="px-3 py-2 text-sm font-bold text-gray-800 transition-colors flex items-center gap-1 whitespace-nowrap no-underline mobile-menu-button"
+                  type="button"
+                  ref="mobileMenuButton"
+                >
+                  더보기
+                  <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2"
+                    viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                </button>
+                <div
+                  v-if="showMobileMenu"
+                  ref="mobileDropdownContent"
+                  class="mobile-dropdown-menu"
+                >
+                  <router-link 
+                    to="/inspection-notes" 
+                    @click="showMobileMenu = false"
+                    class="mobile-dropdown-item"
+                    :class="{ 'mobile-dropdown-item-active': isActiveRoute('/inspection-notes') }"
+                  >
+                    검수노트
+                  </router-link>
+                  <router-link 
+                    to="/part-to-set-search" 
+                    @click="showMobileMenu = false"
+                    class="mobile-dropdown-item"
+                    :class="{ 'mobile-dropdown-item-active': isActiveRoute('/part-to-set-search') }"
+                  >
+                    부품으로 세트찾기
+                  </router-link>
+                  <router-link 
+                    to="/missing-parts" 
+                    @click="showMobileMenu = false"
+                    class="mobile-dropdown-item"
+                    :class="{ 'mobile-dropdown-item-active': isActiveRoute('/missing-parts') }"
+                  >
+                    누락부품
+                  </router-link>
+                  <div v-if="isAdmin" class="mobile-dropdown-divider">
+                    <div class="mobile-dropdown-label">관리</div>
+                    <router-link 
+                      to="/dashboard" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                    >
+                      대시보드
+                    </router-link>
+                    <router-link 
+                      to="/synthetic-dataset" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                    >
+                      합성 데이터셋
+                    </router-link>
+                    <router-link 
+                      to="/automated-training" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                    >
+                      AI 학습
+                    </router-link>
+                  </div>
                 </div>
-              </nav>
+              </div>
             </div>
 
             <!-- 오른쪽: 계정 메뉴 -->
-            <div class="flex items-center gap-2 lg:gap-4 flex-shrink-0">
+            <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end">
               <router-link v-if="!user" to="/login" class="px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 whitespace-nowrap">로그인</router-link>
               <div v-else class="relative" ref="userMenuDropdown">
                 <!-- // 🔧 수정됨: 계정 메뉴 -->
@@ -210,8 +287,39 @@ export default {
     const managementDropdown = ref(null)
     const showUserMenu = ref(false)
     const userMenuDropdown = ref(null)
+    const showMobileMenu = ref(false)
+    const mobileMenuDropdown = ref(null)
+    const mobileMenuButton = ref(null)
+    const mobileDropdownContent = ref(null)
 
     const isSystemMonitoringRoute = computed(() => route.path.startsWith('/system-monitoring'))
+    
+    // watch로 showMobileMenu 변화 감지
+    watch(showMobileMenu, (newVal) => {
+      console.log('=== showMobileMenu changed ===')
+      console.log('New value:', newVal)
+      console.log('mobileMenuDropdown ref:', mobileMenuDropdown.value)
+      console.log('mobileDropdownContent ref:', mobileDropdownContent.value)
+      
+      if (newVal && mobileDropdownContent.value) {
+        console.log('Dropdown should be visible now')
+        console.log('Dropdown element:', mobileDropdownContent.value)
+        console.log('Dropdown classes:', mobileDropdownContent.value.className)
+      }
+    })
+
+    const handleMobileMenuClick = (event) => {
+      console.log('=== Mobile Menu Click Debug ===')
+      console.log('Event:', event)
+      console.log('Current showMobileMenu state:', showMobileMenu.value)
+      console.log('mobileMenuDropdown ref:', mobileMenuDropdown.value)
+      console.log('mobileMenuDropdown element:', mobileMenuDropdown.value ? mobileMenuDropdown.value.outerHTML.substring(0, 200) : 'null')
+      
+      showMobileMenu.value = !showMobileMenu.value
+      
+      console.log('New showMobileMenu state:', showMobileMenu.value)
+      
+    }
 
     const handleClickOutside = (event) => {
       if (managementDropdown.value && !managementDropdown.value.contains(event.target)) {
@@ -219,6 +327,21 @@ export default {
       }
       if (userMenuDropdown.value && !userMenuDropdown.value.contains(event.target)) {
         showUserMenu.value = false
+      }
+      if (mobileMenuDropdown.value) {
+        const isClickInside = mobileMenuDropdown.value.contains(event.target)
+        console.log('=== Click Outside Check ===')
+        console.log('Click target:', event.target)
+        console.log('mobileMenuDropdown element:', mobileMenuDropdown.value)
+        console.log('Is click inside mobileMenuDropdown:', isClickInside)
+        console.log('Current showMobileMenu:', showMobileMenu.value)
+        
+        if (!isClickInside) {
+          console.log('Closing mobile menu due to outside click')
+          showMobileMenu.value = false
+        } else {
+          console.log('Click is inside mobile menu, keeping it open')
+        }
       }
     }
 
@@ -312,6 +435,11 @@ export default {
       managementDropdown,
       showUserMenu,
       userMenuDropdown,
+      showMobileMenu,
+      mobileMenuDropdown,
+      mobileMenuButton,
+      mobileDropdownContent,
+      handleMobileMenuClick,
       openAutoRecoveryStatus,
       openPortManagement,
       openSystemMonitoring,
@@ -388,8 +516,24 @@ body {
   justify-content: space-between;
 }
 
+.justify-center {
+  justify-content: center;
+}
+
+.justify-start {
+  justify-content: flex-start;
+}
+
+.justify-end {
+  justify-content: flex-end;
+}
+
 .gap-5 {
   gap: 1.25rem;
+}
+
+.gap-3 {
+  gap: 0.75rem;
 }
 
 .gap-1 {
@@ -456,6 +600,18 @@ body {
 
 .nav-menu-link.nav-menu-active {
   color: #2563eb;
+}
+
+.no-underline {
+  text-decoration: none;
+}
+
+.mobile-menu-button {
+  border: none;
+  background: none;
+  outline: none;
+  box-shadow: none;
+  cursor: pointer;
 }
 
 .text-base {
@@ -791,6 +947,10 @@ body {
   flex: 1 1 0%;
 }
 
+.hidden {
+  display: none;
+}
+
 /* 반응형 유틸리티 */
 .sticky {
   position: sticky;
@@ -860,6 +1020,16 @@ body {
 
   .sm\:p-6 {
     padding: 1.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .md\:flex {
+    display: flex !important;
+  }
+
+  .md\:hidden {
+    display: none !important;
   }
 }
 
@@ -934,7 +1104,26 @@ main {
   }
 }
 
-@media (max-width: 768px) {
+
+/* 태블릿/데스크톱 메뉴 간격 보장 */
+@media (min-width: 768px) {
+  header nav.gap-3 {
+    gap: 0.75rem !important;
+  }
+  
+  header nav.gap-3 > * {
+    margin: 0;
+  }
+}
+
+@media (min-width: 1280px) {
+  header nav[class*="gap-3"][class*="xl:gap-5"],
+  header nav.gap-3 {
+    gap: 1.25rem !important;
+  }
+}
+
+@media (max-width: 767px) {
   .px-12 {
     padding-left: 1rem;
     padding-right: 1rem;
@@ -951,5 +1140,150 @@ main {
   .text-base {
     font-size: 0.875rem;
   }
+
+  header .flex.items-center {
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+
+  .nav-logo {
+    flex-shrink: 0;
+  }
+
+  header .flex.items-center.flex-1 {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  /* 모바일에서 데스크톱 메뉴 확실히 숨김 */
+  header nav.hidden {
+    display: none !important;
+  }
+
+  /* 모바일 메뉴 간격 줄이기 */
+  .mobile-menu-container {
+    gap: 0.125rem !important;
+    overflow: visible !important;
+  }
+
+  /* 모바일 메뉴 항목 패딩 줄이기 */
+  .mobile-menu-container a.px-3,
+  .mobile-menu-container button.px-3 {
+    padding-left: 0.375rem !important;
+    padding-right: 0.375rem !important;
+  }
+  
+  /* 모바일 메뉴 모든 항목 폰트 사이즈 통일 */
+  .mobile-menu-container a,
+  .mobile-menu-container button {
+    font-size: 0.875rem !important;
+    font-weight: 700 !important;
+    line-height: 1.25rem !important;
+  }
+  
+  /* 모바일 메뉴 컨테이너의 부모 overflow 해제 */
+  header .flex.items-center.h-16,
+  header .flex.items-center.lg\:h-20 {
+    overflow: visible !important;
+  }
+  
+  /* 헤더 컨테이너 overflow 해제 */
+  header > div.max-w-7xl {
+    overflow: visible !important;
+  }
+}
+
+/* 모바일 드롭다운 메뉴 스타일 */
+.mobile-dropdown-menu {
+  position: absolute !important;
+  right: 0 !important;
+  top: 100% !important;
+  margin-top: 0.5rem !important;
+  min-width: 10rem !important;
+  width: auto !important;
+  background: white !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
+  z-index: 99999 !important;
+  overflow: visible !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+.mobile-dropdown-item {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem !important;
+  font-weight: 700 !important;
+  line-height: 1.25rem !important;
+  color: #1f2937;
+  text-decoration: none;
+  transition: all 0.15s;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-button {
+    font-size: 0.875rem !important;
+  }
+
+  .mobile-dropdown-item {
+    font-size: 0.875rem !important;
+  }
+}
+
+.mobile-dropdown-item:hover {
+  background-color: #f3f4f6;
+  color: #2563eb;
+}
+
+.mobile-dropdown-item-active {
+  color: #2563eb;
+  background-color: #f9fafb;
+}
+
+.mobile-dropdown-item-sub {
+  font-weight: 400;
+  color: #374151;
+}
+
+.mobile-dropdown-item-sub:hover {
+  color: #2563eb;
+}
+
+.mobile-dropdown-divider {
+  border-top: 1px solid #e5e7eb;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.mobile-dropdown-label {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+}
+
+/* 모바일 드롭다운 애니메이션 */
+.mobile-dropdown-enter-active,
+.mobile-dropdown-leave-active {
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.mobile-dropdown-enter-from {
+  opacity: 0;
+  transform: translateY(-0.5rem);
+}
+
+.mobile-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-0.5rem);
 }
 </style>

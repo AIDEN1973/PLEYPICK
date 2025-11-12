@@ -172,6 +172,59 @@ export function useImageManager() {
     }
   }
 
+  // element_id 기반 이미지 중복 검사 함수 - ✅ 캐싱 적용
+  const checkPartImageDuplicateByElementId = async (elementId) => {
+    try {
+      const cacheKey = `element_${String(elementId)}`
+      
+      // ✅ 캐시 확인
+      const cached = imageDuplicateCache.get(cacheKey)
+      if (cached !== undefined) {
+        console.log(`✅ Cache hit for ${cacheKey}: ${cached}`)
+        return cached
+      }
+      
+      console.log(`Checking for existing image: element_id=${elementId}`)
+      
+      // 1. DB에서 먼저 확인 (더 정확함)
+      const { data: partImage, error: dbError } = await supabase
+        .from('part_images')
+        .select('uploaded_url, filename')
+        .eq('element_id', String(elementId))
+        .maybeSingle()
+      
+      if (!dbError && partImage?.uploaded_url) {
+        console.log(`Existing image found in DB for element_id ${elementId}: ${partImage.uploaded_url}`)
+        imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
+        return true
+      }
+      
+      // 2. Storage 버킷에서 직접 확인 (폴백)
+      const fileName = `${String(elementId)}.webp`
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+      const bucketName = 'lego_parts_images'
+      const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+      
+      // HTTP HEAD 요청으로 이미지 존재 여부 확인
+      try {
+        const response = await fetch(imageUrl, { method: 'HEAD' })
+        if (response.ok) {
+          console.log(`Existing image found in Storage for element_id ${elementId}: ${imageUrl}`)
+          imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
+          return true
+        }
+      } catch (fetchErr) {
+        console.warn('Storage check failed:', fetchErr.message)
+      }
+      
+      imageDuplicateCache.set(cacheKey, false) // ✅ 캐시 저장
+      return false
+    } catch (err) {
+      console.warn('Error checking image duplicate by element_id:', err.message)
+      return false
+    }
+  }
+
   // 부품별 이미지 중복 검사 함수 (부품번호 + 색상ID로 검사) - ✅ 캐싱 적용
   const checkPartImageDuplicate = async (partNum, colorId) => {
     try {
@@ -359,19 +412,23 @@ export function useImageManager() {
       // 1. 부품별 이미지 중복 검사 수행 (강제 업로드 옵션)
       const forceUpload = options?.forceUpload || false
       if (!forceUpload) {
-        const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
+        // element_id가 있으면 element_id로 중복 검사, 없으면 part_num + color_id로 검사
+        const isDuplicate = elementId
+          ? await checkPartImageDuplicateByElementId(elementId)
+          : await checkPartImageDuplicate(partNum, colorId)
         if (isDuplicate) {
-          console.log(`Skipping duplicate image for part ${partNum} (color: ${colorId})`)
+          console.log(`Skipping duplicate image for ${elementId ? `element_id ${elementId}` : `part ${partNum} (color: ${colorId})`}`)
+          const duplicateFilename = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId || 'unknown'}.webp`
           return {
             originalUrl: imageUrl,
             uploadedUrl: null, // 중복으로 업로드하지 않음
-            filename: originalFilename,
+            filename: duplicateFilename,
             path: uploadPath,
             isDuplicate: true
           }
         }
       } else {
-        console.log(`Force uploading image for part ${partNum} (color: ${colorId}) - overwriting existing`)
+        console.log(`Force uploading image for ${elementId ? `element_id ${elementId}` : `part ${partNum} (color: ${colorId})`} - overwriting existing`)
       }
       
       try {
@@ -408,8 +465,10 @@ export function useImageManager() {
         
         URL.revokeObjectURL(img.src)
         
-        // 파일명을 partNum_colorId.webp 형식으로 통일
-        const fileName = `${partNum}_${colorId}.webp`
+        // 파일명 생성: element_id 우선, 없으면 partNum_colorId.webp
+        const fileName = elementId
+          ? `${String(elementId)}.webp`
+          : `${partNum}_${colorId || 'unknown'}.webp`
         const file = new File([webpBlob], fileName, { type: 'image/webp' })
         
         // Supabase Storage에 직접 업로드
@@ -469,7 +528,10 @@ export function useImageManager() {
           }
           
           const proxyBlob = new Blob([proxyResponse.data])
-          const fileName = `${partNum}_${colorId}.webp`
+          // 파일명 생성: element_id 우선, 없으면 partNum_colorId.webp
+          const fileName = elementId
+            ? `${String(elementId)}.webp`
+            : `${partNum}_${colorId || 'unknown'}.webp`
           const file = new File([proxyBlob], fileName, { type: 'image/webp' })
           
           // Supabase Storage에 직접 업로드
@@ -739,9 +801,14 @@ export function useImageManager() {
   // 이미지 메타데이터를 Supabase에 저장
   const saveImageMetadata = async (imageData) => {
     try {
+      // element_id가 있으면 String으로 변환하여 일관성 유지
+      const metadataPayload = {
+        ...imageData,
+        ...(imageData.element_id && { element_id: String(imageData.element_id) })
+      }
       const { error } = await supabase
         .from('image_metadata')
-        .insert([imageData], { returning: 'minimal' })
+        .insert([metadataPayload], { returning: 'minimal' })
 
       if (error) {
         throw new Error(`Failed to save image metadata: ${error.message}`)
@@ -764,31 +831,52 @@ export function useImageManager() {
         color_id: colorId,
         original_url: uploadedUrl,
         uploaded_url: uploadedUrl,
-        filename: filename || `${partNum}_${colorId}.webp`,
+        filename: filename || (elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`),
         upload_status: 'completed',
         ...(elementId && { element_id: String(elementId) }) // element_id가 있으면 추가
       }
 
-      // element_id가 있으면 element_id로도 조회/업데이트 시도
-      let updateQuery = supabase
-        .from('part_images')
-        .update(payload)
+      // 1) element_id가 있으면 element_id로 먼저 조회/업데이트 시도
+      let updated = null
+      let updateError = null
       
       if (elementId) {
-        // element_id가 있으면 element_id로 우선 조회
-        updateQuery = updateQuery.eq('element_id', String(elementId))
-      } else {
-        // element_id가 없으면 part_id + color_id로 조회
-        updateQuery = updateQuery.eq('part_id', String(partNum)).eq('color_id', colorId)
+        const { data: updatedByElement, error: elementUpdateError } = await supabase
+          .from('part_images')
+          .update(payload)
+          .eq('element_id', String(elementId))
+          .select('part_id')
+        
+        if (!elementUpdateError && updatedByElement && updatedByElement.length > 0) {
+          updated = updatedByElement
+          console.log(`part_images updated by element_id: ${elementId}`)
+        } else if (elementUpdateError) {
+          updateError = elementUpdateError
+        }
       }
-
-      const { data: updated, error: updateError } = await updateQuery.select('part_id')
+      
+      // 2) element_id로 업데이트 실패했거나 element_id가 없으면 part_id + color_id로 조회/업데이트 시도
+      if (!updated || updated.length === 0) {
+        const { data: updatedByPartColor, error: partColorUpdateError } = await supabase
+          .from('part_images')
+          .update(payload)
+          .eq('part_id', String(partNum))
+          .eq('color_id', colorId)
+          .select('part_id')
+        
+        if (!partColorUpdateError && updatedByPartColor && updatedByPartColor.length > 0) {
+          updated = updatedByPartColor
+          console.log(`part_images updated by part_id + color_id: ${partNum}_${colorId}`)
+        } else if (partColorUpdateError) {
+          updateError = partColorUpdateError
+        }
+      }
 
       if (updateError) {
         console.warn('part_images update failed, will try insert:', updateError.message)
       }
 
-      // 2) 업데이트된 행이 없으면 삽입
+      // 3) 업데이트된 행이 없으면 삽입
       if (!updated || updated.length === 0) {
         const { error: insertError } = await supabase
           .from('part_images')
@@ -838,7 +926,7 @@ export function useImageManager() {
     }
   }
 
-  // 여러 이미지를 일괄 처리
+  // 여러 이미지를 일괄 처리 (element_id 지원)
   const processMultipleImages = async (imageData) => {
     const results = []
     const errors = []
@@ -854,7 +942,8 @@ export function useImageManager() {
           const result = await processRebrickableImage(
             data.imageUrl,
             data.partNum,
-            data.colorId
+            data.colorId,
+            { elementId: data.elementId || null, imageSource: data.imageSource || 'unknown' }
           )
           results[i] = result
         } catch (err) {
@@ -883,6 +972,7 @@ export function useImageManager() {
     checkBucketExists,
     extractOriginalFilename,
     checkPartImageDuplicate,
+    checkPartImageDuplicateByElementId,
     // ✅ 캐시 관리 함수 추가
     clearImageCache: () => imageDuplicateCache.clear(),
     getImageCacheSize: () => imageDuplicateCache.size,

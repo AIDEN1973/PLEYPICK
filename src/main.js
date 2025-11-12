@@ -28,11 +28,10 @@ import CategoryManagementView from './views/CategoryManagementView.vue'
 import SyntheticImageUploader from './views/SyntheticImageUploader.vue'
 import PortManagement from './components/PortManagement.vue'
 import ManualInspection from './views/ManualInspection.vue'
-import InspectionHistory from './views/InspectionHistory.vue'
 import InspectionAnalytics from './views/InspectionAnalytics.vue'
 import InspectionNotes from './views/InspectionNotes.vue'
 import PartToSetSearch from './views/PartToSetSearch.vue'
-import AlternativePartsSearch from './views/AlternativePartsSearch.vue'
+import MissingParts from './views/MissingParts.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -61,11 +60,10 @@ const routes = [
   { path: '/synthetic-uploader', name: 'SyntheticImageUploader', component: SyntheticImageUploader },
   { path: '/port-management', name: 'PortManagement', component: PortManagement },
   { path: '/manual-inspection', name: 'ManualInspection', component: ManualInspection },
-  { path: '/inspection-history', name: 'InspectionHistory', component: InspectionHistory },
-  { path: '/inspection-analytics', name: 'InspectionAnalytics', component: InspectionAnalytics },
+  { path: '/inspection-history', name: 'InspectionHistory', component: InspectionAnalytics },
   { path: '/inspection-notes', name: 'InspectionNotes', component: InspectionNotes },
   { path: '/part-to-set-search', name: 'PartToSetSearch', component: PartToSetSearch },
-  { path: '/alternative-parts-search', name: 'AlternativePartsSearch', component: AlternativePartsSearch }
+  { path: '/missing-parts', name: 'MissingParts', component: MissingParts }
 ]
 
 const router = createRouter({

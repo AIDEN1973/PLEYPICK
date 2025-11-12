@@ -1091,23 +1091,55 @@ const generateBatchVectors = async () => {
         const isZeroVector = !vector
         
         if (isZeroVector) {
-          // 이미지 URL 조회 (우선순위: part_images > lego_parts)
+          // 이미지 URL 조회 (element_id 우선, part_images > lego_parts)
           try {
             let imageUrl = null
             
-            // 1. part_images 테이블에서 조회 (우선)
-            const { data: partImageData } = await supabase
-              .from('part_images')
-              .select('uploaded_url')
+            // 0. element_id 조회 (set_parts에서)
+            let elementId = null
+            const { data: setPartData } = await supabase
+              .from('set_parts')
+              .select('element_id')
               .eq('part_id', part.part_id)
               .eq('color_id', part.color_id)
-              .not('uploaded_url', 'is', null)
+              .limit(1)
               .maybeSingle()
             
-            if (partImageData?.uploaded_url) {
-              imageUrl = partImageData.uploaded_url
-            } else {
-              // 2. lego_parts에서 가져오기 (폴백)
+            if (setPartData?.element_id) {
+              elementId = setPartData.element_id
+            }
+            
+            // 1. element_id가 있으면 element_id로 먼저 조회
+            if (elementId) {
+              const { data: partImageByElement } = await supabase
+                .from('part_images')
+                .select('uploaded_url')
+                .eq('element_id', String(elementId))
+                .not('uploaded_url', 'is', null)
+                .maybeSingle()
+              
+              if (partImageByElement?.uploaded_url) {
+                imageUrl = partImageByElement.uploaded_url
+              }
+            }
+            
+            // 2. element_id로 찾지 못했거나 element_id가 없으면 part_id + color_id로 조회
+            if (!imageUrl) {
+              const { data: partImageData } = await supabase
+                .from('part_images')
+                .select('uploaded_url')
+                .eq('part_id', part.part_id)
+                .eq('color_id', part.color_id)
+                .not('uploaded_url', 'is', null)
+                .maybeSingle()
+              
+              if (partImageData?.uploaded_url) {
+                imageUrl = partImageData.uploaded_url
+              }
+            }
+            
+            // 3. part_images에서 찾지 못했으면 lego_parts에서 가져오기 (폴백)
+            if (!imageUrl) {
               const { data: legoData } = await supabase
                 .from('lego_parts')
                 .select('part_img_url')

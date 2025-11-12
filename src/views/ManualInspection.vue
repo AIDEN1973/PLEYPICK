@@ -2,25 +2,30 @@
   <div class="pleyon-layout">
     <div class="layout-container">
       <main class="main-panel">
-        <header class="panel-header" :class="{ 'session-header': session.id, 'start-header': !session.id }">
+        <header v-if="!session.id" class="page-header">
+          <h1>부품검수</h1>
+          <p>검수할 레고 세트를 선택하세요</p>
+        </header>
+        <header v-else class="panel-header session-header">
           <div class="header-left">
-            <h1 v-if="!session.id" class="start-title">부품검수</h1>
-            <div v-else class="session-title">
-              <h1>{{ session.set_name }}</h1>
+            <div class="session-title">
+              <h1>{{ sessionDisplayName }}</h1>
               <div class="session-stats">
                 <span class="stat-badge progress">{{ progress }}%</span>
-                <span class="stat-badge missing">{{ missingCount }}개 누락</span>
+                <span class="stat-badge missing" v-if="getMissingCountInfo().categoryCount > 0">
+                  {{ getMissingCountInfo().categoryCount }}개 분류, 총 {{ getMissingCountInfo().totalCount }}개
+                </span>
                 <span class="stat-badge time">{{ formatTime(session.last_saved_at) }}</span>
               </div>
             </div>
           </div>
-          <div class="header-actions" v-if="session.id">
+          <div class="header-actions">
             <div class="mode-controls">
               <button 
                 @click="inspectionMode = 'single'"
                 :class="['mode-btn', { active: inspectionMode === 'single' }]"
               >
-                단일 검수
+                단일검수
               </button>
               <button 
                 @click="inspectionMode = 'grid'"
@@ -29,96 +34,69 @@
                 그리드 검수
               </button>
             </div>
-            <div v-if="inspectionMode === 'grid'" class="grid-controls">
-              <button 
-                v-for="cols in [1, 2, 3]" 
-                :key="cols"
-                @click="gridColumns = cols"
-                :class="['grid-btn', { active: gridColumns === cols }]"
-              >
-                {{ cols }}열
-              </button>
-            </div>
-          </div>
-          <div v-if="session.id" class="sync-section"><!-- // 🔧 수정됨 -->
-            <div
-              v-if="syncStatusMessage"
-              class="sync-status"
-              :class="{ error: lastSyncError, syncing: syncInProgress, offline: isOffline }"
-            >
-              <span class="sync-text">{{ syncStatusMessage }}</span>
-              <button
-                type="button"
-                class="sync-action"
-                @click="triggerManualSync"
-                :disabled="syncInProgress || isOffline"
-              >
-                {{ isOffline ? '오프라인' : (syncInProgress ? '동기화 중...' : '지금 동기화') }}
-              </button>
-              <button
-                type="button"
-                class="analytics-toggle"
-                @click="showAnalytics = !showAnalytics"
-                :aria-expanded="showAnalytics"
-              >
-                <svg 
-                  class="toggle-icon" 
-                  :class="{ rotated: showAnalytics }"
-                  fill="none" 
-                  viewBox="0 0 24 24" 
-                  stroke="currentColor" 
-                  stroke-width="2"
-                >
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
           </div>
         </header>
 
         <div class="panel-content">
           <div v-if="!session.id" class="session-setup">
             <div class="setup-card">
-              <div class="card-header">
-                <h3>새 검수 세션</h3>
-                <p>검수할 레고 세트를 선택하세요</p>
-              </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label>세트 선택</label>
-                  <div class="custom-select" ref="setDropdownRef">
-                    <button
-                      type="button"
-                      class="custom-select-trigger"
-                      :class="{ open: showSetDropdown }"
-                      @click="toggleSetDropdown"
-                      :disabled="loading"
-                    >
-                      <span class="custom-select-value">{{ selectedSetLabel }}</span>
-                      <svg class="custom-select-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
+                  <label>레고번호를 입력하세요.</label>
+                  <div class="set-search-wrapper" ref="setDropdownRef">
+                    <div class="set-search-input-row">
+                      <div class="set-search-input-wrapper">
+                        <input
+                          type="text"
+                          v-model="setSearchQuery"
+                          @keyup.enter="handleSearchEnter"
+                          @blur="handleSearchBlur"
+                          placeholder="예 : 76917"
+                          class="set-search-input"
+                          :disabled="loading"
+                        />
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                          <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M14 14L11.1 11.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </div>
+                      <button
+                        type="button"
+                        @click="handleSearchEnter"
+                        class="search-button"
+                        :disabled="loading"
+                      >
+                        검색
+                      </button>
+                    </div>
 
                     <transition name="select-fade">
-                      <div v-if="showSetDropdown" class="custom-select-dropdown">
+                      <div v-if="showSetDropdown && searchResults.length > 0" :key="`dropdown-${searchResultsKey}`" class="custom-select-dropdown">
                         <button
-                          v-for="set in availableSets"
-                          :key="set.id"
+                          v-for="(set, index) in searchResults"
+                          :key="`${set.id}-${set.set_num}-${searchResultsKey}-${index}`"
                           type="button"
                           class="custom-select-option"
                           :class="{ active: selectedSetId === set.id }"
                           @click="handleSelectSet(set)"
                         >
-                          <div class="option-title">{{ set.name }}</div>
-                          <div class="option-subtitle">{{ set.set_num }}</div>
+                          <div class="option-row option-row-meta">
+                            <span class="option-value option-set-display">{{ formatSetDisplay(set.set_num, set.theme_name, set.name) }}</span>
+                          </div>
+                          <div class="option-row">
+                            <span class="option-label">제품명:</span>
+                            <span class="option-value">{{ set.name || '' }}</span>
+                          </div>
                         </button>
                       </div>
                     </transition>
+                    <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                      <span class="selected-set-display">{{ formatSetDisplay(selectedSet.set_num, selectedSet.theme_name, selectedSet.name) }}</span>
+                    </div>
                   </div>
                 </div>
                 <button 
-                  @click="startNewSession" 
+                  @click="handleStartNewSession" 
                   :disabled="!selectedSetId || loading"
                   class="btn-primary"
                 >
@@ -126,103 +104,74 @@
                 </button>
               </div>
             </div>
+          </div>
 
-            <div v-if="lastSession" class="setup-card resume-card">
+          <!-- 진행 중인 세션 확인 모달 -->
+          <div v-if="showExistingSessionModal" class="modal-overlay" @click="closeExistingSessionModal">
+            <div class="modal-content" @click.stop>
+              <div class="modal-header">
+                <h3>진행 중인 검수 세션이 있습니다</h3>
+                <!-- // 🔧 수정됨 -->
+                <button 
+                  type="button" 
+                  class="modal-close-btn" 
+                  @click="closeExistingSessionModal" 
+                  aria-label="모달 닫기" 
+                >
+                  &times;
+                </button>
+              </div>
+              <div class="modal-body">
+                <div class="existing-session-info">
+                <p><strong>세트명:</strong> {{ existingSessionInfo ? formatSetDisplay(existingSessionInfo.set_num, existingSessionInfo.set_theme_name, existingSessionInfo.set_name) : '알 수 없음' }}</p>
+                  <p><strong>진행률:</strong> {{ existingSessionInfo?.progress || 0 }}%</p>
+                  <p><strong>마지막 저장:</strong> {{ existingSessionInfo?.last_saved_at ? formatDate(existingSessionInfo.last_saved_at) : '-' }}</p>
+                </div>
+                <div class="modal-warning">
+                  <p>새로 검수를 시작하면 기존 세션은 완료 처리됩니다.</p>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button @click="resumeExistingSession" class="btn-secondary">이어서 검수</button>
+                <button @click="startNewSessionWithCompletion" class="btn-primary">새로 검수</button>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="!session.id && lastSession" class="session-setup" style="margin-top: 1.5rem;">
+            <div class="setup-card resume-card">
               <div class="card-header">
-                <h3>이전 세션 복원</h3>
+                <h3>진행 중 검수</h3>
                 <p>진행 중이던 검수를 이어서 진행할 수 있습니다</p>
               </div>
               <div class="card-body">
                 <div class="resume-info">
                   <div class="info-row">
-                    <span class="info-label">세트명:</span>
-                    <span class="info-value">{{ lastSession.set_name }}</span>
+                    <span class="info-label">세트명</span>
+                    <span class="info-value">{{ lastSessionDisplayName || '알 수 없음' }}</span>
                   </div>
                   <div class="info-row">
-                    <span class="info-label">진행률:</span>
-                    <span class="info-value progress-text">{{ lastSession.progress }}%</span>
+                    <span class="info-label">진행률</span>
+                    <span class="info-value progress-text">
+                      {{ lastSession?.progress || 0 }}%
+                      <span v-if="lastSessionProgressInfo && lastSessionProgressInfo.total > 0" class="progress-detail">
+                        ({{ lastSessionProgressInfo.checked }}/{{ lastSessionProgressInfo.total }})
+                      </span>
+                    </span>
                   </div>
                   <div class="info-row">
-                    <span class="info-label">마지막 저장:</span>
-                    <span class="info-value">{{ formatDate(lastSession.last_saved_at) }}</span>
+                    <span class="info-label">마지막 저장</span>
+                    <span class="info-value">{{ lastSession?.last_saved_at ? formatDate(lastSession.last_saved_at) : '-' }}</span>
                   </div>
                 </div>
                 <div class="resume-actions">
                   <button @click="resumeSession" class="btn-primary">이어하기</button>
-                  <button @click="startNewSession" class="btn-secondary">새로 시작</button>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 희귀부품 알림 패널 -->
-          <div v-if="session.id && rareParts.length > 0" class="rare-parts-panel">
-            <div class="rare-parts-header">
-              <h3>희귀부품 알림</h3>
-              <button @click="showRareParts = !showRareParts" class="toggle-btn">
-                {{ showRareParts ? '숨기기' : '보기' }}
-              </button>
-            </div>
-            <div v-if="showRareParts" class="rare-parts-list">
-              <div
-                v-for="part in rareParts.slice(0, 5)"
-                :key="`${part.part_id}_${part.color_id}`"
-                class="rare-part-item"
-              >
-                <span class="rare-part-name">{{ part.part_name }}</span>
-                <span class="rare-part-badge">희귀도: {{ part.usage_frequency }}</span>
               </div>
             </div>
           </div>
 
           <div v-else class="inspection-workspace">
-            <div v-if="session.id && showAnalytics" class="progress-section"><!-- // 🔧 수정됨 -->
-              <div class="progress-bar-container">
-                <div class="progress-bar-fill" :style="{ width: `${progress}%` }"></div>
-              </div>
-              <div class="progress-stats"><!-- // 🔧 수정됨 -->
-                <div class="stat-item">
-                  <span class="stat-label">완료</span>
-                  <span class="stat-value">{{ items.filter(i => i.status === 'checked').length }} / {{ items.length }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">보류</span>
-                  <span class="stat-value">{{ items.filter(i => i.status === 'hold').length }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">누락</span>
-                  <span class="stat-value error">{{ items.filter(i => i.status === 'missing').length }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="session.id && showAnalytics" class="analytics-panel"><!-- // 🔧 수정됨 -->
-              <section class="metrics-overview"><!-- // 🔧 수정됨 -->
-                <div class="metric-card">
-                  <span class="metric-label">평균 소요시간</span>
-                  <span class="metric-value">{{ averageDurationLabel }}</span>
-                  <span class="metric-hint">총 {{ elapsedDurationLabel }}</span>
-                </div>
-                <div class="metric-card">
-                  <span class="metric-label">완료 부품</span>
-                  <span class="metric-value">{{ statusCounts.checked }} / {{ totalItems }}</span>
-                  <span class="metric-hint">완료율 {{ progress }}%</span>
-                </div>
-                <div class="metric-card">
-                  <span class="metric-label">누락 · 보류</span>
-                  <span class="metric-value error">{{ statusCounts.missing }} / {{ statusCounts.hold }}</span>
-                  <span class="metric-hint">누락률 {{ missingRateLabel }}</span>
-                </div>
-              </section>
-              <section class="status-chart-panel"><!-- // 🔧 수정됨 -->
-                <Bar :data="statusChartData" :options="statusChartOptions" class="status-chart" />
-              </section>
-            </div>
-
-            <div v-if="qaReminder.visible" class="qa-reminder" :class="qaReminder.level"><!-- // 🔧 수정됨 -->
-              <div class="qa-reminder-title">QA 리마인더</div>
-              <p class="qa-reminder-message">{{ qaReminder.message }}</p>
-            </div>
 
             <div v-if="session.id" class="workspace-controls">
               <div class="status-filter-group">
@@ -235,10 +184,21 @@
                   @click="statusFilter = option.value"
                 >
                   {{ option.label }}
+                  <span 
+                    v-if="option.value === 'missing' && getMissingCountInfo().categoryCount > 0" 
+                    class="status-badge-count status-badge-count-missing"
+                  >
+                    {{ getMissingCountInfo().categoryCount }}개 분류, 총 {{ getMissingCountInfo().totalCount }}개
+                  </span>
+                  <span 
+                    v-else-if="option.value !== 'missing' && getStatusCount(option.value) > 0" 
+                    class="status-badge-count"
+                  >
+                    {{ getStatusCount(option.value) }}
+                  </span>
                 </button>
               </div>
               <div class="sort-control">
-                <label for="sort-select">정렬</label>
                 <select id="sort-select" v-model="selectedSortMode" class="sort-select">
                   <option v-for="option in sortOptions" :key="option.value" :value="option.value">
                     {{ option.label }}
@@ -249,37 +209,61 @@
 
             <div class="items-container">
               <div v-if="inspectionMode === 'single' && displayedItems.length > 0" class="single-card-navigation">
-                <div class="card-counter">
-                  <div class="counter-content">
-                    <span class="counter-current">{{ currentItemIndex + 1 }}</span>
-                    <span class="counter-separator">/</span>
-                    <span class="counter-total">{{ totalItems }}</span>
+                <div 
+                  class="card-counter"
+                >
+                  <button
+                    class="counter-arrow counter-arrow-left"
+                    @click.stop="goToPrevItem"
+                    :disabled="currentItemIndex === 0"
+                    type="button"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                    </svg>
+                  </button>
+                  <div class="counter-main">
+                    <div class="counter-content">
+                      <span class="counter-current">{{ currentItemIndex + 1 }}</span>
+                      <span class="counter-separator">/</span>
+                      <span class="counter-total">{{ totalItems }}</span>
+                    </div>
+                    <div 
+                      class="counter-progress"
+                      @mousedown="handleProgressDragStart"
+                      @touchstart="handleProgressDragStart"
+                      ref="progressBarRef"
+                    >
+                      <div class="counter-progress-bar" :style="{ width: `${((currentItemIndex + 1) / totalItems) * 100}%` }"></div>
+                      <div 
+                        class="counter-progress-handle"
+                        :style="{ left: `${((currentItemIndex + 1) / totalItems) * 100}%` }"
+                        @mousedown.stop="handleProgressDragStart"
+                        @touchstart.stop="handleProgressDragStart"
+                      ></div>
+                    </div>
                   </div>
-                  <div class="counter-progress">
-                    <div class="counter-progress-bar" :style="{ width: `${((currentItemIndex + 1) / totalItems) * 100}%` }"></div>
-                  </div>
+                  <button
+                    class="counter-arrow counter-arrow-right"
+                    @click.stop="goToNextItem"
+                    :disabled="currentItemIndex >= totalItems - 1"
+                    type="button"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
                 </div>
               </div>
               <div 
                 class="items-grid" 
-                :class="{ 'single-mode': inspectionMode === 'single' }"
-                :style="inspectionMode === 'grid' ? { gridTemplateColumns: `repeat(${gridColumns}, 1fr)` } : {}"
+                :class="{ 'single-mode': inspectionMode === 'single', 'grid-mode': inspectionMode === 'grid' }"
               >
                 <template v-if="inspectionMode === 'single'">
                   <div 
                     v-if="displayedItems.length > 0"
                     class="part-card-wrapper"
                   >
-                    <button
-                      class="card-nav-arrow card-nav-arrow-left"
-                      @click="goToPrevItem"
-                      :disabled="currentItemIndex === 0"
-                      aria-label="이전 카드"
-                    >
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M15 18L9 12L15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </button>
                     <Transition 
                       :name="`slide-${slideDirection}`"
                       mode="out-in"
@@ -327,12 +311,14 @@
                         <div class="card-body">
                           <div class="part-image-section">
                             <img
-                              :src="partImageUrls[displayedItems[0].id] || ''"
+                              v-if="partImageUrls[displayedItems[0].id]"
+                              :src="partImageUrls[displayedItems[0].id]"
                               :alt="`${displayedItems[0].part_name} (${displayedItems[0].color_name})`"
                               class="part-image"
                               @error="handleImageError($event)"
                               @load="handleImageLoad($event)"
                             />
+                            <div v-else class="no-part-image">이미지 없음</div>
                           </div>
 
                           <div class="quantity-section">
@@ -372,7 +358,7 @@
                                 @click="setItemStatus(displayedItems[0], 'checked')"
                                 :class="['status-button', 'checked', { active: displayedItems[0].status === 'checked' }]"
                               >
-                                완료
+                                정상확인
                               </button>
                               <button
                                 @click="setItemStatus(displayedItems[0], 'missing')"
@@ -386,15 +372,47 @@
                         </div>
                       </div>
                     </Transition>
-                    <button
-                      class="card-nav-arrow card-nav-arrow-right"
-                      @click="goToNextItem"
-                      aria-label="다음 카드"
-                    >
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M9 18L15 12L9 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </button>
+                    <div class="card-actions-bottom">
+                      <button
+                        @click="handleCompleteInspection"
+                        class="save-button complete-save"
+                      >
+                        검수완료
+                      </button>
+                      <button
+                        @click="handleTemporarySave"
+                        class="save-button temporary-save"
+                        :disabled="syncInProgress || isOffline"
+                      >
+                        {{ syncInProgress ? '저장 중...' : '임시저장' }}
+                      </button>
+                    </div>
+                    <div v-if="session.id && inspectionMode === 'single' && allItemsForThumbnails.length > 0" class="parts-thumbnails">
+                      <div class="thumbnails-scroll">
+                        <div
+                          v-for="(item, idx) in allItemsForThumbnails"
+                          :key="item.id || `${item.part_id}-${item.color_id}`"
+                          class="thumbnail-item"
+                          :class="{ active: currentItemIndex === idx, ...getCardStatusClass(item.status) }"
+                          @click="goToItemByIndex(idx)"
+                        >
+                          <div class="thumbnail-image">
+                            <img
+                              v-if="partImageUrls[item.id]"
+                              :src="partImageUrls[item.id]"
+                              :alt="`${item.part_name} (${item.color_name})`"
+                              @error="handleImageError($event)"
+                            />
+                            <div v-else class="thumbnail-placeholder">이미지 없음</div>
+                          </div>
+                          <div class="thumbnail-info">
+                            <div v-if="item.element_id" class="thumbnail-element-id">{{ item.element_id }}</div>
+                            <div class="thumbnail-status" :class="getCardStatusClass(item.status)"></div>
+                            <div class="thumbnail-count">{{ item.checked_count }}/{{ item.total_count }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </template>
                 <template v-else>
@@ -431,12 +449,14 @@
                     <div class="card-body">
                       <div class="part-image-section">
                         <img
-                          :src="partImageUrls[item.id] || ''"
+                          v-if="partImageUrls[item.id]"
+                          :src="partImageUrls[item.id]"
                           :alt="`${item.part_name} (${item.color_name})`"
                           class="part-image"
                           @error="handleImageError($event)"
                           @load="handleImageLoad($event)"
                         />
+                        <div v-else class="no-part-image">이미지 없음</div>
                       </div>
 
                       <div class="quantity-section">
@@ -472,11 +492,11 @@
 
                       <div class="status-section">
                         <div class="status-buttons">
-                          <button
+                            <button
                             @click="setItemStatus(item, 'checked')"
                             :class="['status-button', 'checked', { active: item.status === 'checked' }]"
                           >
-                            완료
+                            정상확인
                           </button>
                           <button
                             @click="setItemStatus(item, 'missing')"
@@ -486,7 +506,6 @@
                           </button>
                         </div>
                       </div>
-
                     </div>
                   </div>
                 </template>
@@ -496,6 +515,25 @@
           </div>
         </div>
       </main>
+    </div>
+
+    <!-- 그리드 검수 모드 하단 고정 버튼 -->
+    <div v-if="session.id && inspectionMode === 'grid'" class="grid-mode-bottom-actions">
+      <div class="bottom-actions-container">
+        <button
+          @click="handleCompleteInspection"
+          class="save-button complete-save"
+        >
+          검수완료
+        </button>
+        <button
+          @click="handleTemporarySave"
+          class="save-button temporary-save"
+          :disabled="syncInProgress || isOffline"
+        >
+          {{ syncInProgress ? '저장 중...' : '임시저장' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="error-toast">
@@ -569,21 +607,21 @@
 </template>
 
 <script>
-import { ref, reactive, onMounted, watch, computed, onUnmounted } from 'vue'
-import { Bar } from 'vue-chartjs' // 🔧 수정됨
-import { Chart, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js' // 🔧 수정됨
+import { ref, reactive, onMounted, watch, computed, onUnmounted, nextTick, onActivated } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useInspectionSession } from '../composables/useInspectionSession'
 import { useSupabase } from '../composables/useSupabase'
+import { formatSetNumber, formatThemeName, formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
+
 import { usePartSearch } from '../composables/usePartSearch'
 import { useRebrickable } from '../composables/useRebrickable'
 
-Chart.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend) // 🔧 수정됨
-
 export default {
   name: 'ManualInspection',
-  components: { Bar }, // 🔧 수정됨
   setup() {
-    const { supabase } = useSupabase()
+    const router = useRouter()
+    const route = useRoute()
+    const { supabase, user, loading: userLoading } = useSupabase()
     const {
       loading,
       error,
@@ -598,6 +636,7 @@ export default {
       pauseSession: pauseSessionAction,
       completeSession: completeSessionAction,
       findLastSession,
+      completeSessionById,
       syncToServer,
       syncInProgress,
       lastSyncError,
@@ -606,7 +645,9 @@ export default {
     } = useInspectionSession()
 
     const selectedSetId = ref('')
-    const availableSets = ref([])
+    const searchResults = ref([])
+    const searchResultsKey = ref(0) // 강제 리렌더링을 위한 key
+    const setSearchQuery = ref('')
     const lastSession = ref(null)
     const showSetDropdown = ref(false)
     const partImageUrls = ref({})
@@ -616,7 +657,6 @@ export default {
     const statusFilter = ref('all')
     const selectedSortMode = ref('sequence')
     const isOffline = ref(!navigator.onLine) // 🔧 수정됨
-    const showAnalytics = ref(false) // 🔧 수정됨: 기본값 닫힘
     const inspectionMode = ref('single') // 🔧 수정됨: 'single' 또는 'grid'
     const currentItemIndex = ref(0) // 🔧 수정됨
     const slideDirection = ref('right') // 슬라이드 방향: 'left' 또는 'right'
@@ -630,7 +670,71 @@ export default {
     const alternativeParts = ref([])
     const alternativePartsLoading = ref(false)
     const rareParts = ref([])
-    const showRareParts = ref(true)
+    const sessionMetadata = ref(null)
+    const lastSessionMetadata = ref(null)
+    const sessionDisplayName = computed(() => {
+      const meta = sessionMetadata.value
+      const setNum = session.set_num || meta?.set_num
+      const themeName = session.set_theme_name || meta?.theme_name
+      const setName = session.set_name || meta?.set_name
+      return formatSetDisplay(setNum, themeName, setName)
+    })
+    const lastSessionDisplayName = computed(() => {
+      if (!lastSession.value) return ''
+      const meta = lastSessionMetadata.value
+      const setNum = lastSession.value.set_num || meta?.set_num
+      const themeName = lastSession.value.set_theme_name || meta?.theme_name
+      const setName = lastSession.value.set_name || meta?.set_name
+      return formatSetDisplay(setNum, themeName, setName || '세트명 없음')
+    })
+
+    const lastSessionItems = ref([])
+    const lastSessionItemsLoading = ref(false)
+
+    const loadLastSessionItems = async () => {
+      if (!lastSession.value?.id || lastSessionItemsLoading.value) return
+      
+      lastSessionItemsLoading.value = true
+      try {
+        const { data, error } = await supabase
+          .from('inspection_items')
+          .select('id, status')
+          .eq('session_id', lastSession.value.id)
+        
+        if (!error && data) {
+          lastSessionItems.value = data
+        }
+      } catch (err) {
+        console.error('마지막 세션 부품 조회 실패:', err)
+      } finally {
+        lastSessionItemsLoading.value = false
+      }
+    }
+
+    const lastSessionProgressInfo = computed(() => {
+      if (!lastSession.value) return null
+      
+      const totalItems = lastSessionItems.value.length || 0
+      const checkedItems = lastSessionItems.value.filter(item => item.status === 'checked').length
+      
+      return {
+        total: totalItems,
+        checked: checkedItems,
+        progress: lastSession.value.progress || 0
+      }
+    })
+
+    watch(lastSession, async (newSession) => {
+      if (newSession?.id) {
+        await loadLastSessionItems()
+      } else {
+        lastSessionItems.value = []
+      }
+    }, { immediate: true })
+    
+    // 진행 중인 세션 확인 모달
+    const showExistingSessionModal = ref(false)
+    const existingSessionInfo = ref(null)
     
     // 색상 RGB 조회 (캐시)
     const colorRgbCache = ref(new Map())
@@ -667,6 +771,64 @@ export default {
       
       return null
     }
+
+    const applyMetadataToTarget = (target, meta) => {
+      if (!target || !meta) return
+      if (meta.set_num && !target.set_num) {
+        target.set_num = meta.set_num
+      }
+      if (meta.theme_name && !target.set_theme_name) {
+        target.set_theme_name = meta.theme_name
+      }
+      if (meta.set_name && !target.set_name) {
+        target.set_name = meta.set_name
+      }
+    }
+
+    const hydrateSetMetadata = async (setId) => {
+      if (!setId) return null
+      try {
+        const metadataMap = await fetchSetMetadata(supabase, [setId])
+        return metadataMap.get(setId) || null
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('세트 메타데이터 로드 실패:', err)
+        }
+        return null
+      }
+    }
+
+    watch(
+      () => session.set_id,
+      async (newSetId) => {
+        if (!newSetId) {
+          sessionMetadata.value = null
+          return
+        }
+
+        const meta = await hydrateSetMetadata(newSetId)
+        sessionMetadata.value = meta
+        applyMetadataToTarget(session, meta)
+      },
+      { immediate: true }
+    )
+
+    watch(
+      () => lastSession.value?.set_id,
+      async (newSetId) => {
+        if (!newSetId) {
+          lastSessionMetadata.value = null
+          return
+        }
+
+        const meta = await hydrateSetMetadata(newSetId)
+        lastSessionMetadata.value = meta
+        if (lastSession.value) {
+          applyMetadataToTarget(lastSession.value, meta)
+        }
+      },
+      { immediate: true }
+    )
     
     // 색상 RGB 동기 조회 (이미 로드된 items에서)
     const getColorRgbSync = (colorId, item = null) => {
@@ -686,28 +848,13 @@ export default {
             rgb = `#${rgb}`
           }
           colorRgbCache.value.set(colorId, rgb)
-          
-          // 디버깅: 특정 element_id인 경우 로그
-          if (item.element_id === '6335317' || item.element_id === '306923') {
-            console.log(`[getColorRgbSync] element_id ${item.element_id}: color_id=${colorId}, rgb=${rgb}, item.color_rgb=${item.color_rgb}`)
-          }
-          
           return rgb
-        } else {
-          // 디버깅: element_id 6335317인 경우 로그
-          if (item.element_id === '6335317') {
-            console.warn(`[getColorRgbSync] element_id 6335317: color_rgb가 유효하지 않습니다:`, { colorId, color_rgb: item.color_rgb, rgb })
-          }
         }
       }
       
       // 캐시 확인
       if (colorRgbCache.value.has(colorId)) {
-        const cachedRgb = colorRgbCache.value.get(colorId)
-        if (item && (item.element_id === '6335317' || item.element_id === '306923')) {
-          console.log(`[getColorRgbSync] element_id ${item.element_id}: 캐시에서 가져옴: color_id=${colorId}, rgb=${cachedRgb}`)
-        }
-        return cachedRgb
+        return colorRgbCache.value.get(colorId)
       }
       
       // items에서 찾기
@@ -719,19 +866,8 @@ export default {
             rgb = `#${rgb}`
           }
           colorRgbCache.value.set(colorId, rgb)
-          
-          // 디버깅: 특정 element_id인 경우 로그
-          if (foundItem.element_id === '6335317' || foundItem.element_id === '306923') {
-            console.log(`[getColorRgbSync] element_id ${foundItem.element_id}: items에서 찾음: color_id=${colorId}, rgb=${rgb}`)
-          }
-          
           return rgb
         }
-      }
-      
-      // 디버깅: 특정 element_id인 경우 로그
-      if (item && (item.element_id === '6335317' || item.element_id === '306923')) {
-        console.warn(`[getColorRgbSync] element_id ${item.element_id}: RGB를 찾을 수 없습니다:`, { colorId, item, foundItem })
       }
       
       // RGB가 없으면 비동기로 조회 시도 (하지만 즉시 반환은 null)
@@ -749,8 +885,11 @@ export default {
       isSwiping: false
     })
 
+    const progressBarRef = ref(null)
+    const isDraggingProgress = ref(false)
+
     const sortOptions = [
-      { value: 'sequence', label: '설명서 순서' },
+      { value: 'sequence', label: '설명서 순' },
       { value: 'color', label: '색상순' },
       { value: 'shape', label: '형태순' },
       { value: 'size', label: '크기순' },
@@ -761,20 +900,36 @@ export default {
     const statusOptions = [
       { value: 'all', label: '전체' },
       { value: 'pending', label: '미확인' },
-      { value: 'checked', label: '완료' },
+      { value: 'checked', label: '정상확인' },
       { value: 'missing', label: '누락' }
     ]
-
 
     const statusLabel = (status) => {
       switch (status) {
         case 'checked':
-          return '완료'
+          return '정상확인'
         case 'missing':
           return '누락'
         default:
           return '미확인'
       }
+    }
+
+    const getStatusCount = (statusValue) => {
+      if (statusValue === 'all') {
+        return items.value.length
+      }
+      return statusCounts.value[statusValue] || 0
+    }
+
+    const getMissingCountInfo = () => {
+      const missingItems = items.value.filter(item => item.status === 'missing')
+      const categoryCount = missingItems.length
+      const totalCount = missingItems.reduce((sum, item) => {
+        const missingQty = (item.total_count || 0) - (item.checked_count || 0)
+        return sum + missingQty
+      }, 0)
+      return { categoryCount, totalCount }
     }
 
 
@@ -832,6 +987,53 @@ export default {
           return currentItem ? [currentItem] : []
         }
         return []
+      }
+
+      return sorted
+    })
+
+    // 썸네일용 전체 아이템 목록 (정렬된 모든 아이템)
+    const allItemsForThumbnails = computed(() => {
+      const filtered = statusFilter.value === 'all'
+        ? items.value
+        : items.value.filter(item => item.status === statusFilter.value)
+
+      const sorted = [...filtered]
+
+      switch (selectedSortMode.value) {
+        case 'color':
+          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          break
+        case 'shape':
+          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          break
+        case 'size':
+          sorted.sort((a, b) => {
+            const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
+            if (aSize === bSize) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aSize - bSize
+          })
+          break
+        case 'rarity':
+          sorted.sort((a, b) => {
+            const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
+            if (aFreq === bFreq) {
+              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+            }
+            return aFreq - bFreq
+          })
+          break
+        case 'name':
+          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          break
+        case 'sequence':
+        default:
+          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          break
       }
 
       return sorted
@@ -925,58 +1127,6 @@ export default {
       return `${secs}초`
     }
 
-    const averageDurationLabel = computed(() => formatSeconds(averageSecondsPerItem.value)) // 🔧 수정됨
-    const elapsedDurationLabel = computed(() => formatSeconds(elapsedSeconds.value)) // 🔧 수정됨
-
-    const missingRateLabel = computed(() => { // 🔧 수정됨
-      if (totalItems.value === 0) return '--'
-      const rate = (statusCounts.value.missing / totalItems.value) * 100
-      return `${rate.toFixed(1)}%`
-    })
-
-    const statusChartData = computed(() => ({ // 🔧 수정됨
-      labels: ['완료', '미확인', '누락', '보류'],
-      datasets: [
-        {
-          label: '부품 수',
-          data: [
-            statusCounts.value.checked || 0,
-            statusCounts.value.pending || 0,
-            statusCounts.value.missing || 0,
-            statusCounts.value.hold || 0
-          ],
-          backgroundColor: ['#1d4ed8', '#9ca3af', '#dc2626', '#f59e0b']
-        }
-      ]
-    }))
-
-    const statusChartOptions = { // 🔧 수정됨
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (context) => `${context.parsed.y ?? context.parsed ?? 0}개`
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: { color: '#4b5563' }
-        },
-        y: {
-          beginAtZero: true,
-          ticks: {
-            precision: 0,
-            maxTicksLimit: 10,
-            color: '#6b7280'
-          }
-        }
-      }
-    }
-
     const qaReminder = computed(() => { // 🔧 수정됨
       if (!session.id) {
         return { visible: false, level: '', message: '' }
@@ -1017,26 +1167,276 @@ export default {
     })
 
 
-    const loadAvailableSets = async () => {
-      try {
-        const { data, error: err } = await supabase
-          .from('lego_sets')
-          .select('id, name, set_num')
-          .order('name')
-          .limit(100)
+    const searchSets = async () => {
+      if (!setSearchQuery.value.trim()) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
 
-        if (err) throw err
-        availableSets.value = data || []
+      try {
+        const query = setSearchQuery.value.trim()
+        const mainSetNum = query.split('-')[0]
+        let results = []
+        
+        // 1단계: 정확한 매칭 시도
+        const { data: exactMatch, error: exactError } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id')
+          .eq('set_num', query)
+          .limit(20)
+
+        if (!exactError && exactMatch && exactMatch.length > 0) {
+          results = exactMatch
+        } else {
+          // 2단계: 메인 세트 번호로 정확히 일치
+          const { data: mainMatch, error: mainError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id')
+            .eq('set_num', mainSetNum)
+            .limit(20)
+
+          if (!mainError && mainMatch && mainMatch.length > 0) {
+            results = mainMatch
+          } else {
+            // 3단계: 메인 세트 번호로 시작하는 모든 세트 검색
+            const { data: likeMatch, error: likeError } = await supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id')
+              .ilike('set_num', `${mainSetNum}%`)
+              .order('set_num')
+              .limit(20)
+
+            if (!likeError && likeMatch && likeMatch.length > 0) {
+              // 하이픈이 없는 메인 세트만 필터링
+              results = likeMatch.filter(set => set.set_num === mainSetNum)
+              
+              if (results.length === 0 && likeMatch.length > 0) {
+                const withoutHyphen = likeMatch.filter(set => !set.set_num.includes('-'))
+                if (withoutHyphen.length > 0) {
+                  results = [withoutHyphen.sort((a, b) => a.set_num.length - b.set_num.length)[0]]
+                } else {
+                  results = [likeMatch[0]]
+                }
+              }
+            }
+          }
+        }
+
+        // 테마 정보 조회
+        if (results.length > 0) {
+          const themeIds = [...new Set(results.map(set => set.theme_id).filter(Boolean))]
+          
+          if (themeIds.length > 0) {
+            const { data: themesData, error: themesError } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .in('theme_id', themeIds)
+
+            if (!themesError && themesData && themesData.length > 0) {
+              const themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
+              
+              results = results.map(set => ({
+                ...set,
+                theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null
+              }))
+            } else {
+              results = results.map(set => ({ ...set, theme_name: null }))
+            }
+          } else {
+            results = results.map(set => ({ ...set, theme_name: null }))
+          }
+        }
+
+        // 검색 결과 업데이트
+        searchResults.value = results
+        searchResultsKey.value++
+        
+        if (searchResults.value.length > 0) {
+          showSetDropdown.value = true
+        } else {
+          showSetDropdown.value = false
+        }
       } catch (err) {
-        console.error('세트 목록 로드 실패:', err)
+        console.error('세트 검색 실패:', err)
+        searchResults.value = []
+        showSetDropdown.value = false
+      }
+    }
+
+    const handleSearchEnter = async () => {
+      if (!setSearchQuery.value.trim()) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
+      
+      await searchSets()
+      
+      if (searchResults.value.length === 1) {
+        handleSelectSet(searchResults.value[0])
+      } else if (searchResults.value.length > 0) {
+        showSetDropdown.value = true
+      }
+    }
+
+    const handleSearchBlur = () => {
+      // blur 이벤트가 드롭다운 클릭보다 먼저 발생할 수 있으므로 약간의 지연
+      setTimeout(() => {
+        showSetDropdown.value = false
+      }, 200)
+    }
+
+    // 진행 중인 세션 확인
+    const checkExistingSession = async (setId) => {
+      if (!user.value || !setId) return null
+
+      try {
+        // 서버에서 확인
+        const { data: serverSessions, error } = await supabase
+          .from('inspection_sessions')
+          .select(`
+            id,
+            set_id,
+            status,
+            progress,
+            started_at,
+            last_saved_at,
+            lego_sets:set_id (
+              name,
+              set_num,
+              theme_id
+            )
+          `)
+          .eq('set_id', setId)
+          .eq('user_id', user.value.id)
+          .in('status', ['in_progress', 'paused'])
+          .order('last_saved_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        if (!error && serverSessions) {
+          const sessionData = {
+            id: serverSessions.id,
+            set_id: serverSessions.set_id,
+            set_name: serverSessions.lego_sets?.name || '세트명 없음',
+            set_num: serverSessions.lego_sets?.set_num || null,
+            set_theme_name: null,
+            status: serverSessions.status,
+            progress: serverSessions.progress || 0,
+            last_saved_at: serverSessions.last_saved_at
+          }
+
+          if (serverSessions.lego_sets?.theme_id) {
+            const { data: themeData } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .eq('theme_id', serverSessions.lego_sets.theme_id)
+              .maybeSingle()
+
+            sessionData.set_theme_name = themeData?.name || null
+          } else {
+            const meta = await hydrateSetMetadata(sessionData.set_id)
+            applyMetadataToTarget(sessionData, meta)
+          }
+
+          return sessionData
+        }
+
+        return null
+      } catch (err) {
+        console.error('기존 세션 확인 실패:', err)
+        return null
+      }
+    }
+
+    // 새 세션 시작 처리 (모달 표시)
+    const handleStartNewSession = async () => {
+      if (!selectedSetId.value) return
+
+      const existingSession = await checkExistingSession(selectedSetId.value)
+      if (existingSession) {
+        const meta = await hydrateSetMetadata(existingSession.set_id)
+        applyMetadataToTarget(existingSession, meta)
+        existingSessionInfo.value = existingSession
+        showExistingSessionModal.value = true
+      } else {
+        await startNewSession()
+      }
+    }
+
+    // 모달 닫기
+    const closeExistingSessionModal = () => {
+      showExistingSessionModal.value = false
+      existingSessionInfo.value = null
+    }
+
+    // 기존 세션 이어서 검수
+    const resumeExistingSession = async () => {
+      if (!existingSessionInfo.value) return
+      
+      closeExistingSessionModal()
+      await loadSession(existingSessionInfo.value.id)
+      selectedSetId.value = session.set_id
+      
+      // 세트 정보 조회하여 검색창에 표시
+      if (session.set_id) {
+        const { data: setData, error: setError } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id')
+          .eq('id', session.set_id)
+          .maybeSingle()
+        
+        if (!setError && setData) {
+          setSearchQuery.value = setData.set_num
+          if (setData.theme_id) {
+            const { data: themeData } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .eq('theme_id', setData.theme_id)
+              .maybeSingle()
+            
+            searchResults.value = [{
+              ...setData,
+              theme_name: themeData?.name || null
+            }]
+          } else {
+            searchResults.value = [{ ...setData, theme_name: null }]
+          }
+          searchResultsKey.value++
+        }
+      }
+      
+      showSetDropdown.value = false
+      lastSession.value = null
+    }
+
+    // 새로 검수 (기존 세션 완료 처리)
+    const startNewSessionWithCompletion = async () => {
+      if (!selectedSetId.value || !existingSessionInfo.value) return
+
+      try {
+        // 기존 세션 완료 처리
+        await completeSessionById(existingSessionInfo.value.id)
+        
+        closeExistingSessionModal()
+        await startNewSession()
+      } catch (err) {
+        console.error('기존 세션 완료 처리 실패:', err)
+        closeExistingSessionModal()
+        await startNewSession()
       }
     }
 
     const startNewSession = async () => {
       if (!selectedSetId.value) return
       try {
-        await createSession(selectedSetId.value)
-        lastSession.value = null
+        const newSession = await createSession(selectedSetId.value)
+        if (newSession && newSession.id) {
+          router.push(`/manual-inspection?session=${newSession.id}`)
+        }
+        // 새 세션 시작 후 다른 세션이 있는지 확인
+        lastSession.value = await findLastSession(user.value?.id)
         showSetDropdown.value = false
         currentItemIndex.value = 0
       } catch (err) {
@@ -1049,97 +1449,59 @@ export default {
       try {
         await loadSession(lastSession.value.id)
         selectedSetId.value = session.set_id
-        showSetDropdown.value = false
-        lastSession.value = null
         
-        // 마지막 검수 완료한 부품 다음 부품으로 이동
-        if (inspectionMode.value === 'single' && items.value.length > 0) {
-          // displayedItems와 동일한 정렬 로직 적용
-          const filtered = statusFilter.value === 'all'
-            ? items.value
-            : items.value.filter(item => item.status === statusFilter.value)
-          const sorted = [...filtered]
+        // 세트 정보 조회하여 검색창에 표시
+        if (session.set_id) {
+          const { data: setData, error: setError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id')
+            .eq('id', session.set_id)
+            .maybeSingle()
           
-          switch (selectedSortMode.value) {
-            case 'color':
-              sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
-              break
-            case 'shape':
-              sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
-              break
-            case 'size':
-              sorted.sort((a, b) => {
-                const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-                const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
-                if (aSize === bSize) {
-                  return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-                }
-                return aSize - bSize
-              })
-              break
-            case 'rarity':
-              sorted.sort((a, b) => {
-                const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
-                const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
-                if (aFreq === bFreq) {
-                  return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
-                }
-                return aFreq - bFreq
-              })
-              break
-            case 'name':
-              sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
-              break
-            case 'sequence':
-            default:
-              sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
-              break
-          }
-          
-          // 마지막 완료된 부품 찾기
-          let lastCheckedIndex = -1
-          for (let i = sorted.length - 1; i >= 0; i--) {
-            if (sorted[i].status === 'checked') {
-              lastCheckedIndex = i
-              break
+          if (!setError && setData) {
+            setSearchQuery.value = setData.set_num
+            // theme_id가 있으면 테마 정보도 조회
+            if (setData.theme_id) {
+              const { data: themeData } = await supabase
+                .from('lego_themes')
+                .select('theme_id, name')
+                .eq('theme_id', setData.theme_id)
+                .maybeSingle()
+              
+              searchResults.value = [{
+                ...setData,
+                theme_name: themeData?.name || null
+              }]
+            } else {
+              searchResults.value = [{ ...setData, theme_name: null }]
             }
-          }
-          
-          // 마지막 완료된 부품 다음 인덱스로 설정
-          if (lastCheckedIndex >= 0 && lastCheckedIndex < sorted.length - 1) {
-            currentItemIndex.value = lastCheckedIndex + 1
-          } else if (lastCheckedIndex === -1) {
-            // 완료된 부품이 없으면 첫 번째 부품으로
-            currentItemIndex.value = 0
-          } else {
-            // 모든 부품이 완료되었으면 첫 번째 부품으로
-            currentItemIndex.value = 0
+            searchResultsKey.value++
           }
         }
+        
+        showSetDropdown.value = false
+        // 세션 복원 후 다른 세션이 있는지 확인
+        lastSession.value = await findLastSession()
+        
+        await focusLastInspectedItem() // 🔧 수정됨
       } catch (err) {
         console.error('세션 복원 실패:', err)
       }
     }
 
-    const selectedSetLabel = computed(() => {
-      if (!selectedSetId.value) {
-        return '세트를 선택하세요'
-      }
-      const match = availableSets.value.find(set => set.id === selectedSetId.value)
-      if (!match) {
-        return '세트를 선택하세요'
-      }
-      return `${match.name} (${match.set_num})`
+    const selectedSet = computed(() => {
+      if (!selectedSetId.value) return null
+      return searchResults.value.find(set => set.id === selectedSetId.value)
     })
-
-    const toggleSetDropdown = () => {
-      if (loading.value) return
-      showSetDropdown.value = !showSetDropdown.value
-    }
 
     const handleSelectSet = (set) => {
       selectedSetId.value = set.id
+      // 검색창에는 메인 세트 번호만 표시 (하이픈 이전 부분)
+      const mainSetNum = set.set_num.split('-')[0]
+      setSearchQuery.value = mainSetNum
       showSetDropdown.value = false
+      searchResults.value = [{ ...set }] // 새 객체로 복사
+      searchResultsKey.value++ // 강제 리렌더링
     }
 
     const handleClickOutsideDropdown = (event) => {
@@ -1332,10 +1694,20 @@ export default {
     const setItemStatus = (item, status) => {
       const index = findItemIndex(item.id)
       if (index === -1) return
-      updateItem(index, { status })
+      const target = items.value[index]
       
-      // 단일 카드 모드에서 상태가 'checked'로 변경되면 다음 카드로 자동 이동
-      if (inspectionMode.value === 'single' && status === 'checked') {
+      // 완료 버튼 클릭 시 재고 수량 자동으로 채우기
+      if (status === 'checked') {
+        updateItem(index, { 
+          status: 'checked',
+          checked_count: target.total_count
+        })
+      } else {
+        updateItem(index, { status })
+      }
+      
+      // 단일 카드 모드에서 상태가 'checked' 또는 'missing'로 변경되면 다음 카드로 자동 이동
+      if (inspectionMode.value === 'single' && (status === 'checked' || status === 'missing')) {
         slideDirection.value = 'right'
         // displayedItems와 동일한 정렬 로직으로 다음 pending 아이템 찾기
         const filtered = statusFilter.value === 'all'
@@ -1378,7 +1750,7 @@ export default {
             sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
             break
         }
-        // 현재 인덱스 이후의 다음 pending 아이템 찾기
+        // 현재 인덱스 이후의 다음 pending 아이템 찾기 (checked가 아닌 아이템)
         let nextPendingIndex = -1
         for (let i = currentItemIndex.value + 1; i < sorted.length; i++) {
           if (sorted[i].status !== 'checked') {
@@ -1404,6 +1776,42 @@ export default {
       }
     }
     
+    const handleProgressDragStart = (e) => {
+      if (inspectionMode.value !== 'single' || displayedItems.value.length === 0) return
+      
+      e.preventDefault()
+      isDraggingProgress.value = true
+      
+      const handleMove = (moveEvent) => {
+        if (!progressBarRef.value) return
+        
+        const clientX = moveEvent.touches ? moveEvent.touches[0].clientX : moveEvent.clientX
+        const rect = progressBarRef.value.getBoundingClientRect()
+        const x = clientX - rect.left
+        const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100))
+        const newIndex = Math.round((percentage / 100) * totalItems.value) - 1
+        const clampedIndex = Math.max(0, Math.min(totalItems.value - 1, newIndex))
+        
+        if (clampedIndex !== currentItemIndex.value) {
+          goToItemByIndex(clampedIndex)
+        }
+      }
+      
+      const handleEnd = () => {
+        isDraggingProgress.value = false
+        document.removeEventListener('mousemove', handleMove)
+        document.removeEventListener('mouseup', handleEnd)
+        document.removeEventListener('touchmove', handleMove)
+        document.removeEventListener('touchend', handleEnd)
+      }
+      
+      handleMove(e)
+      document.addEventListener('mousemove', handleMove)
+      document.addEventListener('mouseup', handleEnd)
+      document.addEventListener('touchmove', handleMove)
+      document.addEventListener('touchend', handleEnd)
+    }
+
     const goToNextItem = () => {
       if (inspectionMode.value === 'single') {
         // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
@@ -1470,6 +1878,13 @@ export default {
       }
     }
     
+    const goToItemByIndex = (index) => {
+      if (inspectionMode.value === 'single' && index >= 0 && index < allItemsForThumbnails.value.length) {
+        currentItemIndex.value = index
+        slideDirection.value = 'right'
+      }
+    }
+
     const goToPrevItem = () => {
       if (inspectionMode.value === 'single') {
         // 현재 부품이 부분 입력된 경우 보류 상태로 자동 변경
@@ -1547,7 +1962,7 @@ export default {
       try {
         // 1. element_id가 있는 경우: part_images 테이블에서 element_id로 조회
         if (itemsWithElementId.length > 0) {
-          const elementIds = [...new Set(itemsWithElementId.map(item => item.element_id).filter(Boolean))]
+          const elementIds = [...new Set(itemsWithElementId.map(item => item.element_id).filter(Boolean))].map(id => String(id))
           
           const { data: partImages, error: partImagesError } = await supabase
             .from('part_images')
@@ -1557,7 +1972,7 @@ export default {
 
           if (!partImagesError && partImages) {
             partImages.forEach(pi => {
-              const item = itemsWithElementId.find(i => i.element_id === pi.element_id)
+              const item = itemsWithElementId.find(i => String(i.element_id) === String(pi.element_id))
               if (item && pi.uploaded_url) {
                 imageUrlMap[item.id] = pi.uploaded_url
               }
@@ -1577,7 +1992,7 @@ export default {
             if (!imageUrlMap[item.id] && item.element_id) {
               const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
               const bucketName = 'lego_parts_images'
-              const fileName = `${item.element_id}.webp`
+              const fileName = `${String(item.element_id)}.webp`
               imageUrlMap[item.id] = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
             }
           })
@@ -1636,7 +2051,11 @@ export default {
 
     const handleImageError = (event) => {
       // 이미지 로드 실패 시 숨김
-      console.warn('[handleImageError] 이미지 로드 실패:', event.target.src)
+      const imgSrc = event.target.src
+      // 빈 문자열이나 현재 페이지 URL과 같은 잘못된 URL은 로그 출력하지 않음
+      if (imgSrc && imgSrc !== window.location.href && imgSrc !== window.location.origin + window.location.pathname) {
+        console.warn('[handleImageError] 이미지 로드 실패:', imgSrc)
+      }
       event.target.style.display = 'none'
     }
 
@@ -1781,6 +2200,41 @@ export default {
       }
     }
 
+    const handleCompleteInspection = async () => {
+      if (!session.id) return
+      if (confirm('검수를 완료하시겠습니까?')) {
+        try {
+          await completeSessionAction()
+          await finalizeSessionReset()
+        } catch (err) {
+          console.error('검수 완료 실패:', err)
+          showSyncToast('검수 완료에 실패했습니다.')
+        }
+      }
+    }
+
+    const handleSaveLocal = async () => {
+      if (!session.id) return
+      try {
+        await syncToServer({ forceFullSync: true })
+        showSyncToast('서버 저장 완료')
+      } catch (err) {
+        console.error('저장 실패:', err)
+        showSyncToast('저장에 실패했습니다.')
+      }
+    }
+
+    const handleTemporarySave = async () => {
+      if (syncInProgress.value || isOffline.value || !session.id) return
+      try {
+        await pauseSessionAction()
+        showSyncToast('임시저장 완료')
+      } catch (err) {
+        console.error('임시저장 실패:', err)
+        showSyncToast('임시저장에 실패했습니다. 잠시 후 다시 시도해주세요.')
+      }
+    }
+
     // 부품 정보 모달 관련 함수
     const showPartInfo = async (item) => {
       selectedPart.value = item
@@ -1875,22 +2329,228 @@ export default {
 
     watch(isOffline, (offline) => {
       if (offline) {
-        showSyncToast('오프라인 상태입니다. 변경사항이 로컬에 저장됩니다.')
+        showSyncToast('오프라인 상태입니다. 변경사항은 연결 복구 후에만 저장됩니다.')
       } else {
         showSyncToast('온라인으로 복구되었습니다. 동기화를 재시도합니다.')
         triggerManualSync()
       }
     })
 
+    // 정렬 또는 필터 변경 시 단일 검수 모드에서 인덱스 리셋
+    watch([selectedSortMode, statusFilter], () => {
+      if (inspectionMode.value === 'single') {
+        currentItemIndex.value = 0
+      }
+    })
+
+
+    const focusLastInspectedItem = async () => { // 🔧 수정됨
+      if (inspectionMode.value !== 'single') return // 🔧 수정됨
+      if (!Array.isArray(items.value) || items.value.length === 0) return // 🔧 수정됨
+
+      statusFilter.value = 'all' // 🔧 수정됨
+      await nextTick() // 🔧 수정됨
+
+      const sorted = [...items.value].sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0)) // 🔧 수정됨
+      const targetItem = sorted.find(candidate => candidate?.status !== 'checked') || sorted[0] || null // 🔧 수정됨
+
+      if (!targetItem) { // 🔧 수정됨
+        currentItemIndex.value = 0 // 🔧 수정됨
+        session.last_active_item_id = null // 🔧 수정됨
+        return // 🔧 수정됨
+      } // 🔧 수정됨
+
+      const targetIndex = sorted.findIndex(item => item?.id === targetItem.id) // 🔧 수정됨
+      currentItemIndex.value = targetIndex >= 0 ? targetIndex : 0 // 🔧 수정됨
+      session.last_active_item_id = targetItem.id // 🔧 수정됨
+    }
+
+    // URL 쿼리 파라미터에서 세션 로드하는 함수
+    const loadSessionFromQuery = async (sessionId) => {
+      if (!sessionId || typeof sessionId !== 'string') return false
+      
+      try {
+        await loadSession(sessionId)
+        selectedSetId.value = session.set_id
+        
+        // 세트 정보 조회하여 검색창에 표시
+        if (session.set_id) {
+          const { data: setData, error: setError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id')
+            .eq('id', session.set_id)
+            .maybeSingle()
+          
+          if (!setError && setData) {
+            setSearchQuery.value = setData.set_num
+            // theme_id가 있으면 테마 정보도 조회
+            if (setData.theme_id) {
+              const { data: themeData } = await supabase
+                .from('lego_themes')
+                .select('theme_id, name')
+                .eq('theme_id', setData.theme_id)
+                .maybeSingle()
+              
+              searchResults.value = [{
+                ...setData,
+                theme_name: themeData?.name || null
+              }]
+            } else {
+              searchResults.value = [{ ...setData, theme_name: null }]
+            }
+            searchResultsKey.value++
+          }
+        }
+        
+        await focusLastInspectedItem() // 🔧 수정됨
+        return true
+      } catch (err) {
+        console.error('세션 로드 실패:', err)
+        return false
+      }
+    }
+
+    // URL 쿼리 파라미터 변경 감지
+    watch(() => route.query.session, async (newSessionId) => {
+      if (newSessionId && typeof newSessionId === 'string') {
+        await loadSessionFromQuery(newSessionId)
+      }
+    })
+
+    let isLoadingLastSession = false
+
+    // 사용자가 로드된 후 마지막 세션 찾기
+    const loadLastSessionIfNeeded = async () => {
+      console.log('[loadLastSessionIfNeeded] 시작', {
+        hasUser: !!user.value,
+        userId: user.value?.id,
+        isLoadingLastSession,
+        sessionId: session.id,
+        routePath: route.path,
+        routeQuery: route.query
+      })
+
+      if (!user.value) {
+        console.log('[loadLastSessionIfNeeded] 사용자 없음, 종료')
+        return
+      }
+
+      if (isLoadingLastSession) {
+        console.log('[loadLastSessionIfNeeded] 이미 로딩 중, 종료')
+        return
+      }
+
+      isLoadingLastSession = true
+
+      try {
+        // URL 쿼리 파라미터에서 세션 ID 확인
+        const sessionId = route.query.session
+        console.log('[loadLastSessionIfNeeded] 세션 ID 확인', { sessionId })
+        
+        if (sessionId && typeof sessionId === 'string') {
+          const loaded = await loadSessionFromQuery(sessionId)
+          console.log('[loadLastSessionIfNeeded] 세션 로드 결과', { loaded })
+          if (!loaded) {
+            // 세션 로드 실패 시 마지막 세션 찾기
+            lastSession.value = await findLastSession(user.value?.id)
+            console.log('[loadLastSessionIfNeeded] 세션 로드 실패, lastSession 찾음', lastSession.value)
+          }
+          // 세션 로드 성공 시에는 watch에서 처리 (lastSession을 null로 설정)
+        } else {
+          // 세션이 없을 때 마지막 세션 찾기 (findLastSession이 현재 세션을 제외하므로 항상 호출)
+          console.log('[loadLastSessionIfNeeded] 세션 ID 없음, lastSession 찾기 시작')
+          lastSession.value = await findLastSession(user.value?.id)
+          console.log('[loadLastSessionIfNeeded] lastSession 찾기 완료', lastSession.value)
+        }
+      } finally {
+        isLoadingLastSession = false
+        console.log('[loadLastSessionIfNeeded] 완료', {
+          lastSession: lastSession.value,
+          sessionId: session.id,
+          condition: !session.id && lastSession.value
+        })
+      }
+    }
+
+    // 사용자 로드 감지
+    watch(user, async (newUser, oldUser) => {
+      console.log('[watch user] 변경 감지', { newUser: !!newUser, oldUser: !!oldUser, userId: newUser?.id })
+      if (newUser) {
+        await loadLastSessionIfNeeded()
+      }
+    }, { immediate: true })
+
+    // 사용자 로딩 완료 감지
+    watch(userLoading, async (loading, oldLoading) => {
+      console.log('[watch userLoading] 변경 감지', { loading, oldLoading, hasUser: !!user.value })
+      if (!loading && user.value) {
+        await loadLastSessionIfNeeded()
+      }
+    }, { immediate: true })
+
+    // 라우트 경로 변경 감지 (다른 메뉴에서 이 페이지로 이동할 때)
+    watch(() => route.path, async (newPath, oldPath) => {
+      console.log('[watch route.path] 변경 감지', { newPath, oldPath })
+      if (newPath === '/manual-inspection' && oldPath !== '/manual-inspection') {
+        console.log('[watch route.path] manual-inspection 페이지로 이동')
+        // 다른 페이지에서 이 페이지로 이동할 때 플래그 리셋
+        isLoadingLastSession = false
+        // 사용자가 로드되어 있고 세션이 없을 때만 마지막 세션 찾기
+        console.log('[watch route.path] 조건 확인', { hasUser: !!user.value, hasSession: !!session.id })
+        if (user.value && !session.id) {
+          await loadLastSessionIfNeeded()
+        }
+      }
+    })
+
+    // keep-alive 사용 시 활성화될 때 실행
+    onActivated(async () => {
+      console.log('[onActivated] 컴포넌트 활성화', { hasUser: !!user.value, hasSession: !!session.id })
+      isLoadingLastSession = false
+      if (user.value && !session.id) {
+        await loadLastSessionIfNeeded()
+      }
+    })
 
     onMounted(async () => {
-      await loadAvailableSets()
-      lastSession.value = await findLastSession()
+      console.log('[onMounted] 컴포넌트 마운트', {
+        userLoading: userLoading.value,
+        hasUser: !!user.value,
+        userId: user.value?.id,
+        hasSession: !!session.id,
+        sessionId: session.id
+      })
+      // 사용자 로딩이 완료되고 사용자가 있으면 즉시 실행
+      await nextTick()
+      console.log('[onMounted] nextTick 후', {
+        userLoading: userLoading.value,
+        hasUser: !!user.value
+      })
+      if (!userLoading.value && user.value) {
+        await loadLastSessionIfNeeded()
+      }
+      
       document.addEventListener('click', handleClickOutsideDropdown)
       window.addEventListener('online', updateOnlineStatus)
       window.addEventListener('offline', updateOnlineStatus)
       if (isOffline.value) {
-        showSyncToast('오프라인 상태입니다. 변경사항이 로컬에 저장됩니다.')
+        showSyncToast('오프라인 상태입니다. 변경사항은 연결 복구 후에만 저장됩니다.')
+      }
+    })
+
+    // session.id가 변경될 때 lastSession 업데이트
+    watch(() => session.id, async (newSessionId, oldSessionId) => {
+      console.log('[watch session.id] 변경 감지', { newSessionId, oldSessionId })
+      // 세션이 없어질 때 (종료 또는 초기화) 마지막 세션 다시 찾기
+      if (!newSessionId && oldSessionId) {
+        console.log('[watch session.id] 세션 종료, lastSession 찾기')
+        isLoadingLastSession = false
+        lastSession.value = await findLastSession(user.value?.id)
+        console.log('[watch session.id] lastSession 찾기 완료', lastSession.value)
+      } else if (newSessionId) {
+        // 세션이 로드되었을 때는 lastSession을 null로 설정 (이전 세션 복원 섹션 숨김)
+        console.log('[watch session.id] 세션 로드, lastSession을 null로 설정')
+        lastSession.value = null
       }
     })
 
@@ -1913,15 +2573,25 @@ export default {
       progress,
       missingCount,
       selectedSetId,
-      availableSets,
-      lastSession,
+      selectedSet,
+      setSearchQuery,
+      searchResults,
+      searchResultsKey,
       showSetDropdown,
-      selectedSetLabel,
-      toggleSetDropdown,
       handleSelectSet,
+      searchSets,
+      handleSearchEnter,
+      handleSearchBlur,
       setDropdownRef,
+      lastSession,
+      handleStartNewSession,
       startNewSession,
       resumeSession,
+      showExistingSessionModal,
+      existingSessionInfo,
+      closeExistingSessionModal,
+      resumeExistingSession,
+      startNewSessionWithCompletion,
       incrementCount,
       decrementCount,
       updateItemCount,
@@ -1934,8 +2604,13 @@ export default {
       slideDirection,
       goToNextItem,
       goToPrevItem,
+      goToItemByIndex,
+      handleProgressDragStart,
+      progressBarRef,
+      allItemsForThumbnails,
       pauseSession,
       completeSession,
+      handleCompleteInspection,
       triggerManualSync,
       getCardStatusClass,
       handleSwipeStart,
@@ -1946,7 +2621,6 @@ export default {
       formatTime,
       syncStatusMessage,
       syncInProgress,
-      showAnalytics,
       syncErrorToast,
       lastSyncError,
       isOffline,
@@ -1954,16 +2628,19 @@ export default {
       selectedSortMode,
       sortOptions,
       statusOptions,
+      formatSetNumber,
+      formatThemeName,
+      formatSetDisplay,
+      sessionDisplayName,
+      lastSessionDisplayName,
+      lastSessionProgressInfo,
       displayedItems,
       totalPendingItems,
       statusLabel,
       statusCounts,
+      getStatusCount,
+      getMissingCountInfo,
       totalItems,
-      averageDurationLabel,
-      elapsedDurationLabel,
-      missingRateLabel,
-      statusChartData,
-      statusChartOptions,
       qaReminder,
       showPartInfo,
       showPartInfoModal,
@@ -1974,7 +2651,6 @@ export default {
       alternativePartsLoading,
       closePartInfoModal,
       rareParts,
-      showRareParts,
       getColorRgbSync
     }
   }
@@ -1986,6 +2662,11 @@ export default {
   min-height: 100vh;
   background: transparent;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  padding: 2rem;
+}
+
+.pleyon-layout:has(.grid-mode-bottom-actions) {
+  padding-bottom: 5rem;
 }
 
 .layout-container {
@@ -2000,6 +2681,25 @@ export default {
   min-width: 0;
 }
 
+.page-header {
+  margin-bottom: 2rem;
+}
+
+.page-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.5rem 0;
+  text-align: center;
+}
+
+.page-header p {
+  font-size: 1rem;
+  color: #6b7280;
+  margin: 0;
+  text-align: center;
+}
+
 .panel-header {
   position: relative;
   background: #ffffff;
@@ -2012,28 +2712,11 @@ export default {
   gap: 1rem;
 }
 
-.panel-header.start-header {
-  background: transparent;
-  border-bottom: none;
-  justify-content: center;
-  padding: 1.5rem 1rem 1rem;
-}
-
 .panel-header h1 {
   font-size: 1.5rem;
   font-weight: 600;
   color: #111827;
   margin: 0;
-}
-
-.start-title {
-  text-align: center;
-  width: 100%;
-  font-size: 2rem !important;
-  font-weight: 600;
-  color: #111827;
-  margin: 0 0 0.5rem;
-  line-height: 1.2;
 }
 
 .session-title h1 {
@@ -2164,101 +2847,6 @@ export default {
   background: #e5e7eb;
 }
 
-.sync-section {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-}
-
-.sync-status {
-  margin-top: 0.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.875rem;
-  color: #374151;
-}
-
-.sync-status .sync-text {
-  flex: 1;
-}
-
-.sync-status .sync-action {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #2563eb;
-  font-size: 0.75rem;
-  font-weight: 600;
-  border-radius: 9999px;
-  padding: 0.35rem 0.85rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.sync-status .sync-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.sync-status .sync-action:not(:disabled):hover {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-}
-
-.analytics-toggle {
-  position: absolute;
-  left: 50%;
-  bottom: -20px;
-  transform: translateX(-50%);
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  border-radius: 50%;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-  z-index: 10;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.analytics-toggle:hover {
-  background: #f3f4f6;
-  border-color: #9ca3af;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-.toggle-icon {
-  width: 20px;
-  height: 20px;
-  color: #6b7280;
-  transition: transform 0.2s ease;
-}
-
-.toggle-icon.rotated {
-  transform: rotate(180deg);
-}
-
-.sync-status.syncing {
-  color: #2563eb;
-}
-
-.sync-status.error {
-  color: #dc2626;
-}
-
-.sync-status.offline {
-  color: #6b7280;
-}
-
-.sync-status.offline .sync-action {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
 
 .sync-toast {
   position: fixed;
@@ -2275,7 +2863,7 @@ export default {
 
 .panel-content {
   flex: 1;
-  padding: 2rem;
+  padding: 0;
   overflow-y: auto;
 }
 
@@ -2298,19 +2886,26 @@ export default {
   padding: 1.5rem;
   border-bottom: 1px solid #e5e7eb;
   background: #f9fafb;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 .card-header h3 {
   font-size: 1.125rem;
   font-weight: 600;
   color: #111827;
-  margin: 0 0 0.5rem 0;
+  margin: 0;
 }
 
 .card-header p {
   font-size: 0.875rem;
   color: #6b7280;
   margin: 0;
+  flex: 1;
+  text-align: right;
 }
 
 .card-body {
@@ -2318,7 +2913,11 @@ export default {
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0rem;
+}
+
+.card-body > .btn-primary {
+  margin-top: 0;
 }
 
 .form-group label {
@@ -2327,6 +2926,123 @@ export default {
   font-weight: 500;
   color: #374151;
   margin-bottom: 0.5rem;
+}
+
+.set-search-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-search-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  position: relative;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.set-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+.set-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-input:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.set-search-input:focus + .search-icon {
+  color: #2563eb;
+}
+
+.search-button {
+  padding: 0.75rem 1.5rem;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.search-button:hover {
+  background: #1d4ed8;
+}
+
+.search-button:active {
+  background: #1e40af;
+}
+
+.search-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.selected-set-info {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.selected-set-display {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.search-no-results {
+  padding: 1rem;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.875rem;
 }
 
 .custom-select {
@@ -2387,9 +3103,7 @@ export default {
 }
 
 .custom-select-dropdown {
-  position: absolute;
-  top: calc(100% + 0.5rem);
-  left: 0;
+  position: relative;
   width: 100%;
   max-height: 260px;
   overflow-y: auto;
@@ -2399,6 +3113,7 @@ export default {
   box-shadow: 0 18px 36px -12px rgba(15, 23, 42, 0.25);
   z-index: 20;
   padding: 0.5rem;
+  margin-top: 0.5rem;
 }
 
 .custom-select-option {
@@ -2424,15 +3139,41 @@ export default {
   color: #1d4ed8;
 }
 
-.option-title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: inherit;
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+  width: 100%;
+  font-size: 0.875rem;
+  line-height: 1.5;
 }
 
-.option-subtitle {
-  font-size: 0.8125rem;
+.option-row:last-child {
+  margin-bottom: 0;
+}
+
+.option-row-meta {
+  gap: 0.375rem;
+}
+
+.option-set-display {
+  font-weight: 600;
+  color: #1f2937;
+  flex: 1;
+}
+
+.option-label {
+  font-weight: 600;
   color: #6b7280;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.option-value {
+  color: #111827;
+  word-break: break-word;
+  flex: 1;
 }
 
 .select-fade-enter-active,
@@ -2495,6 +3236,8 @@ export default {
   justify-content: space-between;
   padding: 0.75rem 0;
   border-bottom: 1px solid #dbeafe;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .info-row:last-child {
@@ -2504,16 +3247,29 @@ export default {
 .info-label {
   font-size: 0.875rem;
   color: #6b7280;
+  flex-shrink: 0;
 }
 
 .info-value {
   font-size: 0.875rem;
   font-weight: 500;
   color: #111827;
+  word-break: break-word;
+  white-space: normal;
+  flex: 1;
+  min-width: 0;
+  text-align: right;
 }
 
 .progress-text {
   color: #2563eb;
+}
+
+.progress-detail {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin-left: 0.25rem;
+  font-weight: 400;
 }
 
 .resume-actions {
@@ -2527,116 +3283,6 @@ export default {
   gap: 1.5rem;
 }
 
-.progress-section {
-  background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  padding: 1.5rem;
-}
-
-.progress-bar-container {
-  width: 100%;
-  height: 12px;
-  background: #f3f4f6;
-  border-radius: 6px;
-  overflow: hidden;
-  margin-bottom: 1rem;
-}
-
-.progress-bar-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
-  transition: width 0.3s ease;
-  border-radius: 6px;
-}
-
-.progress-stats {
-  display: flex;
-  gap: 2rem;
-  flex-wrap: wrap;
-}
-
-.stat-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.stat-label {
-  font-size: 0.75rem;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.stat-value {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #111827;
-}
-
-.stat-value.error {
-  color: #dc2626;
-}
-
-/* // 🔧 수정됨 */
-.analytics-panel {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 1.5rem;
-  align-items: stretch;
-}
-
-.metrics-overview {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.metric-card {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.metric-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #6b7280;
-  letter-spacing: 0.04em;
-}
-
-.metric-value {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #111827;
-}
-
-.metric-value.error {
-  color: #dc2626;
-}
-
-.metric-hint {
-  font-size: 0.8125rem;
-  color: #6b7280;
-}
-
-.status-chart-panel {
-  width: 260px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 1.25rem;
-}
-
-.status-chart {
-  width: 100%;
-  height: 220px;
-}
 
 .qa-reminder {
   border-radius: 12px;
@@ -2675,6 +3321,7 @@ export default {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  margin-top: 1.5rem;
   margin-bottom: 1.5rem;
 }
 
@@ -2694,6 +3341,32 @@ export default {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+}
+
+.status-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: #6b7280;
+  color: #ffffff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.status-badge-count.status-badge-count-missing {
+  height: auto;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.6875rem;
 }
 
 .status-filter-button:hover {
@@ -2707,6 +3380,21 @@ export default {
   border-color: #2563eb;
   box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
 }
+
+.status-filter-button.active .status-badge-count {
+  background: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.status-badge-count-missing {
+  background: #ef4444 !important;
+}
+
+.status-filter-button.active .status-badge-count-missing {
+  background: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+}
+
 
 .sort-control {
   display: flex;
@@ -2743,17 +3431,67 @@ export default {
 .items-grid.single-mode {
   grid-template-columns: 1fr;
   max-width: 600px;
+  width: 100%;
   margin: 0 auto;
   position: relative;
   overflow: visible;
 }
 
+.single-card-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 600px;
+  margin: 0 auto 1.5rem auto;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.items-grid.grid-mode {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  max-width: 100%;
+}
+
+.items-grid.grid-mode .part-card {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .items-grid.grid-mode {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .items-grid.grid-mode {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .items-grid.grid-mode {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .items-grid.grid-mode {
+    grid-template-columns: 1fr;
+  }
+}
+
 .part-card-wrapper {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 1rem;
 }
+
 
 /* 슬라이드 애니메이션 */
 .slide-right-enter-active,
@@ -2783,15 +3521,6 @@ export default {
   opacity: 0;
 }
 
-.single-card-navigation {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 1.5rem;
-  padding: 0;
-  background: transparent;
-  border: none;
-}
 
 .nav-btn {
   padding: 0.75rem 1.5rem;
@@ -2822,7 +3551,27 @@ export default {
   border-radius: 12px;
   padding: 1rem 1.5rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-  min-width: 200px;
+  min-width: 300px;
+  width: 100%;
+  max-width: 100%;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+}
+
+.card-counter:hover {
+  background: #f9fafb;
+}
+
+.counter-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 0.75rem;
 }
 
 .counter-content {
@@ -2830,7 +3579,6 @@ export default {
   align-items: baseline;
   justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
 }
 
 .counter-current {
@@ -2856,10 +3604,12 @@ export default {
 
 .counter-progress {
   width: 100%;
-  height: 6px;
+  height: 8px;
   background: #f3f4f6;
   border-radius: 999px;
-  overflow: hidden;
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
 }
 
 .counter-progress-bar {
@@ -2867,6 +3617,75 @@ export default {
   background: linear-gradient(90deg, #2563eb 0%, #3b82f6 100%);
   border-radius: 999px;
   transition: width 0.3s ease;
+  pointer-events: none;
+}
+
+.counter-progress-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  background: #ffffff;
+  border: 3px solid #2563eb;
+  border-radius: 50%;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  pointer-events: auto;
+  z-index: 10;
+}
+
+.counter-progress-handle:active {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.1);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+.counter-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  padding: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.counter-arrow svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  stroke-width: 2.5;
+}
+
+.counter-arrow:hover:not(:disabled) {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+  transform: scale(1.05);
+}
+
+.counter-arrow:active:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  transform: scale(0.95);
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.2);
+}
+
+.counter-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  background: #f9fafb;
+  border-color: #e5e7eb;
+  box-shadow: none;
 }
 
 .part-card {
@@ -2875,67 +3694,37 @@ export default {
   border-radius: 12px;
   padding: 1.25rem;
   position: relative;
+  display: flex;
+  flex-direction: column;
   transition: transform 0.2s ease-out;
   touch-action: pan-y;
   user-select: none;
   -webkit-user-select: none;
-  flex: 1;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .part-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.card-nav-arrow {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: 2px solid #e5e7eb;
-  background: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-  color: #374151;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.card-nav-arrow:hover:not(:disabled) {
-  background: #f3f4f6;
-  border-color: #9ca3af;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  transform: scale(1.05);
-}
-
-.card-nav-arrow:active:not(:disabled) {
-  transform: scale(0.95);
-}
-
-.card-nav-arrow:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.card-nav-arrow svg {
-  width: 24px;
-  height: 24px;
-}
 
 .part-card.card-checked {
-  background: #f0fdf4;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #10b981;
 }
 
 .part-card.card-hold {
-  background: #fffbeb;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #f59e0b;
 }
 
 .part-card.card-missing {
-  background: #fef2f2;
-  border: 1px solid #e5e7eb;
+  background: #ffffff;
+  border: 1px solid #ef4444;
 }
 
 
@@ -2946,6 +3735,10 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 .part-info-btn {
@@ -2971,6 +3764,10 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  width: 0;
 }
 
 .element-id {
@@ -2985,6 +3782,12 @@ export default {
   font-weight: 500;
   color: #111827;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .color-badge {
@@ -3085,6 +3888,7 @@ export default {
 
 .status-buttons {
   display: flex;
+  flex-direction: row;
   gap: 0.5rem;
 }
 
@@ -3100,22 +3904,277 @@ export default {
   transition: all 0.2s;
 }
 
-.status-button.checked.active {
+.card-actions-bottom {
+  margin-top: 1.5rem;
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0 1rem;
+}
+
+.parts-thumbnails {
+  margin-top: 2rem;
+  width: 100%;
+  padding: 0 1rem;
+}
+
+.thumbnails-scroll {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db #f3f4f6;
+  -webkit-overflow-scrolling: touch;
+}
+
+.thumbnails-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.thumbnails-scroll::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 3px;
+}
+
+.thumbnails-scroll::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.thumbnails-scroll::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.thumbnail-item {
+  width: 100%;
+  min-width: 70px;
+  max-width: 100px;
+  cursor: pointer;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+  transition: all 0.2s ease;
+  justify-self: center;
+}
+
+.thumbnail-item:hover {
+  border-color: #2563eb;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.thumbnail-item.active {
+  border-color: #2563eb;
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.thumbnail-item.card-checked {
+  border-color: #10b981;
+  border-width: 1px;
+}
+
+.thumbnail-item.card-missing {
+  border-color: #ef4444;
+  border-width: 1px;
+}
+
+.thumbnail-item.card-hold {
+  border-color: #f59e0b;
+  border-width: 1px;
+}
+
+.thumbnail-item.active.card-checked {
+  border-color: #2563eb;
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1), 0 0 0 4px rgba(16, 185, 129, 0.1);
+}
+
+.thumbnail-item.active.card-missing {
+  border-color: #2563eb;
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1), 0 0 0 4px rgba(239, 68, 68, 0.1);
+}
+
+.thumbnail-item.active.card-hold {
+  border-color: #2563eb;
+  border-width: 3px;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1), 0 0 0 4px rgba(245, 158, 11, 0.1);
+}
+
+.thumbnail-image {
+  width: 100%;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f9fafb;
+  overflow: hidden;
+  padding: 0.25rem 0.5rem 0 0.5rem;
+}
+
+.thumbnail-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumbnail-placeholder {
+  font-size: 0.625rem;
+  color: #9ca3af;
+  text-align: center;
+  padding: 0.25rem;
+}
+
+.thumbnail-info {
+  padding: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.thumbnail-element-id {
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: #374151;
+  text-align: center;
+}
+
+.thumbnail-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.thumbnail-status.pending {
+  background: #9ca3af;
+}
+
+.thumbnail-status.checked {
   background: #10b981;
+}
+
+.thumbnail-status.missing {
+  background: #ef4444;
+}
+
+.thumbnail-status.hold {
+  background: #f59e0b;
+}
+
+.thumbnail-count {
+  font-size: 0.625rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.save-button {
+  padding: 0.75rem 1.5rem;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: all 0.2s;
+  min-width: 120px;
+}
+
+.save-button.complete-save {
   color: #ffffff;
+  background: #10b981;
   border-color: #10b981;
 }
 
+.save-button.complete-save:hover {
+  background: #059669;
+  border-color: #059669;
+}
+
+.save-button.temporary-save {
+  color: #2563eb;
+  border-color: #2563eb;
+}
+
+.save-button.temporary-save:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #1d4ed8;
+}
+
+.save-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 그리드 검수 모드 하단 고정 버튼 */
+.grid-mode-bottom-actions {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  z-index: 40;
+  padding: 1rem;
+}
+
+.bottom-actions-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0 1rem;
+}
+
+.bottom-actions-container .save-button {
+  flex: 1;
+  max-width: 300px;
+  padding: 0.875rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .grid-mode-bottom-actions {
+    padding: 0.75rem;
+  }
+
+  .bottom-actions-container {
+    padding: 0 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .bottom-actions-container .save-button {
+    font-size: 0.875rem;
+    padding: 0.75rem 1rem;
+  }
+}
+
+.status-button.checked.active {
+  background: #ffffff;
+  color: #10b981;
+  border-color: #10b981;
+  border-width: 2px;
+}
+
 .status-button.hold.active {
-  background: #f59e0b;
-  color: #ffffff;
+  background: #ffffff;
+  color: #f59e0b;
   border-color: #f59e0b;
+  border-width: 2px;
 }
 
 .status-button.missing.active {
-  background: #ef4444;
-  color: #ffffff;
+  background: #ffffff;
+  color: #ef4444;
   border-color: #ef4444;
+  border-width: 2px;
 }
 
 .status-button:hover {
@@ -3123,7 +4182,7 @@ export default {
 }
 
 .status-button.active:hover {
-  opacity: 0.9;
+  background: #ffffff;
 }
 
 .card-action-buttons {
@@ -3152,6 +4211,18 @@ export default {
   border-radius: 4px;
 }
 
+.no-part-image {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.875rem;
+  background: #f9fafb;
+  border-radius: 4px;
+}
+
 
 
 .error-toast {
@@ -3168,21 +4239,44 @@ export default {
 
 /* 태블릿 (1024px 이하) */
 @media (max-width: 1024px) {
-  .analytics-panel {
-    grid-template-columns: 1fr; /* // 🔧 수정됨 */
+  .items-grid.single-mode {
+    max-width: 100%;
+    padding: 0 1rem;
   }
 
-  .status-chart-panel {
-    width: 100%; /* // 🔧 수정됨 */
+  .part-card {
+    width: 100%;
+    max-width: 100%;
   }
 
+  .single-card-navigation {
+    max-width: 100%;
+    padding: 0 1rem;
+  }
+
+  .card-counter {
+    font-size: 1.125rem;
+  }
+
+  .part-card-wrapper {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .thumbnails-scroll {
+    grid-template-columns: repeat(auto-fill, minmax(65px, 1fr));
+  }
+
+  .thumbnail-item {
+    max-width: 95px;
+  }
 
   .panel-header {
     padding: 1.25rem 1.5rem;
   }
 
   .panel-content {
-    padding: 1.5rem;
+    padding: 0;
   }
 
   .session-setup {
@@ -3195,14 +4289,34 @@ export default {
     padding: 1rem 1.5rem;
     font-size: 1rem;
   }
-  
-  .card-counter {
-    font-size: 1.125rem;
-  }
 }
 
 /* 모바일 (768px 이하) */
 @media (max-width: 768px) {
+  .items-grid.single-mode {
+    max-width: 100%;
+    padding: 0 0.5rem;
+  }
+
+  .single-card-navigation {
+    max-width: 100%;
+    padding: 0 0.5rem;
+  }
+
+  .part-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .thumbnails-scroll {
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+  }
+
+  .thumbnail-item {
+    min-width: 60px;
+    max-width: 90px;
+  }
+
   .metrics-overview {
     grid-template-columns: 1fr; /* // 🔧 수정됨 */
   }
@@ -3216,10 +4330,6 @@ export default {
 
   .panel-header h1 {
     font-size: 1.25rem;
-  }
-
-  .start-title {
-    font-size: 1.75rem !important;
   }
 
   .session-title h1 {
@@ -3242,17 +4352,6 @@ export default {
     align-items: stretch;
   }
 
-  .grid-controls {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .grid-btn {
-    flex: 1;
-    padding: 0.5rem;
-    font-size: 0.8125rem;
-  }
-
   .action-btn {
     width: 100%;
     padding: 0.75rem 1rem;
@@ -3260,12 +4359,45 @@ export default {
   }
 
   .panel-content {
-    padding: 1rem;
+    padding: 0;
   }
 
   .items-grid {
-    /* 그리드 컬럼 수는 gridColumns 값에 따라 동적으로 설정됨 */
     gap: 1rem;
+  }
+
+  .items-grid.grid-mode {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+    max-width: 100%;
+  }
+
+  .items-grid.grid-mode .part-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  @media (min-width: 1400px) {
+    .items-grid.grid-mode {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  @media (max-width: 1200px) {
+    .items-grid.grid-mode {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    }
+  }
+
+  @media (max-width: 900px) {
+    .items-grid.grid-mode {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+    }
+  }
+
+  @media (max-width: 600px) {
+    .items-grid.grid-mode {
+      grid-template-columns: 1fr;
+    }
   }
 
   .items-container {
@@ -3276,19 +4408,56 @@ export default {
     padding: 1rem;
   }
 
-  .progress-section {
+  .part-card .card-header {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+    overflow: visible !important;
+  }
+
+  .part-card .part-info {
+    width: auto !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  .part-card .part-name {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+
+  .part-card .element-id {
+    display: block !important;
+  }
+
+  .part-card .color-badge {
+    display: inline-block !important;
+  }
+
+  .pleyon-layout {
     padding: 1rem;
+    padding-bottom: 4.5rem;
   }
 
-  .progress-stats {
-    flex-direction: column;
-    gap: 0.75rem;
+  .pleyon-layout:has(.grid-mode-bottom-actions) {
+    padding-bottom: 4.5rem;
   }
 
-  .stat-item {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
+  .page-header {
+    margin-bottom: 2rem !important;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  .page-header p {
+    font-size: 0.875rem !important;
+    margin: 0 !important;
   }
 
   .session-setup {
@@ -3303,6 +4472,8 @@ export default {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.75rem;
+    margin-top: 1.5rem !important;
+    margin-bottom: 1.5rem !important;
   }
 
   .status-filter-group {
@@ -3325,10 +4496,21 @@ export default {
 
   .card-header {
     padding: 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
   }
 
   .card-header h3 {
-    font-size: 1rem;
+    font-size: 0.875rem !important;
+    margin: 0;
+  }
+
+  .card-header p {
+    font-size: 0.8125rem !important;
+    margin: 0;
+    width: 100%;
+    text-align: left !important;
   }
 
   .card-body {
@@ -3338,6 +4520,48 @@ export default {
   .form-select {
     padding: 0.625rem;
     font-size: 0.875rem;
+  }
+
+  /* 본문 폰트 사이즈 조정 */
+  .set-search-input {
+    font-size: 0.9375rem !important;
+  }
+
+  .search-button {
+    font-size: 0.875rem !important;
+  }
+
+  .part-name {
+    font-size: 0.9375rem !important;
+  }
+
+  /* 추가 본문 폰트 사이즈 조정 */
+  .selected-set-display {
+    font-size: 0.9375rem !important;
+  }
+
+  .search-no-results {
+    font-size: 0.875rem !important;
+  }
+
+  .custom-select-trigger {
+    font-size: 0.9375rem !important;
+  }
+
+  .part-card .color-badge {
+    font-size: 0.8125rem !important;
+  }
+
+  .part-color {
+    font-size: 0.8125rem !important;
+  }
+
+  .qty-display {
+    font-size: 0.875rem !important;
+  }
+
+  .save-button {
+    font-size: 0.875rem !important;
   }
 
   .btn-primary,
@@ -3375,13 +4599,13 @@ export default {
   }
 
   .status-buttons {
-    flex-direction: column;
+    flex-direction: row;
     gap: 0.375rem;
   }
 
   .status-button {
     padding: 0.5rem;
-    font-size: 0.8125rem;
+    font-size: 0.875rem !important;
   }
 
   .part-image-section {
@@ -3406,25 +4630,82 @@ export default {
   }
 
   .counter-current {
-    font-size: 1.375rem;
+    font-size: 1.125rem !important;
   }
 
   .counter-separator,
   .counter-total {
-    font-size: 1rem;
+    font-size: 0.875rem !important;
   }
 
-  .part-name {
-    font-size: 0.9375rem;
+  .part-card .part-name {
+    font-size: 0.875rem !important;
   }
 
-  .part-color {
-    font-size: 0.8125rem;
+  .part-card .part-color {
+    font-size: 0.8125rem !important;
+  }
+
+  /* 검수 모드 본문 폰트 사이즈 조정 */
+  .part-card .element-id {
+    font-size: 0.875rem !important;
+  }
+
+  .part-card .qty-input {
+    font-size: 0.875rem !important;
+  }
+
+  .part-card .section-label {
+    font-size: 0.75rem !important;
+  }
+
+  .part-card .qty-display {
+    font-size: 0.875rem !important;
+  }
+
+  .part-card .qty-total,
+  .part-card .qty-divider {
+    font-size: 0.875rem !important;
+  }
+
+  .status-filter-button {
+    font-size: 0.8125rem !important;
+  }
+
+  .sort-select {
+    font-size: 0.875rem !important;
+  }
+
+  .sort-control label {
+    font-size: 0.8125rem !important;
   }
 }
 
 /* 작은 모바일 (480px 이하) */
 @media (max-width: 480px) {
+  .items-grid.single-mode {
+    max-width: 100%;
+    padding: 0;
+  }
+
+  .part-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .part-name {
+    font-size: 0.875rem;
+  }
+
+  .thumbnails-scroll {
+    grid-template-columns: repeat(auto-fill, minmax(55px, 1fr));
+  }
+
+  .thumbnail-item {
+    min-width: 55px;
+    max-width: 80px;
+  }
+
   .panel-header {
     padding: 0.75rem;
   }
@@ -3433,13 +4714,8 @@ export default {
     font-size: 1.125rem;
   }
 
-  .start-title {
-    font-size: 1.5rem !important;
-    margin-bottom: 0.5rem;
-  }
-
   .panel-content {
-    padding: 0.75rem;
+    padding: 0;
   }
 
   .items-container {
@@ -3450,9 +4726,6 @@ export default {
     padding: 0.75rem;
   }
 
-  .progress-section {
-    padding: 0.75rem;
-  }
 
   .card-header {
     padding: 0.75rem;
@@ -3471,73 +4744,37 @@ export default {
   }
 }
 
-/* 희귀부품 알림 패널 */
-.rare-parts-panel {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 12px;
-  padding: 1rem 1.5rem;
-  margin-bottom: 1.5rem;
-}
-
-.rare-parts-header {
+/* 모달 공통 스타일 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.75rem;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
 }
 
-.rare-parts-header h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #9a3412;
-  margin: 0;
-}
-
-.toggle-btn {
-  background: transparent;
-  border: 1px solid #fed7aa;
-  border-radius: 6px;
-  padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
-  color: #9a3412;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.toggle-btn:hover {
-  background: #fed7aa;
-}
-
-.rare-parts-list {
+.modal-content {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
 }
 
-.rare-part-item {
+.modal-footer {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.5rem;
-  background: #ffffff;
-  border-radius: 6px;
-  border: 1px solid #fed7aa;
-}
-
-.rare-part-name {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #1f2937;
-}
-
-.rare-part-badge {
-  font-size: 0.75rem;
-  color: #9a3412;
-  background: #fed7aa;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-weight: 600;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 /* 부품 정보 모달 */
@@ -3666,6 +4903,53 @@ export default {
   color: #111827;
 }
 
+/* 진행 중인 세션 확인 모달 */
+.existing-session-info {
+  margin-bottom: 1.5rem;
+}
+
+.existing-session-info p {
+  margin: 0.5rem 0;
+  font-size: 0.9375rem;
+  color: #374151;
+}
+
+.existing-session-info strong {
+  color: #111827;
+  margin-right: 0.5rem;
+}
+
+.modal-warning {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.modal-warning p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #92400e;
+}
+
+.btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  padding: 0.625rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
 .set-num {
   font-size: 0.75rem;
   color: #6b7280;
@@ -3716,3 +5000,4 @@ export default {
   margin-left: 0.25rem;
 }
 </style>
+

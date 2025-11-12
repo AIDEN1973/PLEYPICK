@@ -1,21 +1,21 @@
 <template>
   <div class="inspection-notes-page">
     <div class="page-header">
-      <h1>검수 노트</h1>
-      <p>세트별 검수 팁, 주의사항, 자주 누락되는 부품 정보를 관리합니다</p>
+      <h1>검수노트</h1>
+      <p>세트별 특이사항을 기록하고 관리할 수 있습니다.</p>
     </div>
 
     <div class="notes-content">
       <div class="notes-controls">
         <div class="set-selector">
-          <label for="set-select">세트 선택</label>
+          <label for="set-select">세트선택</label>
           <select
             id="set-select"
             v-model="selectedSetId"
             @change="loadNotes"
             class="set-select"
           >
-            <option value="">전체 세트</option>
+            <option value="">전체세트</option>
             <option
               v-for="set in availableSets"
               :key="set.id"
@@ -27,7 +27,7 @@
         </div>
 
         <div class="note-type-filter">
-          <label>노트 유형</label>
+          <label>노트유형</label>
           <div class="filter-buttons">
             <button
               v-for="type in noteTypes"
@@ -44,7 +44,7 @@
       <div class="notes-main">
         <div class="notes-list-section">
           <div class="section-header">
-            <h3>노트 목록</h3>
+            <h3>노트목록</h3>
             <span class="notes-count">{{ filteredNotes.length }}건</span>
           </div>
 
@@ -71,7 +71,7 @@
                   <span class="note-type" :class="`type-${note.note_type}`">
                     {{ noteTypeLabel(note.note_type) }}
                   </span>
-                  <span class="note-set">{{ getSetName(note.set_id) }}</span>
+                  <span class="note-set">{{ formatSetDisplay(note.set_num, note.theme_name, note.set_name) }}</span>
                   <span v-if="note.part_id" class="note-part">부품: {{ note.part_id }}</span>
                 </div>
                 <div class="note-actions">
@@ -108,7 +108,7 @@
 
         <div class="note-form-section">
           <div class="section-header">
-            <h3>{{ editingNote ? '노트 수정' : '노트 추가' }}</h3>
+            <h3>{{ editingNote ? '노트수정' : '노트추가' }}</h3>
           </div>
 
           <form @submit.prevent="submitNote" class="note-form">
@@ -126,7 +126,7 @@
                   :key="set.id"
                   :value="set.id"
                 >
-                  {{ set.name }} ({{ set.set_num }})
+                  {{ set.display_name }}
                 </option>
               </select>
             </div>
@@ -196,6 +196,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useInspectionSession } from '../composables/useInspectionSession'
+import { formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
 
 export default {
   name: 'InspectionNotes',
@@ -206,6 +207,7 @@ export default {
     const loading = ref(false)
     const error = ref(null)
     const availableSets = ref([])
+    const setMetadataMap = ref(new Map())
     const notes = ref([])
     const selectedSetId = ref('')
     const noteTypeFilter = ref('all')
@@ -213,9 +215,9 @@ export default {
 
     const noteTypes = [
       { value: 'general', label: '일반' },
-      { value: 'tip', label: '검수 팁' },
+      { value: 'tip', label: '검수팁' },
       { value: 'caution', label: '주의' },
-      { value: 'missing_frequent', label: '자주 누락' }
+      { value: 'missing_frequent', label: '자주누락' }
     ]
 
     const noteForm = ref({
@@ -239,16 +241,60 @@ export default {
       return filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     })
 
+    const ensureSetMetadata = async (setIds) => {
+      const uniqueIds = Array.from(new Set((setIds || []).filter(Boolean)))
+      const missingIds = uniqueIds.filter(id => !setMetadataMap.value.has(id))
+
+      if (missingIds.length === 0) return
+
+      const metadata = await fetchSetMetadata(supabase, missingIds)
+      metadata.forEach((meta, id) => {
+        setMetadataMap.value.set(id, {
+          set_name: meta.set_name || '세트명 없음',
+          set_num: meta.set_num || '',
+          theme_name: meta.theme_name || null
+        })
+      })
+    }
+
     const loadAvailableSets = async () => {
       try {
         const { data, error: err } = await supabase
           .from('lego_sets')
-          .select('id, name, set_num')
+          .select('id, name, set_num, theme_id')
           .order('name')
           .limit(200)
 
         if (err) throw err
-        availableSets.value = data || []
+        const themeIds = [...new Set((data || []).map(set => set.theme_id).filter(Boolean))]
+        let themeMap = new Map()
+
+        if (themeIds.length > 0) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (themesError) throw themesError
+          themeMap = new Map((themesData || []).map(theme => [theme.theme_id, theme.name]))
+        }
+
+        availableSets.value = (data || []).map(set => {
+          const themeName = set.theme_id ? (themeMap.get(set.theme_id) || null) : null
+          const meta = {
+            set_name: set.name || '세트명 없음',
+            set_num: set.set_num || '',
+            theme_name: themeName
+          }
+          setMetadataMap.value.set(set.id, meta)
+          return {
+            id: set.id,
+            name: meta.set_name,
+            set_num: meta.set_num,
+            theme_name: meta.theme_name,
+            display_name: formatSetDisplay(meta.set_num, meta.theme_name, meta.set_name)
+          }
+        })
       } catch (err) {
         console.error('세트 목록 로드 실패:', err)
         error.value = '세트 목록을 불러오는데 실패했습니다'
@@ -279,11 +325,19 @@ export default {
         const userIds = [...new Set((data || []).map(note => note.created_by).filter(Boolean))]
         const userEmailsMap = await loadUserEmails(userIds)
 
-        notes.value = (data || []).map(note => ({
-          ...note,
-          created_by_email: userEmailsMap.get(note.created_by) || null,
-          set_name: note.lego_sets?.name || null
-        }))
+        const setIds = (data || []).map(note => note.set_id).filter(Boolean)
+        await ensureSetMetadata(setIds)
+
+        notes.value = (data || []).map(note => {
+          const meta = setMetadataMap.value.get(note.set_id) || {}
+          return {
+            ...note,
+            created_by_email: userEmailsMap.get(note.created_by) || null,
+            set_name: meta.set_name || note.lego_sets?.name || null,
+            set_num: meta.set_num || null,
+            theme_name: meta.theme_name || null
+          }
+        })
       } catch (err) {
         console.error('노트 로드 실패:', err)
         error.value = '노트를 불러오는데 실패했습니다'
@@ -336,11 +390,19 @@ export default {
         const userIds = [...new Set((data || []).map(note => note.created_by).filter(Boolean))]
         const userEmailsMap = await loadUserEmails(userIds)
 
-        notes.value = (data || []).map(note => ({
-          ...note,
-          created_by_email: userEmailsMap.get(note.created_by) || null,
-          set_name: note.lego_sets?.name || null
-        }))
+        const setIds = (data || []).map(note => note.set_id).filter(Boolean)
+        await ensureSetMetadata(setIds)
+
+        notes.value = (data || []).map(note => {
+          const meta = setMetadataMap.value.get(note.set_id) || {}
+          return {
+            ...note,
+            created_by_email: userEmailsMap.get(note.created_by) || null,
+            set_name: meta.set_name || note.lego_sets?.name || null,
+            set_num: meta.set_num || null,
+            theme_name: meta.theme_name || null
+          }
+        })
       } catch (err) {
         console.error('전체 노트 로드 실패:', err)
         error.value = '노트를 불러오는데 실패했습니다'
@@ -351,12 +413,14 @@ export default {
 
     const formatUserId = (userId) => {
       if (!userId) return '작성자'
-      return userId.substring(0, 8) + '...'
+      return '작성자'
     }
 
     const getSetName = (setId) => {
-      const set = availableSets.value.find(s => s.id === setId)
-      return set ? `${set.name} (${set.set_num})` : '세트명 없음'
+      if (!setId) return '세트명 없음'
+      const meta = setMetadataMap.value.get(setId)
+      if (!meta) return '세트명 없음'
+      return formatSetDisplay(meta.set_num, meta.theme_name, meta.set_name || '세트명 없음')
     }
 
     const noteTypeLabel = (type) => {
@@ -469,7 +533,8 @@ export default {
       cancelEdit,
       deleteNote,
       formatDate,
-      formatUserId
+      formatUserId,
+      formatSetDisplay
     }
   }
 }
@@ -491,12 +556,14 @@ export default {
   font-weight: 700;
   color: #111827;
   margin: 0 0 0.5rem 0;
+  text-align: center;
 }
 
 .page-header p {
   font-size: 1rem;
   color: #6b7280;
   margin: 0;
+  text-align: center;
 }
 
 .notes-content {
@@ -647,51 +714,59 @@ export default {
 }
 
 .note-type {
-  padding: 0.25rem 0.75rem;
+  padding: 0.375rem 0.875rem;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
+  border: 1px solid transparent;
 }
 
 .note-type.type-general {
-  background: #e5e7eb;
+  background: #f3f4f6;
   color: #374151;
+  border-color: #d1d5db;
 }
 
 .note-type.type-tip {
   background: #dbeafe;
   color: #1e40af;
+  border-color: #93c5fd;
 }
 
 .note-type.type-caution {
   background: #fef3c7;
   color: #92400e;
+  border-color: #fcd34d;
 }
 
 .note-type.type-missing_frequent {
   background: #fee2e2;
   color: #991b1b;
+  border-color: #fca5a5;
 }
 
 .note-set,
 .note-part {
   font-size: 0.8125rem;
-  color: #6b7280;
-  padding: 0.25rem 0.5rem;
-  background: #e5e7eb;
+  color: #374151;
+  padding: 0.375rem 0.75rem;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
   border-radius: 6px;
+  font-weight: 500;
 }
 
 .note-actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.25rem;
+  align-items: center;
 }
 
 .btn-icon {
-  padding: 0.375rem;
-  border: none;
-  background: transparent;
+  padding: 0.5rem;
+  border: 1px solid #e5e7eb;
+  background: #ffffff;
   color: #6b7280;
   cursor: pointer;
   border-radius: 6px;
@@ -699,16 +774,24 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 2rem;
+  height: 2rem;
 }
 
 .btn-icon:hover {
   background: #f3f4f6;
-  color: #111827;
+  color: #2563eb;
+  border-color: #2563eb;
+}
+
+.btn-icon.btn-danger {
+  border-color: #e5e7eb;
 }
 
 .btn-icon.btn-danger:hover {
   background: #fee2e2;
   color: #dc2626;
+  border-color: #ef4444;
 }
 
 .note-item-body {
@@ -824,6 +907,106 @@ export default {
   .notes-controls {
     flex-direction: column;
     align-items: stretch;
+  }
+  
+  .notes-main {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .notes-list-section,
+  .note-form-section {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  
+  .note-item {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  
+  .note-item-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  
+  .note-meta {
+    flex: 1;
+    min-width: 0;
+  }
+  
+  .note-actions {
+    flex-shrink: 0;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .page-header p {
+    font-size: 0.875rem !important;
+  }
+
+  /* 본문 폰트 사이즈 조정 */
+  .note-text {
+    font-size: 0.875rem !important;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .section-header h3 {
+    font-size: 1rem !important;
+  }
+
+  .notes-count {
+    font-size: 0.8125rem !important;
+  }
+
+  .note-type {
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+  }
+
+  .note-set,
+  .note-part {
+    font-size: 0.8125rem !important;
+    word-break: break-word;
+    white-space: normal;
+  }
+
+  .note-item-footer {
+    font-size: 0.8125rem !important;
+  }
+
+  .form-select,
+  .form-input,
+  .form-textarea {
+    font-size: 0.875rem !important;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    font-size: 0.875rem !important;
+  }
+
+  .set-select label,
+  .note-type-filter label,
+  .form-row label {
+    font-size: 0.8125rem !important;
+  }
+  
+  .set-select {
+    font-size: 0.875rem !important;
+  }
+  
+  .filter-btn {
+    font-size: 0.875rem !important;
   }
 }
 </style>

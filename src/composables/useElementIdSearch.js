@@ -159,7 +159,7 @@ export function useElementIdSearch() {
       const { data, error: queryError } = await supabase
         .from('v_element_id_search')
         .select('*')
-        .eq('element_id', elementId.trim())
+        .eq('element_id', String(elementId.trim()))
 
       if (queryError) {
         throw queryError
@@ -187,7 +187,7 @@ export function useElementIdSearch() {
       const { data, error } = await supabase
         .from('set_parts')
         .select('element_id')
-        .eq('element_id', elementId.trim())
+        .eq('element_id', String(elementId.trim()))
         .limit(1)
 
       return !error && data && data.length > 0

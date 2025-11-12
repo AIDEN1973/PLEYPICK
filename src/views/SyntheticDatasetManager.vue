@@ -1301,7 +1301,7 @@ const searchByElementId = async () => {
     const { data, error } = await supabase
       .from('parts_master_features')
       .select('part_id, part_name, element_id')
-      .eq('element_id', elementId.value)
+      .eq('element_id', String(elementId.value))
       .limit(10)
 
     if (error) {

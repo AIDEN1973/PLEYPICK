@@ -42,16 +42,31 @@ export function usePartSearch() {
       // 2단계: lego_sets에서 세트 정보 가져오기
       const { data: setsData, error: setsError } = await supabase
         .from('lego_sets')
-        .select('id, name, set_num, webp_image_url')
+        .select('id, name, set_num, theme_id, webp_image_url')
         .in('id', uniqueSetIds)
 
       if (setsError) throw setsError
+
+      const themeIds = [...new Set((setsData || []).map(set => set.theme_id).filter(Boolean))]
+      let themeMap = new Map()
+
+      if (themeIds.length > 0) {
+        const { data: themesData, error: themesError } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .in('theme_id', themeIds)
+
+        if (themesError) throw themesError
+        themeMap = new Map((themesData || []).map(theme => [theme.theme_id, theme.name]))
+      }
 
       // 결과 정리
       const result = (setsData || []).map(set => ({
         id: set.id,
         name: set.name,
         set_num: set.set_num,
+        theme_id: set.theme_id || null,
+        theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
         image_url: set.webp_image_url,
         quantity: quantityMap.get(set.id) || 0
       }))
