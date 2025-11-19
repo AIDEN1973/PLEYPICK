@@ -1,21 +1,22 @@
 import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 
+  (import.meta.env.PROD ? null : 'https://npferbxuxocbfnfbpcnz.supabase.co')
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 
+  (import.meta.env.PROD ? null : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk')
 
-// CORS 및 Storage 접근을 위한 추가 옵션
+// 프로덕션 모드에서 환경 변수 검증
+if (import.meta.env.PROD && (!supabaseUrl || !supabaseKey)) {
+  console.error('[ERROR] VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required in production mode')
+  throw new Error('Supabase 환경 변수가 설정되지 않았습니다. 프로덕션 모드에서는 필수입니다.')
+}
+
+// Supabase 클라이언트 옵션 (global.headers는 Supabase에서 지원하지 않음)
 const supabaseOptions = {
   auth: {
     persistSession: true,
     autoRefreshToken: true
-  },
-  global: {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
   }
 }
 
