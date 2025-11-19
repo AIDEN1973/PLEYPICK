@@ -4,6 +4,9 @@
 
 [build.environment]
   NODE_VERSION = "18"
+  # 환경 변수는 Netlify 대시보드에서 설정해야 합니다:
+  # VITE_SUPABASE_URL
+  # VITE_SUPABASE_ANON_KEY
 
 [[redirects]]
   from = "/*"

@@ -2,6 +2,9 @@
   "version": 2,
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "env": {
+    "comment": "환경 변수는 Vercel 대시보드에서 설정해야 합니다: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY"
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
