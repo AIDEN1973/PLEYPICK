@@ -9,60 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&display=swap" rel="stylesheet">
-    <!-- 🔧 수정됨: 폴리필을 최우선으로 로드 (vendor 청크보다 먼저 실행) -->
-    <script>
-      // 즉시 실행: vendor 청크가 로드되기 전에 전역 변수 설정
-      // 모듈 로드 전에 반드시 실행되어야 함
-      (function() {
-        'use strict';
-        try {
-          var g = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : self);
-          
-          // Node.js 스타일 전역 객체
-          if (typeof window !== 'undefined') {
-            if (!window.global) window.global = window;
-            if (!window.process) window.process = { env: {} };
-          }
-          
-          // Fetch API 전역 변수 보장 (구조분해 할당 오류 방지)
-          // 브라우저 기본 API를 globalThis와 전역 변수로 명시적으로 노출
-          if (typeof window !== 'undefined') {
-            var req = window.Request;
-            var res = window.Response;
-            var hdr = window.Headers;
-            var fch = window.fetch;
-            
-            // globalThis에 명시적으로 설정
-            if (req) {
-              g.Request = req;
-              if (!globalThis.Request) globalThis.Request = req;
-            }
-            if (res) {
-              g.Response = res;
-              if (!globalThis.Response) globalThis.Response = res;
-            }
-            if (hdr) {
-              g.Headers = hdr;
-              if (!globalThis.Headers) globalThis.Headers = hdr;
-            }
-            if (fch) {
-              g.fetch = fch;
-              if (!globalThis.fetch) globalThis.fetch = fch;
-            }
-            
-            // 전역 변수로도 명시적으로 설정 (일부 라이브러리가 전역 변수로 접근)
-            if (req) window.Request = req;
-            if (res) window.Response = res;
-            if (hdr) window.Headers = hdr;
-            if (fch) window.fetch = fch;
-          }
-        } catch (e) {
-          console.error('[POLYFILL] 폴리필 설정 실패:', e);
-        }
-      })();
-    </script>
-    <!-- Supabase 라이브러리 CDN 로드 (빌드 번들 제외) -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/index.min.js"></script>
   </head>
   <body>
     <div id="app"></div>

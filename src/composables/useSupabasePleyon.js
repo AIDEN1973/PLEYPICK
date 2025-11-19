@@ -1,40 +1,27 @@
 // 플레이온 Supabase REST API 직접 호출 (GoTrueClient 경고 방지)
-// 동적 import로 변경하여 빌드 시점 오류 방지
+import { createClient } from '@supabase/supabase-js'
 
 const pleyonSupabaseUrl = import.meta.env.VITE_PLEYON_SUPABASE_URL || 'https://sywkefjwagkddzqarylf.supabase.co'
 const pleyonSupabaseKey = import.meta.env.VITE_PLEYON_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN5d2tlZmp3YWdrZGR6cWFyeWxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDYxOTA4NjksImV4cCI6MjA2MTc2Njg2OX0.iYg_CO658830li0cUWVOtI1bZsFQwp2tI7nUMinUPyw'
 
 // Pleyon Supabase 클라이언트 (Realtime 구독용, custom storage 사용)
 let pleyonSupabaseClient = null
-const getPleyonSupabaseClient = async () => {
-  if (!pleyonSupabaseClient && typeof window !== 'undefined') {
-    try {
-      // 전역 변수에서만 로드 (CDN 스크립트, 동적 import 제거)
-      // 동적 import는 번들링 시점에 분석되어 vendor 청크에 포함될 수 있음
-      if (window.supabase && window.supabase.createClient) {
-        const createClient = window.supabase.createClient
-        
-        pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
-          realtime: {
-            params: {
-              eventsPerSecond: 10
-            }
-          },
-          auth: {
-            storage: {
-              getItem: () => null,
-              setItem: () => {},
-              removeItem: () => {}
-            }
-          }
-        })
-        console.log('[Pleyon] Supabase 클라이언트 런타임 초기화 성공 (CDN)')
-      } else {
-        console.warn('[Pleyon] window.supabase.createClient를 찾을 수 없습니다. CDN 스크립트가 로드되었는지 확인하세요.')
+const getPleyonSupabaseClient = () => {
+  if (!pleyonSupabaseClient) {
+    pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
+      realtime: {
+        params: {
+          eventsPerSecond: 10
+        }
+      },
+      auth: {
+        storage: {
+          getItem: () => null,
+          setItem: () => {},
+          removeItem: () => {}
+        }
       }
-    } catch (error) {
-      console.error('[Pleyon] Supabase 클라이언트 초기화 실패:', error)
-    }
+    })
   }
   return pleyonSupabaseClient
 }
@@ -66,9 +53,6 @@ const pleyonApiCall = async (endpoint, options = {}) => {
 export function useSupabasePleyon() {
   const getStoreInfoByEmail = async (email) => {
     try {
-      // 클라이언트 초기화 대기
-      await getPleyonSupabaseClient()
-      
       const profileUrl = `profiles?email=eq.${encodeURIComponent(email)}&select=id,email,role,store_id`
       const profiles = await pleyonApiCall(profileUrl)
       const profile = Array.isArray(profiles) && profiles.length > 0 ? profiles[0] : null
@@ -110,9 +94,6 @@ export function useSupabasePleyon() {
 
   const getStoreInventory = async (storeId) => {
     try {
-      // 클라이언트 초기화 대기
-      await getPleyonSupabaseClient()
-      
       const inventoryUrl = `lego_inventory?store_id=eq.${storeId}&is_store_display=eq.true&deleted_at=is.null&select=id,quantity,assigned_size,assigned_grade,assigned_fee,is_store_display,lego_set_id,lego_sets:lego_set_id(id,number,name,series,part_count,age_range)`
       const inventory = await pleyonApiCall(inventoryUrl)
 
@@ -147,14 +128,10 @@ export function useSupabasePleyon() {
 
   // Pleyon Realtime 구독: lego_inventory 테이블 변경 감지
   const subscribeToInventoryChanges = (storeId, onInsert, onUpdate, onDelete) => {
+    const client = getPleyonSupabaseClient()
     let channel = null
     
-    const setupSubscription = async () => {
-      const client = await getPleyonSupabaseClient()
-      if (!client) {
-        console.error('[Pleyon] Supabase 클라이언트를 초기화할 수 없습니다')
-        return
-      }
+    const setupSubscription = () => {
       if (channel) {
         client.removeChannel(channel)
       }

@@ -114,58 +114,29 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
-        // Supabase 호환성을 위해 polyfill 제거
-        // stream: 'stream-browserify',
-        // url: 'url',
-        // util: resolve(__dirname, 'src/polyfills/util.js'),
-        // http: resolve(__dirname, 'src/polyfills/http.js'),
+        stream: 'stream-browserify', // [FIX] 수정됨: stream 모듈 브라우저 폴리필
+        url: 'url', // [FIX] 수정됨: url 모듈 브라우저 폴리필
+        util: resolve(__dirname, 'src/polyfills/util.js'), // [FIX] 수정됨: util 모듈 브라우저 폴리필
+        http: resolve(__dirname, 'src/polyfills/http.js'), // [FIX] 수정됨: http 모듈 브라우저 폴리필
       },
       dedupe: ['@supabase/supabase-js'], // [FIX] 수정됨: 중복 의존성 제거
     },
     // API 파일 처리를 위한 추가 설정
     build: {
-      target: 'es2020', // 브라우저 호환성
       rollupOptions: {
-        external: ['dotenv'],
-        output: {
-          manualChunks: (id) => {
-            // Supabase는 완전히 제외 (CDN에서 로드)
-            if (id.includes('@supabase/supabase-js')) {
-              return undefined // 번들에 포함하지 않음
-            }
-            // node_modules는 vendor 청크로
-            if (id.includes('node_modules')) {
-              return 'vendor'
-            }
-          },
-          // [FIX] 수정됨: Supabase 관련 import를 완전히 제거
-          banner: '',
-          footer: ''
-        },
-        // [FIX] 수정됨: Supabase를 external로 처리 (브라우저에서는 작동하지 않지만 시도)
-        treeshake: {
-          moduleSideEffects: (id) => {
-            // Supabase 관련 모듈은 side effect 없음으로 표시
-            return !id.includes('@supabase/supabase-js')
-          }
-        }
-      },
-      // CommonJS 변환 방지 (ESM 유지)
-      commonjsOptions: {
-        include: [/node_modules/],
-        transformMixedEsModules: true
+        external: ['dotenv']
       }
     },
     optimizeDeps: {
-      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web'],
-      exclude: ['@supabase/supabase-js'], // Supabase는 최적화에서 제외
-      needsInterop: ['onnxruntime-web'], // [FIX] 수정됨: onnxruntime-web ESM/CJS 혼합 해결
+      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web', 'url', 'util'],
+      exclude: [], // [FIX] 수정됨: alias로 해결하므로 exclude 제거
+      needsInterop: ['onnxruntime-web', 'url', 'util'], // [FIX] 수정됨: onnxruntime-web ESM/CJS 혼합 해결, url/util 모듈 추가
       esbuildOptions: {
-        target: 'es2020',
         define: {
           global: 'globalThis' // [FIX] 수정됨: esbuild에서 global 변수 처리
         }
-      }
+      },
+      force: true // [FIX] 수정됨: 의존성 강제 재최적화
     },
     define: {
       __VUE_OPTIONS_API__: true,

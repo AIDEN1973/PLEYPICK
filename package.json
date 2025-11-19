@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@supabase/node-fetch": "^2.6.13",
-    "@supabase/supabase-js": "2.39.0",
+    "@supabase/supabase-js": "^2.76.1",
     "@vue/devtools-api": "^8.0.3",
     "archiver": "^7.0.1",
     "axios": "^1.12.2",
