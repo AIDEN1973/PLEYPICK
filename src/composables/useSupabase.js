@@ -20,14 +20,7 @@ if (import.meta.env.PROD) {
   }
 }
 
-// Supabase 클라이언트 옵션: 내부에서 global.headers를 기대하는 경로가 있어 빈 객체를 명시 // 🔧 수정됨
-const supabaseOptions = {
-  global: {
-    headers: {}
-  }
-}
-
-// Supabase 클라이언트 생성 (필수 최소 옵션만 사용) // 🔧 수정됨
+// Supabase 클라이언트 지연 초기화 (프로덕션 빌드 시 문제 방지)
 let supabaseInstance = null
 
 const getSupabaseClient = () => {
@@ -43,16 +36,18 @@ const getSupabaseClient = () => {
       throw new Error(errorMsg)
     }
     
-    try { // 🔧 수정됨
-      // Supabase 클라이언트 생성 (global.headers 빈 객체 주입) // 🔧 수정됨
-      supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+    try {
+      // Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
+      // 브라우저 환경에서는 기본 fetch를 사용하므로 추가 옵션 불필요
+      supabaseInstance = createClient(supabaseUrl, supabaseKey)
     } catch (error) {
       console.error('[ERROR] createClient failed:', error)
       console.error('[ERROR] Error details:', {
         message: error.message,
         stack: error.stack,
         url: supabaseUrl,
-        keyLength: supabaseKey?.length || 0
+        keyLength: supabaseKey?.length || 0,
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A'
       })
       throw error
     }
@@ -60,8 +55,24 @@ const getSupabaseClient = () => {
   return supabaseInstance
 }
 
-// 모듈 레벨에서 즉시 초기화
-export const supabase = getSupabaseClient()
+// 지연 초기화: Proxy를 사용하여 실제 사용 시점에만 클라이언트 생성
+// 프로덕션 빌드에서 발생하는 문제를 방지하기 위해 지연 초기화 사용
+export const supabase = new Proxy({}, {
+  get(target, prop) {
+    try {
+      const client = getSupabaseClient()
+      const value = client[prop]
+      // 함수인 경우 this 바인딩 유지
+      if (typeof value === 'function') {
+        return value.bind(client)
+      }
+      return value
+    } catch (error) {
+      console.error('[ERROR] Supabase 클라이언트 접근 실패:', error)
+      throw error
+    }
+  }
+})
 
 export function useSupabase() {
   const user = ref(null)
