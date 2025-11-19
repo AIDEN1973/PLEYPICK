@@ -450,6 +450,14 @@ export default {
             } else if (set.set_img_url) {
               // webp_image_url이 없으면 set_img_url 사용
               webpImageUrl = set.set_img_url
+              
+              // Rebrickable CDN URL인 경우 프록시를 통해 로드
+              if (webpImageUrl && webpImageUrl.includes('cdn.rebrickable.com')) {
+                const imagePath = webpImageUrl.replace('https://cdn.rebrickable.com/', '')
+                webpImageUrl = `/api/proxy/${imagePath}`
+                console.log(`[SetParts] 세트 ${set.set_num} - Rebrickable URL을 프록시로 변환:`, webpImageUrl)
+              }
+              
               console.log(`[SetParts] 세트 ${set.set_num} - set_img_url 사용:`, webpImageUrl)
             } else {
               console.warn(`[SetParts] 세트 ${set.set_num} - 이미지 URL 없음`)
@@ -910,8 +918,20 @@ export default {
     }
 
     const handleSetImageError = (event, set) => {
-      console.warn('세트 이미지 로드 실패:', event.target.src, set)
       const img = event.target
+      const originalSrc = img.src
+      console.warn('세트 이미지 로드 실패:', originalSrc, set)
+      
+      // Rebrickable CDN URL인 경우 프록시로 재시도
+      if (originalSrc && originalSrc.includes('cdn.rebrickable.com') && !originalSrc.includes('/api/proxy/')) {
+        const imagePath = originalSrc.replace('https://cdn.rebrickable.com/', '')
+        const proxyUrl = `/api/proxy/${imagePath}`
+        console.log('[SetParts] 프록시 URL로 재시도:', proxyUrl)
+        img.src = proxyUrl
+        return // 프록시로 재시도하므로 여기서 종료
+      }
+      
+      // 프록시 재시도 실패 또는 다른 오류인 경우
       const wrapper = img.closest('.option-image-wrapper')
       if (wrapper) {
         img.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important;'
@@ -969,8 +989,22 @@ export default {
     }
 
     const handleSelectedSetImageError = (event) => {
-      event.target.style.display = 'none'
-      const wrapper = event.target.closest('.selected-set-thumb-wrapper')
+      const img = event.target
+      const originalSrc = img.src
+      console.warn('[SetParts] 선택된 세트 이미지 로드 실패:', originalSrc)
+      
+      // Rebrickable CDN URL인 경우 프록시로 재시도
+      if (originalSrc && originalSrc.includes('cdn.rebrickable.com') && !originalSrc.includes('/api/proxy/')) {
+        const imagePath = originalSrc.replace('https://cdn.rebrickable.com/', '')
+        const proxyUrl = `/api/proxy/${imagePath}`
+        console.log('[SetParts] 선택된 세트 프록시 URL로 재시도:', proxyUrl)
+        img.src = proxyUrl
+        return // 프록시로 재시도하므로 여기서 종료
+      }
+      
+      // 프록시 재시도 실패 또는 다른 오류인 경우
+      img.style.display = 'none'
+      const wrapper = img.closest('.selected-set-thumb-wrapper')
       if (wrapper) {
         const placeholder = document.createElement('div')
         placeholder.className = 'selected-set-no-image'

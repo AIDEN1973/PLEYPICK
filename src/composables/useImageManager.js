@@ -77,9 +77,10 @@ export function useImageManager() {
         console.log(`[ImageManager] 원본 URL 검증: ${imageUrl}`)
         
         // Axios를 사용한 안정적인 다운로드
+        // 프로덕션 모드에서 네트워크 지연을 고려하여 타임아웃 증가
         const response = await axios.get(proxyUrl, {
           responseType: 'arraybuffer',
-          timeout: 5000,              // 5초 제한 (3초에서 증가)
+          timeout: 15000,              // 15초 제한 (프로덕션 모드 대응)
           validateStatus: status => status < 500  // 5xx 에러만 재시도
         })
         
@@ -296,6 +297,7 @@ export function useImageManager() {
       }
       
       // 2. Storage 버킷에서 직접 확인 (폴백)
+      // 주의: Supabase Storage는 파일이 없을 때 400을 반환하므로 이를 정상 응답으로 처리
       const fileName = `${String(elementId)}.webp`
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
       const bucketName = 'lego_parts_images'
@@ -303,18 +305,23 @@ export function useImageManager() {
       
       // HTTP HEAD 요청으로 이미지 존재 여부 확인
       try {
-        const response = await fetch(imageUrl, { method: 'HEAD' })
-        if (response.ok) {
+        const response = await fetch(imageUrl, { 
+          method: 'HEAD',
+          // 400 오류를 조용히 처리하기 위해 에러를 던지지 않음
+        })
+        
+        // 200-299 범위의 응답만 성공으로 간주
+        if (response.ok && response.status >= 200 && response.status < 300) {
           console.log(`Existing image found in Storage for element_id ${elementId}: ${imageUrl}`)
           const result = { exists: true, url: imageUrl }
           imageDuplicateCache.set(cacheKey, result) // ✅ 캐시 저장
           return result
         }
-        // 400, 404 등은 이미지가 없는 것으로 간주 (정상 동작)
+        // 400, 404 등은 이미지가 없는 것으로 간주 (정상 동작, 로그 출력 안 함)
       } catch (fetchErr) {
-        // 400, 404 등은 이미지가 없는 것으로 간주 (조용히 처리)
-        // 네트워크 오류만 경고 로그 출력
-        if (!fetchErr.message.includes('400') && !fetchErr.message.includes('404')) {
+        // 네트워크 오류만 경고 로그 출력 (400, 404는 정상적인 "파일 없음" 응답)
+        const errorMsg = fetchErr.message || String(fetchErr)
+        if (!errorMsg.includes('400') && !errorMsg.includes('404') && !errorMsg.includes('Bad Request')) {
           console.warn('Storage check failed:', fetchErr.message)
         }
       }
@@ -356,6 +363,7 @@ export function useImageManager() {
       }
       
       // 2. Storage 버킷에서 직접 확인 (폴백)
+      // 주의: Supabase Storage는 파일이 없을 때 400을 반환하므로 이를 정상 응답으로 처리
       const fileName = `${partNum}_${colorId}.webp`
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
       const bucketName = 'lego_parts_images'
@@ -364,13 +372,19 @@ export function useImageManager() {
       // HTTP HEAD 요청으로 이미지 존재 여부 확인
       try {
         const response = await fetch(imageUrl, { method: 'HEAD' })
-        if (response.ok) {
+        // 200-299 범위의 응답만 성공으로 간주
+        if (response.ok && response.status >= 200 && response.status < 300) {
           console.log(`Existing image found in Storage for ${partNum} (color: ${colorId}): ${imageUrl}`)
           imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
           return true
         }
+        // 400, 404 등은 이미지가 없는 것으로 간주 (정상 동작, 로그 출력 안 함)
       } catch (fetchError) {
-        console.log(`Image not found in Storage: ${fileName}`)
+        // 400, 404는 정상적인 "파일 없음" 응답이므로 조용히 처리
+        const errorMsg = fetchError.message || String(fetchError)
+        if (!errorMsg.includes('400') && !errorMsg.includes('404') && !errorMsg.includes('Bad Request')) {
+          console.log(`Image not found in Storage: ${fileName}`)
+        }
       }
       
       imageDuplicateCache.set(cacheKey, false) // ✅ 캐시 저장 (없음)
@@ -718,7 +732,7 @@ export function useImageManager() {
             
             const proxyResponse = await axios.get(proxyUrl, {
               responseType: 'arraybuffer',
-              timeout: 5000, // 5초 제한
+              timeout: 15000, // 15초 제한 (프로덕션 모드 대응)
               validateStatus: status => status < 500,
               headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
