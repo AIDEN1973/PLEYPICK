@@ -398,32 +398,42 @@ export default {
           
           // Pleyon Realtime 구독 시작
           if (inventorySubscription) {
-            inventorySubscription.unsubscribe()
-          }
-          inventorySubscription = subscribeToInventoryChanges(
-            store.id,
-            // INSERT: 신규 인벤토리 등록
-            async (newItem) => {
-              console.log('[Dashboard] 신규 인벤토리 감지, 동기화 중...', newItem)
-              const updatedInventory = await getStoreInventory(store.id)
-              inventory.value = updatedInventory || []
-              await syncInventoryToBrickbox(store.id, updatedInventory || [])
-            },
-            // UPDATE: 인벤토리 업데이트
-            async (newItem, oldItem) => {
-              console.log('[Dashboard] 인벤토리 업데이트 감지, 동기화 중...', newItem)
-              const updatedInventory = await getStoreInventory(store.id)
-              inventory.value = updatedInventory || []
-              await syncInventoryToBrickbox(store.id, updatedInventory || [])
-            },
-            // DELETE: 인벤토리 삭제
-            async (oldItem) => {
-              console.log('[Dashboard] 인벤토리 삭제 감지, 동기화 중...', oldItem)
-              const updatedInventory = await getStoreInventory(store.id)
-              inventory.value = updatedInventory || []
-              await syncInventoryToBrickbox(store.id, updatedInventory || [])
+            try {
+              inventorySubscription.unsubscribe()
+            } catch (err) {
+              console.error('[Dashboard] 기존 구독 해제 실패:', err)
             }
-          )
+          }
+          
+          try {
+            inventorySubscription = subscribeToInventoryChanges(
+              store.id,
+              // INSERT: 신규 인벤토리 등록
+              async (newItem) => {
+                console.log('[Dashboard] 신규 인벤토리 감지, 동기화 중...', newItem)
+                const updatedInventory = await getStoreInventory(store.id)
+                inventory.value = updatedInventory || []
+                await syncInventoryToBrickbox(store.id, updatedInventory || [])
+              },
+              // UPDATE: 인벤토리 업데이트
+              async (newItem, oldItem) => {
+                console.log('[Dashboard] 인벤토리 업데이트 감지, 동기화 중...', newItem)
+                const updatedInventory = await getStoreInventory(store.id)
+                inventory.value = updatedInventory || []
+                await syncInventoryToBrickbox(store.id, updatedInventory || [])
+              },
+              // DELETE: 인벤토리 삭제
+              async (oldItem) => {
+                console.log('[Dashboard] 인벤토리 삭제 감지, 동기화 중...', oldItem)
+                const updatedInventory = await getStoreInventory(store.id)
+                inventory.value = updatedInventory || []
+                await syncInventoryToBrickbox(store.id, updatedInventory || [])
+              }
+            )
+          } catch (err) {
+            console.error('[Dashboard] Realtime 구독 설정 실패:', err)
+            // 구독 실패해도 인벤토리는 표시
+          }
         } else {
           console.log('[Dashboard] 매장 정보 없음 - 플레이온에 등록되지 않은 계정일 수 있습니다.')
           storeInfo.value = null

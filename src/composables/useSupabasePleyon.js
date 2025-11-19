@@ -8,20 +8,50 @@ const pleyonSupabaseKey = import.meta.env.VITE_PLEYON_SUPABASE_ANON_KEY || 'eyJh
 let pleyonSupabaseClient = null
 const getPleyonSupabaseClient = () => {
   if (!pleyonSupabaseClient) {
-    pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
-      realtime: {
-        params: {
-          eventsPerSecond: 10
+    // URL과 Key 유효성 검증
+    if (!pleyonSupabaseUrl || !pleyonSupabaseKey) {
+      console.error('[Pleyon] Supabase URL 또는 Key가 설정되지 않았습니다.')
+      throw new Error('Pleyon Supabase 환경변수가 설정되지 않았습니다.')
+    }
+
+    try {
+      pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
+        realtime: {
+          params: {
+            eventsPerSecond: 10
+          }
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+          storage: {
+            getItem: (key) => {
+              // 세션 정보는 저장하지 않지만 undefined 대신 null 반환
+              return Promise.resolve(null)
+            },
+            setItem: (key, value) => {
+              // 세션 저장 무시
+              return Promise.resolve()
+            },
+            removeItem: (key) => {
+              // 세션 삭제 무시
+              return Promise.resolve()
+            }
+          }
+        },
+        global: {
+          headers: {
+            'apikey': pleyonSupabaseKey,
+            'Authorization': `Bearer ${pleyonSupabaseKey}`
+          }
         }
-      },
-      auth: {
-        storage: {
-          getItem: () => null,
-          setItem: () => {},
-          removeItem: () => {}
-        }
-      }
-    })
+      })
+      console.log('[Pleyon] Supabase 클라이언트 초기화 완료')
+    } catch (err) {
+      console.error('[Pleyon] Supabase 클라이언트 초기화 실패:', err)
+      throw err
+    }
   }
   return pleyonSupabaseClient
 }
@@ -128,75 +158,98 @@ export function useSupabasePleyon() {
 
   // Pleyon Realtime 구독: lego_inventory 테이블 변경 감지
   const subscribeToInventoryChanges = (storeId, onInsert, onUpdate, onDelete) => {
-    const client = getPleyonSupabaseClient()
-    let channel = null
-    
-    const setupSubscription = () => {
-      if (channel) {
-        client.removeChannel(channel)
+    try {
+      const client = getPleyonSupabaseClient()
+      
+      if (!client) {
+        console.error('[Pleyon] Supabase 클라이언트를 가져올 수 없습니다.')
+        return {
+          unsubscribe: () => {}
+        }
+      }
+
+      let channel = null
+      
+      const setupSubscription = () => {
+        try {
+          if (channel) {
+            client.removeChannel(channel)
+          }
+          
+          channel = client
+            .channel(`pleyon_inventory_${storeId}`)
+            .on(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'lego_inventory',
+                filter: `store_id=eq.${storeId}`
+              },
+              (payload) => {
+                console.log('[Pleyon] 인벤토리 신규 등록 감지:', payload.new)
+                if (onInsert) onInsert(payload.new)
+              }
+            )
+            .on(
+              'postgres_changes',
+              {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'lego_inventory',
+                filter: `store_id=eq.${storeId}`
+              },
+              (payload) => {
+                console.log('[Pleyon] 인벤토리 업데이트 감지:', payload.new)
+                if (onUpdate) onUpdate(payload.new, payload.old)
+              }
+            )
+            .on(
+              'postgres_changes',
+              {
+                event: 'DELETE',
+                schema: 'public',
+                table: 'lego_inventory',
+                filter: `store_id=eq.${storeId}`
+              },
+              (payload) => {
+                console.log('[Pleyon] 인벤토리 삭제 감지:', payload.old)
+                if (onDelete) onDelete(payload.old)
+              }
+            )
+            .subscribe((status) => {
+              console.log(`[Pleyon] Realtime 구독 상태: ${status}`)
+              if (status === 'SUBSCRIBED') {
+                console.log('[Pleyon] 인벤토리 변경사항 실시간 구독 시작')
+              } else if (status === 'CHANNEL_ERROR') {
+                console.error('[Pleyon] Realtime 구독 오류, 재연결 시도...')
+                setTimeout(setupSubscription, 5000)
+              }
+            })
+        } catch (err) {
+          console.error('[Pleyon] Realtime 구독 설정 실패:', err)
+        }
       }
       
-      channel = client
-        .channel(`pleyon_inventory_${storeId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'lego_inventory',
-            filter: `store_id=eq.${storeId}`
-          },
-          (payload) => {
-            console.log('[Pleyon] 인벤토리 신규 등록 감지:', payload.new)
-            if (onInsert) onInsert(payload.new)
+      setupSubscription()
+      
+      return {
+        unsubscribe: () => {
+          try {
+            if (channel && client) {
+              client.removeChannel(channel)
+              channel = null
+              console.log('[Pleyon] Realtime 구독 해제')
+            }
+          } catch (err) {
+            console.error('[Pleyon] Realtime 구독 해제 실패:', err)
           }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'lego_inventory',
-            filter: `store_id=eq.${storeId}`
-          },
-          (payload) => {
-            console.log('[Pleyon] 인벤토리 업데이트 감지:', payload.new)
-            if (onUpdate) onUpdate(payload.new, payload.old)
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'DELETE',
-            schema: 'public',
-            table: 'lego_inventory',
-            filter: `store_id=eq.${storeId}`
-          },
-          (payload) => {
-            console.log('[Pleyon] 인벤토리 삭제 감지:', payload.old)
-            if (onDelete) onDelete(payload.old)
-          }
-        )
-        .subscribe((status) => {
-          console.log(`[Pleyon] Realtime 구독 상태: ${status}`)
-          if (status === 'SUBSCRIBED') {
-            console.log('[Pleyon] 인벤토리 변경사항 실시간 구독 시작')
-          } else if (status === 'CHANNEL_ERROR') {
-            console.error('[Pleyon] Realtime 구독 오류, 재연결 시도...')
-            setTimeout(setupSubscription, 5000)
-          }
-        })
-    }
-    
-    setupSubscription()
-    
-    return {
-      unsubscribe: () => {
-        if (channel) {
-          client.removeChannel(channel)
-          channel = null
-          console.log('[Pleyon] Realtime 구독 해제')
         }
+      }
+    } catch (err) {
+      console.error('[Pleyon] subscribeToInventoryChanges 오류:', err)
+      return {
+        unsubscribe: () => {}
       }
     }
   }
