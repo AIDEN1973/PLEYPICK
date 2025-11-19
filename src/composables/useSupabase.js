@@ -1,68 +1,30 @@
 import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
-// 환경 변수 가져오기
-const getSupabaseConfig = () => {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 
-    (import.meta.env.PROD ? null : 'https://npferbxuxocbfnfbpcnz.supabase.co')
-  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 
-    (import.meta.env.PROD ? null : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk')
+// 원래 코드 복원: 환경 변수는 모듈 레벨에서 가져오기
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
 
-  // 프로덕션 모드에서 환경 변수 검증
-  if (import.meta.env.PROD && (!supabaseUrl || !supabaseKey)) {
-    console.error('[ERROR] VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are required in production mode')
-    throw new Error('Supabase 환경 변수가 설정되지 않았습니다. 프로덕션 모드에서는 필수입니다.')
+// 원래 코드 복원: CORS 및 Storage 접근을 위한 추가 옵션
+const supabaseOptions = {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true
   }
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error('Supabase URL 또는 Key가 설정되지 않았습니다.')
-  }
-
-  return { supabaseUrl, supabaseKey }
 }
 
-// 싱글톤 패턴으로 Supabase 클라이언트 생성 (지연 초기화)
+// 싱글톤 패턴으로 Supabase 클라이언트 생성
 let supabaseInstance = null
 
 const getSupabaseClient = () => {
   if (!supabaseInstance) {
-    const { supabaseUrl, supabaseKey } = getSupabaseConfig()
-    
-    try {
-      // 옵션 없이 최소한으로 생성 (브라우저 환경에서 안전)
-      supabaseInstance = createClient(supabaseUrl, supabaseKey)
-    } catch (error) {
-      console.error('[ERROR] Supabase 클라이언트 생성 실패:', error)
-      console.error('[ERROR] URL:', supabaseUrl)
-      console.error('[ERROR] Key 존재:', !!supabaseKey)
-      throw new Error(`Supabase 클라이언트 초기화 실패: ${error.message}`)
-    }
+    supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
   }
   return supabaseInstance
 }
 
-// 클라이언트 초기화 (안전한 방식)
-let supabaseExport = null
-
-try {
-  supabaseExport = getSupabaseClient()
-} catch (error) {
-  console.error('[ERROR] Supabase 초기화 실패:', error)
-  // 개발 모드에서는 fallback 사용
-  if (!import.meta.env.PROD) {
-    try {
-      const fallbackUrl = 'https://npferbxuxocbfnfbpcnz.supabase.co'
-      const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
-      // 옵션 없이 최소한으로 생성
-      supabaseExport = createClient(fallbackUrl, fallbackKey)
-      console.warn('[WARNING] Fallback Supabase 클라이언트 사용')
-    } catch (fallbackError) {
-      console.error('[ERROR] Fallback 클라이언트 생성도 실패:', fallbackError)
-    }
-  }
-}
-
-export const supabase = supabaseExport
+// 원래 코드 복원: 모듈 레벨에서 즉시 초기화
+export const supabase = getSupabaseClient()
 
 export function useSupabase() {
   const user = ref(null)
