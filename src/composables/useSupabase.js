@@ -28,18 +28,13 @@ const getSupabaseClient = () => {
   if (!supabaseInstance) {
     const { supabaseUrl, supabaseKey } = getSupabaseConfig()
     
-    // Supabase 클라이언트 옵션 (최소한의 옵션만 사용)
-    const supabaseOptions = {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true
-      }
-    }
-    
     try {
-      supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+      // 옵션 없이 최소한으로 생성 (브라우저 환경에서 안전)
+      supabaseInstance = createClient(supabaseUrl, supabaseKey)
     } catch (error) {
       console.error('[ERROR] Supabase 클라이언트 생성 실패:', error)
+      console.error('[ERROR] URL:', supabaseUrl)
+      console.error('[ERROR] Key 존재:', !!supabaseKey)
       throw new Error(`Supabase 클라이언트 초기화 실패: ${error.message}`)
     }
   }
@@ -58,12 +53,8 @@ try {
     try {
       const fallbackUrl = 'https://npferbxuxocbfnfbpcnz.supabase.co'
       const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
-      supabaseExport = createClient(fallbackUrl, fallbackKey, {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true
-        }
-      })
+      // 옵션 없이 최소한으로 생성
+      supabaseExport = createClient(fallbackUrl, fallbackKey)
       console.warn('[WARNING] Fallback Supabase 클라이언트 사용')
     } catch (fallbackError) {
       console.error('[ERROR] Fallback 클라이언트 생성도 실패:', fallbackError)
