@@ -126,6 +126,11 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         external: ['dotenv']
+      },
+      // CommonJS 변환 방지 (ESM 유지)
+      commonjsOptions: {
+        include: [/node_modules/],
+        transformMixedEsModules: true
       }
     },
     optimizeDeps: {

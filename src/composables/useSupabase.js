@@ -37,19 +37,15 @@ const getSupabaseClient = () => {
     }
     
     try {
-      // 브라우저 환경에서 Request/Response가 정의되어 있는지 확인
-      if (typeof window !== 'undefined' && typeof fetch === 'function') {
-        // Supabase 클라이언트 생성 (명시적으로 브라우저 fetch 사용)
-        supabaseInstance = createClient(supabaseUrl, supabaseKey, {
-          global: {
-            fetch: fetch,
-            Headers: Headers,
-            Request: Request,
-            Response: Response
-          }
-        })
+      // 브라우저 환경 확인
+      const isBrowser = typeof window !== 'undefined' && typeof fetch === 'function'
+      
+      if (isBrowser) {
+        // 브라우저 환경: 전역 fetch API 사용 (옵션 없이)
+        // Supabase는 브라우저 환경에서 자동으로 전역 fetch를 사용합니다
+        supabaseInstance = createClient(supabaseUrl, supabaseKey)
       } else {
-        // 기본 생성 (Node.js 환경)
+        // Node.js 환경: 기본 생성
         supabaseInstance = createClient(supabaseUrl, supabaseKey)
       }
     } catch (error) {
