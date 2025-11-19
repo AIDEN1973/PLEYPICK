@@ -19,6 +19,13 @@
       (function () {
         try {
           var g = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : self);
+          // Node 스타일 전역 객체를 기대하는 라이브러리 보호
+          if (typeof window !== 'undefined' && typeof window.global === 'undefined') {
+            window.global = window; // 🔧 수정됨
+          }
+          if (typeof window !== 'undefined' && typeof window.process === 'undefined') {
+            window.process = { env: {} }; // 🔧 수정됨
+          }
           if (typeof window !== 'undefined') {
             if (!g.fetch && typeof window.fetch === 'function') g.fetch = window.fetch.bind(window);
             if (!g.Headers && typeof window.Headers !== 'undefined') g.Headers = window.Headers;
