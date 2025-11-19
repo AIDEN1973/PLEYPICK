@@ -27,29 +27,14 @@ const getSupabaseClient = async () => {
     // 브라우저 환경에서만 Supabase 클라이언트 생성
     if (typeof window !== 'undefined') {
       try {
-        let createClient = null
-        
-        // 1. 전역 변수에서 로드 (index.html의 CDN 스크립트)
-        if (window.supabase && window.supabase.createClient) {
-          createClient = window.supabase.createClient
-          console.log('[DEBUG] Supabase 전역 변수에서 로드')
-        }
-        // 2. 동적 import 시도 (개발 모드)
-        else {
-          try {
-            const supabaseModule = await import('@supabase/supabase-js')
-            createClient = supabaseModule.createClient
-            console.log('[DEBUG] Supabase 동적 import로 로드')
-          } catch (importError) {
-            console.warn('[WARN] Supabase 모듈 import 실패:', importError)
-          }
-        }
-        
-        if (createClient && supabaseUrl && supabaseKey) {
+        // 전역 변수에서만 로드 (CDN 스크립트, 동적 import 제거)
+        // 동적 import는 번들링 시점에 분석되어 vendor 청크에 포함될 수 있음
+        if (window.supabase && window.supabase.createClient && supabaseUrl && supabaseKey) {
+          const createClient = window.supabase.createClient
           supabaseInstance = createClient(supabaseUrl, supabaseKey)
-          console.log('[DEBUG] Supabase 클라이언트 런타임 초기화 성공')
+          console.log('[DEBUG] Supabase 클라이언트 런타임 초기화 성공 (CDN)')
         } else {
-          console.warn('[WARN] Supabase createClient 또는 URL/Key가 없습니다')
+          console.warn('[WARN] window.supabase.createClient 또는 URL/Key가 없습니다. CDN 스크립트가 로드되었는지 확인하세요.')
         }
       } catch (error) {
         console.error('[ERROR] Supabase 클라이언트 초기화 실패:', error)
