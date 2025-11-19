@@ -20,15 +20,8 @@ if (import.meta.env.PROD) {
   }
 }
 
-// Supabase 클라이언트 옵션 (최소한의 옵션만 사용)
-const supabaseOptions = {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true
-  }
-}
-
-// 싱글톤 패턴으로 Supabase 클라이언트 생성
+// Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
+// 브라우저 환경에서는 기본 fetch를 사용하므로 옵션을 최소화
 let supabaseInstance = null
 
 const getSupabaseClient = () => {
@@ -45,12 +38,9 @@ const getSupabaseClient = () => {
     }
     
     try {
-      // Supabase 클라이언트 생성 (옵션 없이도 시도)
-      if (Object.keys(supabaseOptions).length > 0) {
-        supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
-      } else {
-        supabaseInstance = createClient(supabaseUrl, supabaseKey)
-      }
+      // Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
+      // 브라우저 환경에서는 기본 fetch를 사용하므로 추가 옵션 불필요
+      supabaseInstance = createClient(supabaseUrl, supabaseKey)
     } catch (error) {
       console.error('[ERROR] createClient failed:', error)
       console.error('[ERROR] Error details:', {
