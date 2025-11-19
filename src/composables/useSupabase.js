@@ -20,67 +20,22 @@ if (import.meta.env.PROD) {
   }
 }
 
-// Supabase 클라이언트 지연 초기화 (프로덕션 빌드 시 문제 방지)
+// Supabase 클라이언트 생성 (원래 방식: 모듈 레벨에서 즉시 초기화)
 let supabaseInstance = null
 
-const getSupabaseClient = () => {
-  if (!supabaseInstance) {
-    // URL과 Key 검증
-    if (!supabaseUrl || !supabaseKey) {
-      const errorMsg = import.meta.env.PROD
-        ? 'VITE_SUPABASE_URL 또는 VITE_SUPABASE_ANON_KEY 환경 변수가 설정되지 않았습니다. Vercel 대시보드에서 환경 변수를 확인하세요.'
-        : 'Supabase URL or Key is missing'
-      console.error('[ERROR]', errorMsg)
-      console.error('[ERROR] URL:', supabaseUrl)
-      console.error('[ERROR] Key:', supabaseKey ? 'Present' : 'Missing')
-      throw new Error(errorMsg)
-    }
-    
-    try {
-      // 브라우저 환경 확인
-      const isBrowser = typeof window !== 'undefined' && typeof fetch === 'function'
-      
-      if (isBrowser) {
-        // 브라우저 환경: 전역 fetch API 사용 (옵션 없이)
-        // Supabase는 브라우저 환경에서 자동으로 전역 fetch를 사용합니다
-        supabaseInstance = createClient(supabaseUrl, supabaseKey)
-      } else {
-        // Node.js 환경: 기본 생성
-        supabaseInstance = createClient(supabaseUrl, supabaseKey)
-      }
-    } catch (error) {
-      console.error('[ERROR] createClient failed:', error)
-      console.error('[ERROR] Error details:', {
-        message: error.message,
-        stack: error.stack,
-        url: supabaseUrl,
-        keyLength: supabaseKey?.length || 0,
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A'
-      })
-      throw error
-    }
+try {
+  if (supabaseUrl && supabaseKey) {
+    // 옵션 없이 기본값만 사용 (useSupabasePleyon과 동일한 방식)
+    supabaseInstance = createClient(supabaseUrl, supabaseKey)
+  } else {
+    console.warn('[WARN] Supabase URL or Key is missing, client not initialized')
   }
-  return supabaseInstance
+} catch (error) {
+  console.error('[ERROR] Supabase 클라이언트 초기화 실패:', error)
+  // 초기화 실패해도 앱이 크래시되지 않도록 null 유지
 }
 
-// 지연 초기화: Proxy를 사용하여 실제 사용 시점에만 클라이언트 생성
-// 프로덕션 빌드에서 발생하는 문제를 방지하기 위해 지연 초기화 사용
-export const supabase = new Proxy({}, {
-  get(target, prop) {
-    try {
-      const client = getSupabaseClient()
-      const value = client[prop]
-      // 함수인 경우 this 바인딩 유지
-      if (typeof value === 'function') {
-        return value.bind(client)
-      }
-      return value
-    } catch (error) {
-      console.error('[ERROR] Supabase 클라이언트 접근 실패:', error)
-      throw error
-    }
-  }
-})
+export const supabase = supabaseInstance
 
 export function useSupabase() {
   const user = ref(null)
