@@ -20,8 +20,14 @@ if (import.meta.env.PROD) {
   }
 }
 
-// Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
-// 브라우저 환경에서는 기본 fetch를 사용하므로 옵션을 최소화
+// Supabase 클라이언트 옵션: 내부에서 global.headers를 기대하는 경로가 있어 빈 객체를 명시 // 🔧 수정됨
+const supabaseOptions = {
+  global: {
+    headers: {}
+  }
+}
+
+// Supabase 클라이언트 생성 (필수 최소 옵션만 사용) // 🔧 수정됨
 let supabaseInstance = null
 
 const getSupabaseClient = () => {
@@ -37,10 +43,9 @@ const getSupabaseClient = () => {
       throw new Error(errorMsg)
     }
     
-    try {
-      // Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
-      // 브라우저 환경에서는 기본 fetch를 사용하므로 추가 옵션 불필요
-      supabaseInstance = createClient(supabaseUrl, supabaseKey)
+    try { // 🔧 수정됨
+      // Supabase 클라이언트 생성 (global.headers 빈 객체 주입) // 🔧 수정됨
+      supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
     } catch (error) {
       console.error('[ERROR] createClient failed:', error)
       console.error('[ERROR] Error details:', {
