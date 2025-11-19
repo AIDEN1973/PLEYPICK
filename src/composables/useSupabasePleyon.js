@@ -9,47 +9,40 @@ let pleyonSupabaseClient = null
 const getPleyonSupabaseClient = () => {
   if (!pleyonSupabaseClient) {
     // URL과 Key 유효성 검증
+    console.log('[Pleyon] 클라이언트 초기화 시작:', {
+      hasUrl: !!pleyonSupabaseUrl,
+      hasKey: !!pleyonSupabaseKey,
+      url: pleyonSupabaseUrl
+    })
+    
     if (!pleyonSupabaseUrl || !pleyonSupabaseKey) {
       console.error('[Pleyon] Supabase URL 또는 Key가 설정되지 않았습니다.')
       throw new Error('Pleyon Supabase 환경변수가 설정되지 않았습니다.')
     }
 
     try {
+      console.log('[Pleyon] createClient 호출 전')
+      // Supabase 클라이언트 최소 설정 (Realtime 전용)
       pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        },
         realtime: {
           params: {
             eventsPerSecond: 10
           }
         },
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false,
-          storage: {
-            getItem: (key) => {
-              // 세션 정보는 저장하지 않지만 undefined 대신 null 반환
-              return Promise.resolve(null)
-            },
-            setItem: (key, value) => {
-              // 세션 저장 무시
-              return Promise.resolve()
-            },
-            removeItem: (key) => {
-              // 세션 삭제 무시
-              return Promise.resolve()
-            }
-          }
-        },
-        global: {
-          headers: {
-            'apikey': pleyonSupabaseKey,
-            'Authorization': `Bearer ${pleyonSupabaseKey}`
-          }
+        db: {
+          schema: 'public'
         }
       })
+      console.log('[Pleyon] createClient 호출 완료, 클라이언트:', pleyonSupabaseClient)
       console.log('[Pleyon] Supabase 클라이언트 초기화 완료')
     } catch (err) {
       console.error('[Pleyon] Supabase 클라이언트 초기화 실패:', err)
+      console.error('[Pleyon] 오류 스택:', err.stack)
       throw err
     }
   }
