@@ -618,21 +618,28 @@ export default {
           
           if (userUpdateError) {
             console.error('[App] 관리자 role 업데이트 실패:', userUpdateError)
-          } else {
-            console.log('[App] 관리자 role 업데이트 완료 (role: admin)')
+          } else if (pleyonStoreInfo && pleyonStoreInfo.store) {
+            // 관리자이면서 매장 정보가 있는 경우, storeInfo 설정
+            storeInfo.value = pleyonStoreInfo
           }
           
           return
+        } else if (adminError && adminError.code !== 'PGRST116') {
+          // PGRST116: No rows found (정상 케이스)
+          console.error('[App] 관리자 확인 오류:', adminError.message)
         }
 
-        // 관리자가 아닌 경우에만 매장 사용자 확인
+        // 관리자가 아닌 경우, 플레이온 매장 사용자 정보를 확인
         const pleyonStoreInfo = await getStoreInfoByEmail(user.value.email)
+        
         if (pleyonStoreInfo && pleyonStoreInfo.store) {
           isStoreUser.value = true
-          storeInfo.value = pleyonStoreInfo
           isAdmin.value = false
-
-          const { store } = pleyonStoreInfo
+          storeInfo.value = pleyonStoreInfo
+          
+          const { store, storeUserRole } = pleyonStoreInfo
+          
+          // stores 테이블 동기화
           const { error: storeSyncError } = await supabase
             .from('stores')
             .upsert({
@@ -650,18 +657,28 @@ export default {
             }, {
               onConflict: 'id'
             })
-
+          
           if (storeSyncError) {
             console.error('[App] 매장 정보 동기화 실패:', storeSyncError)
           } else {
             console.log('[App] 플레이온 매장 정보 동기화 완료:', store.name)
             
-            // users 테이블의 store_id와 role 업데이트
+            // 역할 매핑: 점주 -> store_owner, 직원 -> store_staff, 기타 -> store_manager
+            let userRole = 'store_user'
+            if (storeUserRole === '점주' || storeUserRole === 'owner') {
+              userRole = 'store_owner'
+            } else if (storeUserRole === '직원' || storeUserRole === 'staff') {
+              userRole = 'store_staff'
+            } else if (storeUserRole === 'manager') {
+              userRole = 'store_manager'
+            }
+            
+            // users 테이블의 role과 store_id 업데이트
             const { error: userUpdateError } = await supabase
               .from('users')
               .update({
+                role: userRole,
                 store_id: store.id,
-                role: pleyonStoreInfo.storeUserRole === 'owner' ? 'store_owner' : 'store_manager',
                 updated_at: new Date().toISOString()
               })
               .eq('id', user.value.id)
@@ -669,13 +686,28 @@ export default {
             if (userUpdateError) {
               console.error('[App] 사용자 매장 정보 업데이트 실패:', userUpdateError)
             } else {
-              console.log('[App] 사용자 매장 정보 업데이트 완료')
+              console.log('[App] 사용자 매장 정보 업데이트 완료 (role:', userRole, ')')
             }
           }
         } else {
+          // 일반 사용자 (관리자도 아니고 매장 사용자도 아님)
           isStoreUser.value = false
-          storeInfo.value = null
           isAdmin.value = false
+          storeInfo.value = null
+          
+          // users 테이블의 role을 default로 업데이트
+          const { error: userUpdateError } = await supabase
+            .from('users')
+            .update({
+              role: 'user',
+              store_id: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', user.value.id)
+
+          if (userUpdateError) {
+            console.error('[App] 일반 사용자 role 업데이트 실패:', userUpdateError)
+          }
         }
       } catch (err) {
         console.error('사용자 역할 확인 오류:', err)
