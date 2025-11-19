@@ -170,7 +170,7 @@ app = FastAPI(
     title="CLIP Embedding Service",
     description="CLIP ViT-L/14 기반 768차원 임베딩 서비스",
     version="1.0.0",
-    lifespan=lifespan # 🔧 수정됨: lifespan event handlers 사용
+    lifespan=lifespan # [FIX] 수정됨: lifespan event handlers 사용
 )
 
 # CORS 설정

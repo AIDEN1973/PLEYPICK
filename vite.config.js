@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// 🔧 수정됨: Vercel 빌드에서 './src/config/env.js' 경로 해석 실패 대응
+// [FIX] 수정됨: Vercel 빌드에서 './src/config/env.js' 경로 해석 실패 대응
 // vite.config.js 내부에 최소 헬퍼 구현해 외부 모듈 의존 제거
 const DEFAULT_PORTS = {
   frontend: 3000,
@@ -53,22 +53,22 @@ function validateConfig(config) {
   const required = ['frontend', 'aiApi', 'webpApi', 'syntheticApi', 'trainingApi']
   const missing = required.filter((k) => !config.ports[k])
   if (missing.length) {
-    console.error('[ERROR] 필수 포트 설정 누락:', missing.join(', ')) // 🔧 수정됨
+    console.error('[ERROR] 필수 포트 설정 누락:', missing.join(', ')) // [FIX] 수정됨
     return false
   }
   const invalid = Object.entries(config.ports)
     .filter(([, port]) => port < 1024 || port > 65535)
     .map(([name]) => name)
   if (invalid.length) {
-    console.error('[ERROR] 잘못된 포트 범위:', invalid.join(', ')) // 🔧 수정됨
+    console.error('[ERROR] 잘못된 포트 범위:', invalid.join(', ')) // [FIX] 수정됨
     return false
   }
-  console.log('[OK] 설정 검증 완료') // 🔧 수정됨
+  console.log('[OK] 설정 검증 완료') // [FIX] 수정됨
   return true
 }
 
 function printConfig(config) {
-  console.log('\n[FIX] 현재 설정:') // 🔧 수정됨
+  console.log('\n[FIX] 현재 설정:') // [FIX] 수정됨
   console.log('='.repeat(40))
   console.log(`모드: ${config.mode}`)
   console.log(`개발환경: ${config.isDevelopment ? 'Yes' : 'No'}`)
@@ -98,13 +98,13 @@ export default defineConfig(({ mode }) => {
   // 프록시 로거 생성 함수
   const createProxyLogger = (name) => (proxy, _options) => {
     proxy.on('error', (err, _req, _res) => {
-      console.log(`[ERROR] ${name} proxy error:`, err.message) // 🔧 수정됨
+      console.log(`[ERROR] ${name} proxy error:`, err.message) // [FIX] 수정됨
     })
     proxy.on('proxyReq', (proxyReq, req, _res) => {
-      console.log(`[UPLOAD] ${name} Request:`, req.method, req.url) // 🔧 수정됨
+      console.log(`[UPLOAD] ${name} Request:`, req.method, req.url) // [FIX] 수정됨
     })
     proxy.on('proxyRes', (proxyRes, req, _res) => {
-      const status = proxyRes.statusCode >= 400 ? '[ERROR]' : '[OK]' // 🔧 수정됨
+      const status = proxyRes.statusCode >= 400 ? '[ERROR]' : '[OK]' // [FIX] 수정됨
       console.log(`${status} ${name} Response:`, proxyRes.statusCode, req.url)
     })
   }
@@ -114,12 +114,12 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
-        stream: 'stream-browserify', // 🔧 수정됨: stream 모듈 브라우저 폴리필
-        url: 'url', // 🔧 수정됨: url 모듈 브라우저 폴리필
-        util: resolve(__dirname, 'src/polyfills/util.js'), // 🔧 수정됨: util 모듈 브라우저 폴리필
-        http: resolve(__dirname, 'src/polyfills/http.js'), // 🔧 수정됨: http 모듈 브라우저 폴리필
+        stream: 'stream-browserify', // [FIX] 수정됨: stream 모듈 브라우저 폴리필
+        url: 'url', // [FIX] 수정됨: url 모듈 브라우저 폴리필
+        util: resolve(__dirname, 'src/polyfills/util.js'), // [FIX] 수정됨: util 모듈 브라우저 폴리필
+        http: resolve(__dirname, 'src/polyfills/http.js'), // [FIX] 수정됨: http 모듈 브라우저 폴리필
       },
-      dedupe: ['@supabase/supabase-js'], // 🔧 수정됨: 중복 의존성 제거
+      dedupe: ['@supabase/supabase-js'], // [FIX] 수정됨: 중복 의존성 제거
     },
     // API 파일 처리를 위한 추가 설정
     build: {
@@ -129,19 +129,19 @@ export default defineConfig(({ mode }) => {
     },
     optimizeDeps: {
       include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web', 'url', 'util'],
-      exclude: [], // 🔧 수정됨: alias로 해결하므로 exclude 제거
-      needsInterop: ['onnxruntime-web', 'url', 'util'], // 🔧 수정됨: onnxruntime-web ESM/CJS 혼합 해결, url/util 모듈 추가
+      exclude: [], // [FIX] 수정됨: alias로 해결하므로 exclude 제거
+      needsInterop: ['onnxruntime-web', 'url', 'util'], // [FIX] 수정됨: onnxruntime-web ESM/CJS 혼합 해결, url/util 모듈 추가
       esbuildOptions: {
         define: {
-          global: 'globalThis' // 🔧 수정됨: esbuild에서 global 변수 처리
+          global: 'globalThis' // [FIX] 수정됨: esbuild에서 global 변수 처리
         }
       },
-      force: true // 🔧 수정됨: 의존성 강제 재최적화
+      force: true // [FIX] 수정됨: 의존성 강제 재최적화
     },
     define: {
       __VUE_OPTIONS_API__: true,
       __VUE_PROD_DEVTOOLS__: false,
-      'global': 'globalThis', // 🔧 수정됨: 브라우저에서 global 변수 지원
+      'global': 'globalThis', // [FIX] 수정됨: 브라우저에서 global 변수 지원
     },
     server: {
       port: portConfig.frontend,
@@ -153,11 +153,11 @@ export default defineConfig(({ mode }) => {
         port: portConfig.frontend,
         clientPort: portConfig.frontend,
         overlay: true
-      }, // 🔧 수정됨: HMR 연결 안정화
+      }, // [FIX] 수정됨: HMR 연결 안정화
       watch: {
         usePolling: false,
         interval: 100
-      }, // 🔧 수정됨: 파일 감시 최적화
+      }, // [FIX] 수정됨: 파일 감시 최적화
       fs: {
         strict: false,
         allow: ['..']
