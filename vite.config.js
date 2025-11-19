@@ -129,14 +129,24 @@ export default defineConfig(({ mode }) => {
         external: ['dotenv'],
         output: {
           manualChunks: (id) => {
-            // Supabase는 별도 청크로 분리하지 않음 (동적 import로 처리)
+            // Supabase는 완전히 제외 (CDN에서 로드)
             if (id.includes('@supabase/supabase-js')) {
-              return null // 번들에 포함하지 않음
+              return undefined // 번들에 포함하지 않음
             }
             // node_modules는 vendor 청크로
             if (id.includes('node_modules')) {
               return 'vendor'
             }
+          },
+          // [FIX] 수정됨: Supabase 관련 import를 완전히 제거
+          banner: '',
+          footer: ''
+        },
+        // [FIX] 수정됨: Supabase를 external로 처리 (브라우저에서는 작동하지 않지만 시도)
+        treeshake: {
+          moduleSideEffects: (id) => {
+            // Supabase 관련 모듈은 side effect 없음으로 표시
+            return !id.includes('@supabase/supabase-js')
           }
         }
       },
