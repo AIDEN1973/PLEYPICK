@@ -37,9 +37,21 @@ const getSupabaseClient = () => {
     }
     
     try {
-      // Supabase 클라이언트 생성 (옵션 없이 기본값만 사용)
-      // 브라우저 환경에서는 기본 fetch를 사용하므로 추가 옵션 불필요
-      supabaseInstance = createClient(supabaseUrl, supabaseKey)
+      // 브라우저 환경에서 Request/Response가 정의되어 있는지 확인
+      if (typeof window !== 'undefined' && typeof fetch === 'function') {
+        // Supabase 클라이언트 생성 (명시적으로 브라우저 fetch 사용)
+        supabaseInstance = createClient(supabaseUrl, supabaseKey, {
+          global: {
+            fetch: fetch,
+            Headers: Headers,
+            Request: Request,
+            Response: Response
+          }
+        })
+      } else {
+        // 기본 생성 (Node.js 환경)
+        supabaseInstance = createClient(supabaseUrl, supabaseKey)
+      }
     } catch (error) {
       console.error('[ERROR] createClient failed:', error)
       console.error('[ERROR] Error details:', {
