@@ -126,13 +126,9 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         external: ['dotenv']
       },
-      minify: 'terser',
-      terserOptions: {
-        compress: {
-          drop_console: false, // 프로덕션 빌드에서도 console.log 유지
-          drop_debugger: true
-        }
-      }
+      minify: 'esbuild', // esbuild 사용 (terser 대신, 기본 포함)
+      // esbuild는 drop_console 옵션을 지원하지 않으므로
+      // console.log는 기본적으로 유지됨
     },
     optimizeDeps: {
       include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web', 'url', 'util'],
