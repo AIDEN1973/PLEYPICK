@@ -1,22 +1,30 @@
 import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
-// 원래 코드 복원: 환경 변수는 모듈 레벨에서 가져오기
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
+// 환경 변수 가져오기 (프로덕션 빌드 시 Vercel에서 주입됨)
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || (import.meta.env.PROD ? null : 'https://npferbxuxocbfnfbpcnz.supabase.co')
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || (import.meta.env.PROD ? null : 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk')
 
-// 원래 코드 복원: CORS 및 Storage 접근을 위한 추가 옵션
+// 프로덕션 빌드 디버깅
+if (import.meta.env.PROD) {
+  console.log('[DEBUG] Environment check:', {
+    VITE_SUPABASE_URL: supabaseUrl ? 'Present' : 'Missing',
+    VITE_SUPABASE_ANON_KEY: supabaseKey ? 'Present' : 'Missing',
+    allEnvKeys: Object.keys(import.meta.env).filter(k => k.startsWith('VITE_'))
+  })
+  
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[ERROR] Supabase 환경 변수가 설정되지 않았습니다.')
+    console.error('[ERROR] VITE_SUPABASE_URL:', supabaseUrl ? 'Present' : 'Missing')
+    console.error('[ERROR] VITE_SUPABASE_ANON_KEY:', supabaseKey ? 'Present' : 'Missing')
+  }
+}
+
+// Supabase 클라이언트 옵션 (최소한의 옵션만 사용)
 const supabaseOptions = {
   auth: {
     persistSession: true,
     autoRefreshToken: true
-  },
-  global: {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
   }
 }
 
@@ -25,12 +33,39 @@ let supabaseInstance = null
 
 const getSupabaseClient = () => {
   if (!supabaseInstance) {
-    supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+    // URL과 Key 검증
+    if (!supabaseUrl || !supabaseKey) {
+      const errorMsg = import.meta.env.PROD
+        ? 'VITE_SUPABASE_URL 또는 VITE_SUPABASE_ANON_KEY 환경 변수가 설정되지 않았습니다. Vercel 대시보드에서 환경 변수를 확인하세요.'
+        : 'Supabase URL or Key is missing'
+      console.error('[ERROR]', errorMsg)
+      console.error('[ERROR] URL:', supabaseUrl)
+      console.error('[ERROR] Key:', supabaseKey ? 'Present' : 'Missing')
+      throw new Error(errorMsg)
+    }
+    
+    try {
+      // Supabase 클라이언트 생성 (옵션 없이도 시도)
+      if (Object.keys(supabaseOptions).length > 0) {
+        supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+      } else {
+        supabaseInstance = createClient(supabaseUrl, supabaseKey)
+      }
+    } catch (error) {
+      console.error('[ERROR] createClient failed:', error)
+      console.error('[ERROR] Error details:', {
+        message: error.message,
+        stack: error.stack,
+        url: supabaseUrl,
+        keyLength: supabaseKey?.length || 0
+      })
+      throw error
+    }
   }
   return supabaseInstance
 }
 
-// 원래 코드 복원: 모듈 레벨에서 즉시 초기화
+// 모듈 레벨에서 즉시 초기화
 export const supabase = getSupabaseClient()
 
 export function useSupabase() {
