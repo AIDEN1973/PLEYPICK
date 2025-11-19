@@ -124,6 +124,7 @@ export default defineConfig(({ mode }) => {
     },
     // API 파일 처리를 위한 추가 설정
     build: {
+      target: 'es2020', // 브라우저 호환성
       rollupOptions: {
         external: ['dotenv']
       },
@@ -138,6 +139,7 @@ export default defineConfig(({ mode }) => {
       exclude: ['@supabase/supabase-js'], // Supabase는 최적화에서 제외
       needsInterop: ['onnxruntime-web'], // [FIX] 수정됨: onnxruntime-web ESM/CJS 혼합 해결
       esbuildOptions: {
+        target: 'es2020',
         define: {
           global: 'globalThis' // [FIX] 수정됨: esbuild에서 global 변수 처리
         }
