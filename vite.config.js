@@ -18,6 +18,7 @@ const DEFAULT_PORTS = {
   monitoring: 3040,
   semanticVectorApi: 3022,
   inspectionApi: 3045,
+  legoInstructionsApi: 3050,
 }
 
 function getIntegratedConfig(mode) {
@@ -37,6 +38,7 @@ function getIntegratedConfig(mode) {
     monitoring: toInt(env.VITE_PORT_MONITORING, DEFAULT_PORTS.monitoring),
     semanticVectorApi: toInt(env.VITE_PORT_SEMANTIC_VECTOR_API, DEFAULT_PORTS.semanticVectorApi),
     inspectionApi: toInt(env.VITE_PORT_INSPECTION_API, DEFAULT_PORTS.inspectionApi),
+    legoInstructionsApi: toInt(env.VITE_PORT_LEGO_INSTRUCTIONS_API, DEFAULT_PORTS.legoInstructionsApi),
   }
   return {
     ports,
@@ -111,8 +113,13 @@ export default defineConfig(({ mode }) => {
     plugins: [vue()],
     resolve: {
       alias: {
-        '@': resolve(__dirname, 'src')
-      }
+        '@': resolve(__dirname, 'src'),
+        stream: 'stream-browserify', // 🔧 수정됨: stream 모듈 브라우저 폴리필
+        url: 'url', // 🔧 수정됨: url 모듈 브라우저 폴리필
+        util: resolve(__dirname, 'src/polyfills/util.js'), // 🔧 수정됨: util 모듈 브라우저 폴리필
+        http: resolve(__dirname, 'src/polyfills/http.js'), // 🔧 수정됨: http 모듈 브라우저 폴리필
+      },
+      dedupe: ['@supabase/supabase-js'], // 🔧 수정됨: 중복 의존성 제거
     },
     // API 파일 처리를 위한 추가 설정
     build: {
@@ -121,19 +128,41 @@ export default defineConfig(({ mode }) => {
       }
     },
     optimizeDeps: {
-      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web'],
-      exclude: [],
-      needsInterop: ['onnxruntime-web'], // 🔧 수정됨: onnxruntime-web ESM/CJS 혼합 해결
+      include: ['localforage', 'p-limit', 'chart.js', 'vue-chartjs', 'pinia', 'axios', 'onnxruntime-web', 'url', 'util'],
+      exclude: [], // 🔧 수정됨: alias로 해결하므로 exclude 제거
+      needsInterop: ['onnxruntime-web', 'url', 'util'], // 🔧 수정됨: onnxruntime-web ESM/CJS 혼합 해결, url/util 모듈 추가
+      esbuildOptions: {
+        define: {
+          global: 'globalThis' // 🔧 수정됨: esbuild에서 global 변수 처리
+        }
+      },
       force: true // 🔧 수정됨: 의존성 강제 재최적화
     },
     define: {
       __VUE_OPTIONS_API__: true,
       __VUE_PROD_DEVTOOLS__: false,
+      'global': 'globalThis', // 🔧 수정됨: 브라우저에서 global 변수 지원
     },
     server: {
       port: portConfig.frontend,
       strictPort: true,
       host: '0.0.0.0',
+      hmr: {
+        protocol: 'ws',
+        host: 'localhost',
+        port: portConfig.frontend,
+        clientPort: portConfig.frontend,
+        overlay: true
+      }, // 🔧 수정됨: HMR 연결 안정화
+      watch: {
+        usePolling: false,
+        interval: 100
+      }, // 🔧 수정됨: 파일 감시 최적화
+      fs: {
+        strict: false,
+        allow: ['..']
+      },
+      configureServer: undefined,
       proxy: {
         '/api/inspection': {
           target: `http://localhost:${portConfig.inspectionApi || 3045}`,

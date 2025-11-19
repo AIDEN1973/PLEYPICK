@@ -62,8 +62,8 @@ export function useImageManager() {
   const downloading = ref(false)
   const error = ref(null)
 
-  // 이미지 다운로드 함수 (Axios + 재시도 로직)
-  const downloadImage = async (imageUrl, filename, maxRetries = 2) => {
+  // 이미지 다운로드 함수 (Axios + 재시도 로직, 강화)
+  const downloadImage = async (imageUrl, filename, maxRetries = 3) => {
     downloading.value = true
     error.value = null
 
@@ -71,14 +71,16 @@ export function useImageManager() {
       try {
         console.log(`🔄 이미지 다운로드 시도 ${attempt}/${maxRetries}: ${imageUrl}`)
         
+        // URL 검증: 프록시로 전달되기 전 원본 URL 확인
+        const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+        console.log(`[ImageManager] 프록시 URL: ${proxyUrl}`)
+        console.log(`[ImageManager] 원본 URL 검증: ${imageUrl}`)
+        
         // Axios를 사용한 안정적인 다운로드
-        const response = await axios.get(`/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`, {
+        const response = await axios.get(proxyUrl, {
           responseType: 'arraybuffer',
-          timeout: 3000,              // 3초 제한
-          validateStatus: status => status < 500,  // 5xx 에러만 재시도
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
+          timeout: 5000,              // 5초 제한 (3초에서 증가)
+          validateStatus: status => status < 500  // 5xx 에러만 재시도
         })
         
         if (!response.data || response.data.length === 0) {
@@ -87,7 +89,7 @@ export function useImageManager() {
 
         // ArrayBuffer를 Blob으로 변환
         const blob = new Blob([response.data])
-        console.log(`✅ 이미지 다운로드 성공: ${blob.size} bytes`)
+        console.log(`✅ 이미지 다운로드 성공: ${blob.size} bytes (원본 URL: ${imageUrl})`)
         return blob
         
       } catch (err) {
@@ -98,8 +100,10 @@ export function useImageManager() {
           throw err
         }
         
-        // 재시도 전 잠시 대기
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
+        // 재시도 전 잠시 대기 (1초, 2초, 3초)
+        const waitTime = attempt * 1000
+        console.log(`⏳ ${waitTime}ms 후 재시도...`)
+        await new Promise(resolve => setTimeout(resolve, waitTime))
       }
     }
   }
@@ -172,7 +176,98 @@ export function useImageManager() {
     }
   }
 
-  // element_id 기반 이미지 중복 검사 함수 - ✅ 캐싱 적용
+  // element_id + color_id 기반 이미지 중복 검사 함수 - 색상 정보 포함 검증
+  const checkPartImageDuplicateByElementIdAndColor = async (elementId, colorId) => {
+    try {
+      const cacheKey = `element_${String(elementId)}_color_${colorId}`
+      
+      // ✅ 캐시 확인
+      const cached = imageDuplicateCache.get(cacheKey)
+      if (cached !== undefined) {
+        console.log(`✅ Cache hit for ${cacheKey}: ${cached}`)
+        return cached === true ? { exists: true, url: null } : cached
+      }
+      
+      console.log(`Checking for existing image: element_id=${elementId}, color_id=${colorId}`)
+      
+      // 1. DB에서 element_id + color_id로 확인 (색상 정보 포함)
+      const { data: partImage, error: dbError } = await supabase
+        .from('part_images')
+        .select('uploaded_url, filename, color_id')
+        .eq('element_id', String(elementId))
+        .eq('color_id', colorId)
+        .maybeSingle()
+      
+      if (!dbError && partImage?.uploaded_url) {
+        // 색상 정보가 일치하는 경우에만 중복으로 인정
+        if (partImage.color_id === colorId) {
+          console.log(`Existing image found in DB for element_id ${elementId} (color: ${colorId}): ${partImage.uploaded_url}`)
+          const result = { exists: true, url: partImage.uploaded_url }
+          imageDuplicateCache.set(cacheKey, result) // ✅ 캐시 저장
+          return result
+        } else {
+          console.warn(`⚠️ 색상 불일치: element_id ${elementId}의 기존 이미지 색상(${partImage.color_id})과 요청 색상(${colorId})이 다릅니다. 재다운로드 필요.`)
+        }
+      }
+      
+      // 2. element_id만으로 확인 (하위 호환성, 색상 정보 없이 저장된 경우)
+      const { data: partImageByElement, error: elementError } = await supabase
+        .from('part_images')
+        .select('uploaded_url, filename, color_id')
+        .eq('element_id', String(elementId))
+        .maybeSingle()
+      
+      if (!elementError && partImageByElement?.uploaded_url) {
+        // 색상 정보가 일치하는 경우에만 중복으로 인정
+        if (partImageByElement.color_id === colorId) {
+          console.log(`Existing image found in DB for element_id ${elementId} (color: ${colorId}): ${partImageByElement.uploaded_url}`)
+          const result = { exists: true, url: partImageByElement.uploaded_url }
+          imageDuplicateCache.set(cacheKey, result) // ✅ 캐시 저장
+          return result
+        } else {
+          console.warn(`⚠️ 색상 불일치 감지: element_id ${elementId}의 기존 이미지 색상(${partImageByElement.color_id})과 요청 색상(${colorId})이 다릅니다.`)
+          console.warn(`⚠️ 재다운로드 필요: 기존 이미지를 덮어쓰기 위해 false 반환`)
+          // 색상 불일치 시 재다운로드 강제
+          imageDuplicateCache.set(cacheKey, false)
+          return false
+        }
+      }
+      
+      // 3. Storage 버킷에서 직접 확인 (폴백, 색상 검증 불가)
+      const fileName = `${String(elementId)}.webp`
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+      const bucketName = 'lego_parts_images'
+      const imageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+      
+      // HTTP HEAD 요청으로 이미지 존재 여부 확인
+      try {
+        const response = await fetch(imageUrl, { method: 'HEAD' })
+        if (response.ok) {
+          // Storage에 파일이 있어도 색상 정보를 확인할 수 없으므로, DB에서 색상 불일치가 확인된 경우 재다운로드
+          console.log(`⚠️ Storage에 이미지가 있지만 색상 검증이 필요합니다. element_id ${elementId} (요청 색상: ${colorId})`)
+          // DB에서 색상 불일치가 확인된 경우 재다운로드 강제
+          if (partImageByElement && partImageByElement.color_id !== colorId) {
+            console.warn(`⚠️ 색상 불일치로 인한 재다운로드 강제: element_id ${elementId}`)
+            imageDuplicateCache.set(cacheKey, false)
+            return false
+          }
+          // 색상 불일치 가능성이 있으므로 false 반환하여 재다운로드 유도
+          imageDuplicateCache.set(cacheKey, false)
+          return false
+        }
+      } catch (fetchErr) {
+        // 400, 404 등은 이미지가 없는 것으로 간주 (정상 동작)
+      }
+      
+      imageDuplicateCache.set(cacheKey, false) // ✅ 캐시 저장
+      return false
+    } catch (err) {
+      console.warn('Error checking image duplicate by element_id and color:', err.message)
+      return false
+    }
+  }
+
+  // element_id 기반 이미지 중복 검사 함수 - ✅ 캐싱 적용, 기존 URL 반환 (하위 호환성)
   const checkPartImageDuplicateByElementId = async (elementId) => {
     try {
       const cacheKey = `element_${String(elementId)}`
@@ -181,7 +276,7 @@ export function useImageManager() {
       const cached = imageDuplicateCache.get(cacheKey)
       if (cached !== undefined) {
         console.log(`✅ Cache hit for ${cacheKey}: ${cached}`)
-        return cached
+        return cached === true ? { exists: true, url: null } : cached
       }
       
       console.log(`Checking for existing image: element_id=${elementId}`)
@@ -195,8 +290,9 @@ export function useImageManager() {
       
       if (!dbError && partImage?.uploaded_url) {
         console.log(`Existing image found in DB for element_id ${elementId}: ${partImage.uploaded_url}`)
-        imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
-        return true
+        const result = { exists: true, url: partImage.uploaded_url }
+        imageDuplicateCache.set(cacheKey, result) // ✅ 캐시 저장
+        return result
       }
       
       // 2. Storage 버킷에서 직접 확인 (폴백)
@@ -210,11 +306,17 @@ export function useImageManager() {
         const response = await fetch(imageUrl, { method: 'HEAD' })
         if (response.ok) {
           console.log(`Existing image found in Storage for element_id ${elementId}: ${imageUrl}`)
-          imageDuplicateCache.set(cacheKey, true) // ✅ 캐시 저장
-          return true
+          const result = { exists: true, url: imageUrl }
+          imageDuplicateCache.set(cacheKey, result) // ✅ 캐시 저장
+          return result
         }
+        // 400, 404 등은 이미지가 없는 것으로 간주 (정상 동작)
       } catch (fetchErr) {
-        console.warn('Storage check failed:', fetchErr.message)
+        // 400, 404 등은 이미지가 없는 것으로 간주 (조용히 처리)
+        // 네트워크 오류만 경고 로그 출력
+        if (!fetchErr.message.includes('400') && !fetchErr.message.includes('404')) {
+          console.warn('Storage check failed:', fetchErr.message)
+        }
       }
       
       imageDuplicateCache.set(cacheKey, false) // ✅ 캐시 저장
@@ -400,7 +502,21 @@ export function useImageManager() {
 
   // Rebrickable 이미지를 다운로드하고 업로드하는 통합 함수 (파일명 기반 중복 검사)
   const processRebrickableImage = async (imageUrl, partNum, colorId = null, options = {}) => {
-    const elementId = options?.elementId || null
+    // elementId 검증 및 정규화
+    let elementId = options?.elementId || null
+    if (elementId !== null && elementId !== undefined) {
+      const elementIdStr = String(elementId).trim()
+      if (elementIdStr === '' || elementIdStr === 'null' || elementIdStr === 'undefined' || elementIdStr === '0') {
+        elementId = null
+      } else {
+        elementId = elementIdStr
+      }
+    } else {
+      elementId = null
+    }
+    
+    console.log(`[ImageManager] processRebrickableImage 호출: part_num=${partNum}, color_id=${colorId}, element_id=${elementId || '없음'}`)
+    
     try {
       // 원본 URL에서 파일명 추출
       const originalFilename = extractOriginalFilename(imageUrl)
@@ -412,19 +528,52 @@ export function useImageManager() {
       // 1. 부품별 이미지 중복 검사 수행 (강제 업로드 옵션)
       const forceUpload = options?.forceUpload || false
       if (!forceUpload) {
-        // element_id가 있으면 element_id로 중복 검사, 없으면 part_num + color_id로 검사
-        const isDuplicate = elementId
-          ? await checkPartImageDuplicateByElementId(elementId)
-          : await checkPartImageDuplicate(partNum, colorId)
-        if (isDuplicate) {
-          console.log(`Skipping duplicate image for ${elementId ? `element_id ${elementId}` : `part ${partNum} (color: ${colorId})`}`)
-          const duplicateFilename = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId || 'unknown'}.webp`
-          return {
-            originalUrl: imageUrl,
-            uploadedUrl: null, // 중복으로 업로드하지 않음
-            filename: duplicateFilename,
-            path: uploadPath,
-            isDuplicate: true
+        // element_id가 있으면 element_id + color_id로 중복 검사 (색상 정보 포함)
+        if (elementId && colorId !== null && colorId !== undefined) {
+          const duplicateCheck = await checkPartImageDuplicateByElementIdAndColor(elementId, colorId)
+          if (duplicateCheck && (duplicateCheck === true || (duplicateCheck.exists && duplicateCheck.url))) {
+            const existingUrl = (duplicateCheck && typeof duplicateCheck === 'object' && duplicateCheck.url) 
+              ? duplicateCheck.url 
+              : `${import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'}/storage/v1/object/public/lego_parts_images/images/${String(elementId)}.webp`
+            console.log(`Skipping duplicate image for element_id ${elementId} (color: ${colorId}), using existing URL: ${existingUrl}`)
+            const duplicateFilename = `${String(elementId)}.webp`
+            return {
+              originalUrl: imageUrl,
+              uploadedUrl: existingUrl,
+              filename: duplicateFilename,
+              path: uploadPath,
+              isDuplicate: true
+            }
+          }
+        } else if (elementId) {
+          // colorId가 없는 경우 기존 로직 사용 (하위 호환성)
+          const duplicateCheck = await checkPartImageDuplicateByElementId(elementId)
+          if (duplicateCheck && (duplicateCheck === true || (duplicateCheck.exists && duplicateCheck.url))) {
+            const existingUrl = (duplicateCheck && typeof duplicateCheck === 'object' && duplicateCheck.url) 
+              ? duplicateCheck.url 
+              : `${import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'}/storage/v1/object/public/lego_parts_images/images/${String(elementId)}.webp`
+            console.log(`Skipping duplicate image for element_id ${elementId}, using existing URL: ${existingUrl}`)
+            const duplicateFilename = `${String(elementId)}.webp`
+            return {
+              originalUrl: imageUrl,
+              uploadedUrl: existingUrl,
+              filename: duplicateFilename,
+              path: uploadPath,
+              isDuplicate: true
+            }
+          }
+        } else {
+          const isDuplicate = await checkPartImageDuplicate(partNum, colorId)
+          if (isDuplicate) {
+            console.log(`Skipping duplicate image for part ${partNum} (color: ${colorId})`)
+            const duplicateFilename = `${partNum}_${colorId || 'unknown'}.webp`
+            return {
+              originalUrl: imageUrl,
+              uploadedUrl: null, // 중복으로 업로드하지 않음
+              filename: duplicateFilename,
+              path: uploadPath,
+              isDuplicate: true
+            }
           }
         }
       } else {
@@ -433,6 +582,25 @@ export function useImageManager() {
       
       try {
         // 이미지 다운로드 시도
+        console.log(`[ImageManager] 다운로드할 이미지 URL 검증: ${imageUrl}`)
+        console.log(`[ImageManager] element_id: ${elementId}, 예상 색상 ID: ${colorId}`)
+        
+        // URL에서 element_id 추출하여 검증 (경고만, 계속 진행)
+        if (elementId && imageUrl.includes('/elements/')) {
+          const urlElementIdMatch = imageUrl.match(/\/elements\/(\d+)\.jpg/)
+          if (urlElementIdMatch) {
+            const urlElementId = urlElementIdMatch[1]
+            if (urlElementId !== String(elementId)) {
+              console.warn(`⚠️ URL 불일치: 요청 element_id=${elementId}, URL의 element_id=${urlElementId}`)
+              console.warn(`⚠️ Rebrickable API가 다른 element_id의 URL을 반환했습니다. API 응답을 신뢰하고 계속 진행합니다.`)
+              console.warn(`⚠️ URL: ${imageUrl}`)
+              // API가 반환한 URL을 신뢰하고 계속 진행 (요청한 element_id는 그대로 사용)
+            } else {
+              console.log(`✅ URL 검증 성공: element_id 일치 (${elementId})`)
+            }
+          }
+        }
+        
         const blob = await downloadImage(imageUrl)
         
         // WebP로 변환
@@ -466,28 +634,58 @@ export function useImageManager() {
         URL.revokeObjectURL(img.src)
         
         // 파일명 생성: element_id 우선, 없으면 partNum_colorId.webp
+        // elementId는 이미 위에서 검증 및 정규화됨
         const fileName = elementId
-          ? `${String(elementId)}.webp`
+          ? `${elementId}.webp`
           : `${partNum}_${colorId || 'unknown'}.webp`
+        
+        console.log(`[ImageManager] 파일명 결정: element_id=${elementId || '없음'} → 파일명=${fileName}`)
+        
         const file = new File([webpBlob], fileName, { type: 'image/webp' })
         
-        // Supabase Storage에 직접 업로드
+        // Supabase Storage에 직접 업로드 (재시도 포함)
         const bucketName = 'lego_parts_images'
         const filePath = `images/${fileName}`
         
-        console.log(`📤 Supabase Storage 업로드 시도: ${filePath}`)
-        const { data, error: uploadError } = await supabase.storage
-          .from(bucketName)
-          .upload(filePath, file, {
-            upsert: true // 파일이 이미 존재하면 덮어쓰기
-          })
+        const maxUploadRetries = 3
+        let uploadSuccess = false
+        let uploadData = null
+        
+        for (let attempt = 1; attempt <= maxUploadRetries; attempt++) {
+          try {
+            console.log(`📤 Supabase Storage 업로드 시도 ${attempt}/${maxUploadRetries}: ${filePath} (element_id: ${elementId || '없음'})`)
+            const { data, error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(filePath, file, {
+                upsert: true // 파일이 이미 존재하면 덮어쓰기
+              })
 
-        if (uploadError) {
-          console.error(`❌ Supabase 업로드 실패:`, uploadError)
-          throw new Error(`Supabase upload failed: ${uploadError.message}`)
+            if (uploadError) {
+              throw new Error(`Supabase upload failed: ${uploadError.message}`)
+            }
+            
+            uploadData = data
+            uploadSuccess = true
+            console.log(`✅ Supabase 업로드 성공 (시도 ${attempt}/${maxUploadRetries}):`, data)
+            break
+          } catch (uploadErr) {
+            console.warn(`⚠️ Supabase 업로드 실패 (시도 ${attempt}/${maxUploadRetries}): ${uploadErr.message}`)
+            
+            if (attempt < maxUploadRetries) {
+              const waitTime = attempt * 1000
+              console.log(`⏳ ${waitTime}ms 후 재시도...`)
+              await new Promise(resolve => setTimeout(resolve, waitTime))
+              continue
+            } else {
+              console.error(`❌ 모든 Supabase 업로드 시도 실패:`, uploadErr)
+              throw uploadErr
+            }
+          }
         }
         
-        console.log(`✅ Supabase 업로드 성공:`, data)
+        if (!uploadSuccess || !uploadData) {
+          throw new Error('Supabase 업로드 실패')
+        }
         
         // 공개 URL 생성
         const { data: urlData } = supabase.storage
@@ -509,76 +707,115 @@ export function useImageManager() {
       } catch (downloadErr) {
         console.warn('Direct download failed, using alternative method:', downloadErr.message)
         
-        try {
-          // 대체 방법 1: 프록시를 통한 이미지 다운로드 및 WebP 변환 (Axios + 재시도)
-          const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
-          console.log(`🔄 프록시를 통한 이미지 다운로드 시도: ${proxyUrl}`)
-          
-          const proxyResponse = await axios.get(proxyUrl, {
-            responseType: 'arraybuffer',
-            timeout: 3000,
-            validateStatus: status => status < 500,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-          })
-          
-          if (!proxyResponse.data || proxyResponse.data.length === 0) {
-            throw new Error('프록시 다운로드 실패 - 빈 응답')
-          }
-          
-          const proxyBlob = new Blob([proxyResponse.data])
-          // 파일명 생성: element_id 우선, 없으면 partNum_colorId.webp
-          const fileName = elementId
-            ? `${String(elementId)}.webp`
-            : `${partNum}_${colorId || 'unknown'}.webp`
-          const file = new File([proxyBlob], fileName, { type: 'image/webp' })
-          
-          // Supabase Storage에 직접 업로드
-          const bucketName = 'lego_parts_images'
-          const filePath = `images/${fileName}`
-          
-          console.log(`📤 Supabase Storage 업로드 시도 (프록시): ${filePath}`)
-          const { data, error: uploadError } = await supabase.storage
-            .from(bucketName)
-            .upload(filePath, file, {
-              upsert: true
+        // 대체 방법: 서버 사이드 프록시를 통한 이미지 다운로드 및 WebP 변환 (재시도 포함)
+        const maxProxyRetries = 3
+        let lastProxyError = null
+        
+        for (let attempt = 1; attempt <= maxProxyRetries; attempt++) {
+          try {
+            const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+            console.log(`🔄 프록시를 통한 이미지 다운로드 시도 ${attempt}/${maxProxyRetries}: ${proxyUrl}`)
+            
+            const proxyResponse = await axios.get(proxyUrl, {
+              responseType: 'arraybuffer',
+              timeout: 5000, // 5초 제한
+              validateStatus: status => status < 500,
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              }
             })
+            
+            if (!proxyResponse.data || proxyResponse.data.length === 0) {
+              throw new Error('프록시 다운로드 실패 - 빈 응답')
+            }
+            
+            const proxyBlob = new Blob([proxyResponse.data])
+            // 파일명 생성: element_id 우선, 없으면 partNum_colorId.webp
+            const fileName = elementId
+              ? `${String(elementId)}.webp`
+              : `${partNum}_${colorId || 'unknown'}.webp`
+            const file = new File([proxyBlob], fileName, { type: 'image/webp' })
+            
+            // Supabase Storage에 직접 업로드 (재시도 포함)
+            const bucketName = 'lego_parts_images'
+            const filePath = `images/${fileName}`
+            
+            const maxUploadRetries = 3
+            let uploadSuccess = false
+            let uploadedUrl = null
+            
+            for (let uploadAttempt = 1; uploadAttempt <= maxUploadRetries; uploadAttempt++) {
+              try {
+                console.log(`📤 Supabase Storage 업로드 시도 ${uploadAttempt}/${maxUploadRetries} (프록시): ${filePath}`)
+                const { data, error: uploadError } = await supabase.storage
+                  .from(bucketName)
+                  .upload(filePath, file, {
+                    upsert: true
+                  })
 
-          if (uploadError) {
-            throw new Error(`Supabase upload failed: ${uploadError.message}`)
+                if (uploadError) {
+                  throw new Error(`Supabase upload failed: ${uploadError.message}`)
+                }
+                
+                // 공개 URL 생성
+                const { data: urlData } = supabase.storage
+                  .from(bucketName)
+                  .getPublicUrl(filePath)
+                
+                uploadedUrl = urlData.publicUrl
+                uploadSuccess = true
+                console.log(`✅ 프록시를 통한 업로드 성공 (시도 ${uploadAttempt}/${maxUploadRetries}): ${uploadedUrl}`)
+                break
+              } catch (uploadErr) {
+                console.warn(`⚠️ Supabase 업로드 실패 (시도 ${uploadAttempt}/${maxUploadRetries}): ${uploadErr.message}`)
+                if (uploadAttempt < maxUploadRetries) {
+                  const waitTime = uploadAttempt * 1000
+                  console.log(`⏳ ${waitTime}ms 후 재시도...`)
+                  await new Promise(resolve => setTimeout(resolve, waitTime))
+                } else {
+                  throw uploadErr
+                }
+              }
+            }
+            
+            if (!uploadSuccess || !uploadedUrl) {
+              throw new Error('Supabase 업로드 실패')
+            }
+            
+            // part_images 동기화
+            await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName, elementId })
+            
+            return {
+              originalUrl: imageUrl,
+              uploadedUrl: uploadedUrl,
+              filename: fileName,
+              path: filePath
+            }
+          } catch (proxyErr) {
+            lastProxyError = proxyErr
+            console.warn(`⚠️ 프록시 다운로드 실패 (시도 ${attempt}/${maxProxyRetries}): ${proxyErr.message}`)
+            
+            if (attempt < maxProxyRetries) {
+              const waitTime = attempt * 1000
+              console.log(`⏳ ${waitTime}ms 후 재시도...`)
+              await new Promise(resolve => setTimeout(resolve, waitTime))
+              continue
+            }
           }
-          
-          // 공개 URL 생성
-          const { data: urlData } = supabase.storage
-            .from(bucketName)
-            .getPublicUrl(filePath)
-          
-          const uploadedUrl = urlData.publicUrl
-          console.log(`✅ 프록시를 통한 업로드 성공: ${uploadedUrl}`)
-          
-          // part_images 동기화
-          await upsertPartImage({ partNum, colorId, uploadedUrl, filename: fileName, elementId })
-          
-          return {
-            originalUrl: imageUrl,
-            uploadedUrl: uploadedUrl,
-            filename: fileName,
-            path: filePath
-          }
-        } catch (serverErr) {
-          console.warn('프록시 업로드 실패, 로컬 저장소 사용:', serverErr.message)
-          
-          // 대체 방법 2: 로컬 저장소에 이미지 정보 저장
-          const localResult = await saveImageLocally(imageUrl, originalFilename, uploadPath)
-          
-          return {
-            originalUrl: imageUrl,
-            uploadedUrl: localResult.url,
-            filename: originalFilename,
-            path: uploadPath,
-            isLocal: true
-          }
+        }
+        
+        // 모든 프록시 시도 실패 시 로컬 저장소 사용
+        console.warn('프록시 업로드 완전 실패, 로컬 저장소 사용:', lastProxyError?.message)
+        
+        // 대체 방법: 로컬 저장소에 이미지 정보 저장
+        const localResult = await saveImageLocally(imageUrl, originalFilename, uploadPath)
+        
+        return {
+          originalUrl: imageUrl,
+          uploadedUrl: localResult.url,
+          filename: originalFilename,
+          path: uploadPath,
+          isLocal: true
         }
       }
     } catch (err) {
@@ -601,72 +838,101 @@ export function useImageManager() {
           console.warn('Bucket check failed, but attempting upload anyway:', err.message)
         }
 
-        // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드
+        // Supabase Storage 사용: 먼저 이미지를 다운로드한 후 업로드 (재시도 포함)
         let response
         let downloadMethod = 'unknown'
+        const maxDownloadRetries = 3
+        let lastDownloadError = null
         
-        try {
-          // 1. Vite 프록시를 통한 다운로드 (CORS 문제 해결)
-          if (imageUrl.includes('cdn.rebrickable.com')) {
-            try {
-              // Vite 프록시를 통해 Rebrickable CDN 접근
-              const proxyUrl = imageUrl.replace('https://cdn.rebrickable.com', '/api/proxy')
-              response = await fetch(proxyUrl, {
+        for (let attempt = 1; attempt <= maxDownloadRetries; attempt++) {
+          try {
+            console.log(`📥 이미지 다운로드 시도 ${attempt}/${maxDownloadRetries}: ${imageUrl}`)
+            
+            // 1. Vite 프록시를 통한 다운로드 (CORS 문제 해결)
+            if (imageUrl.includes('cdn.rebrickable.com')) {
+              try {
+                // Vite 프록시를 통해 Rebrickable CDN 접근
+                const proxyUrl = imageUrl.replace('https://cdn.rebrickable.com', '/api/proxy')
+                response = await fetch(proxyUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Accept': 'image/*',
+                    'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+                  }
+                })
+                
+                if (response.ok) {
+                  downloadMethod = 'vite_proxy'
+                  console.log(`✅ Vite 프록시 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
+                  break
+                } else {
+                  console.warn(`⚠️ Vite 프록시 다운로드 실패: ${response.status}`)
+                }
+              } catch (proxyError) {
+                console.warn(`⚠️ Vite 프록시 서버 오류: ${proxyError.message}`)
+              }
+            }
+            
+            // 2. API 프록시 서버를 통한 다운로드 (fallback)
+            if (!response || !response.ok) {
+              try {
+                const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
+                response = await fetch(proxyUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Accept': 'image/webp',
+                    'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+                  }
+                })
+                
+                if (response.ok) {
+                  downloadMethod = 'api_proxy'
+                  console.log(`✅ API 프록시 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
+                  break
+                } else {
+                  console.warn(`⚠️ API 프록시 다운로드 실패: ${response.status}`)
+                }
+              } catch (proxyError) {
+                console.warn(`⚠️ API 프록시 서버 오류: ${proxyError.message}`)
+              }
+            }
+            
+            // 3. 직접 다운로드 시도 (최종 fallback)
+            if (!response || !response.ok) {
+              console.log(`🔄 직접 다운로드 시도: ${imageUrl}`)
+              response = await fetch(imageUrl, {
                 method: 'GET',
+                mode: 'cors',
                 headers: {
                   'Accept': 'image/*',
                   'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
                 }
               })
-              
               if (response.ok) {
-                downloadMethod = 'vite_proxy'
-                console.log(`✅ Vite 프록시 다운로드 성공`)
+                downloadMethod = 'direct'
+                console.log(`✅ 직접 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
+                break
               } else {
-                console.warn(`⚠️ Vite 프록시 다운로드 실패: ${response.status}`)
+                throw new Error(`모든 다운로드 방법 실패: ${response.status}`)
               }
-            } catch (proxyError) {
-              console.warn(`⚠️ Vite 프록시 서버 오류: ${proxyError.message}`)
             }
-          }
-          
-          // 2. API 프록시 서버를 통한 다운로드 (fallback)
-          if (!response || !response.ok) {
-            try {
-              const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(imageUrl)}`
-              response = await fetch(proxyUrl, {
-                method: 'GET',
-                headers: {
-                  'Accept': 'image/*',
-                  'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
-                }
-              })
-              
-              if (response.ok) {
-                downloadMethod = 'api_proxy'
-                console.log(`✅ API 프록시 다운로드 성공`)
-              } else {
-                console.warn(`⚠️ API 프록시 다운로드 실패: ${response.status}`)
-              }
-            } catch (proxyError) {
-              console.warn(`⚠️ API 프록시 서버 오류: ${proxyError.message}`)
-            }
-          }
-          
-          // 3. 직접 다운로드 시도 (최종 fallback)
-          if (!response || !response.ok) {
-            console.log(`🔄 직접 다운로드 시도: ${imageUrl}`)
-            response = await fetch(imageUrl)
-            if (response.ok) {
-              downloadMethod = 'direct'
-              console.log(`✅ 직접 다운로드 성공`)
+          } catch (downloadErr) {
+            lastDownloadError = downloadErr
+            console.warn(`⚠️ 다운로드 시도 ${attempt} 실패: ${downloadErr.message}`)
+            
+            if (attempt < maxDownloadRetries) {
+              const waitTime = attempt * 1000
+              console.log(`⏳ ${waitTime}ms 후 재시도...`)
+              await new Promise(resolve => setTimeout(resolve, waitTime))
+              continue
             } else {
-              throw new Error(`모든 다운로드 방법 실패: ${response.status}`)
+              throw new Error(`이미지 다운로드 실패 (${maxDownloadRetries}회 시도): ${lastDownloadError.message}`)
             }
           }
-        } catch (downloadErr) {
-          console.warn('모든 다운로드 방법 실패:', downloadErr.message)
-          throw new Error(`이미지 다운로드 실패: ${downloadErr.message}`)
+        }
+        
+        if (!response || !response.ok) {
+          throw new Error(`이미지 다운로드 실패: ${lastDownloadError?.message || '알 수 없는 오류'}`)
         }
         
         const blob = await response.blob()
@@ -719,31 +985,57 @@ export function useImageManager() {
         // 세트 이미지는 lego_sets_images 폴더에, 부품 이미지는 images 폴더에 저장
         const filePath = uploadPath === 'lego_sets_images' ? `lego_sets_images/${fileName}` : `images/${fileName}`
         
-        // 중복 파일 처리: 덮어쓰기 옵션 사용
-        console.log(`📤 Supabase Storage 업로드 시도: ${filePath} (bucket: ${bucketName})`)
-        console.log(`📤 File size: ${file.size} bytes`)
-        console.log(`📤 File type: ${file.type}`)
-        console.log(`📤 Upload path: ${uploadPath}`)
+        // 중복 파일 처리: 덮어쓰기 옵션 사용 (재시도 포함)
+        const maxUploadRetries = 3
+        let uploadSuccess = false
+        let uploadData = null
         
-        const { data, error: uploadError } = await supabase.storage
-          .from(bucketName)
-          .upload(filePath, file, {
-            upsert: true // 파일이 이미 존재하면 덮어쓰기
-          })
+        for (let attempt = 1; attempt <= maxUploadRetries; attempt++) {
+          try {
+            console.log(`📤 Supabase Storage 업로드 시도 ${attempt}/${maxUploadRetries}: ${filePath} (bucket: ${bucketName})`)
+            console.log(`📤 File size: ${file.size} bytes`)
+            console.log(`📤 File type: ${file.type}`)
+            console.log(`📤 Upload path: ${uploadPath}`)
+            
+            const { data, error: uploadError } = await supabase.storage
+              .from(bucketName)
+              .upload(filePath, file, {
+                upsert: true // 파일이 이미 존재하면 덮어쓰기
+              })
 
-        if (uploadError) {
-          console.error(`❌ Supabase 업로드 실패:`, uploadError)
-          console.error(`❌ Upload details:`, {
-            bucket: bucketName,
-            filePath: filePath,
-            fileSize: file.size,
-            fileType: file.type,
-            uploadPath: uploadPath
-          })
-          throw new Error(`Supabase upload failed: ${uploadError.message}`)
+            if (uploadError) {
+              throw new Error(`Supabase upload failed: ${uploadError.message}`)
+            }
+            
+            uploadData = data
+            uploadSuccess = true
+            console.log(`✅ Supabase 업로드 성공 (시도 ${attempt}/${maxUploadRetries}):`, data)
+            break
+          } catch (uploadErr) {
+            console.warn(`⚠️ Supabase 업로드 실패 (시도 ${attempt}/${maxUploadRetries}): ${uploadErr.message}`)
+            console.warn(`⚠️ Upload details:`, {
+              bucket: bucketName,
+              filePath: filePath,
+              fileSize: file.size,
+              fileType: file.type,
+              uploadPath: uploadPath
+            })
+            
+            if (attempt < maxUploadRetries) {
+              const waitTime = attempt * 1000
+              console.log(`⏳ ${waitTime}ms 후 재시도...`)
+              await new Promise(resolve => setTimeout(resolve, waitTime))
+              continue
+            } else {
+              console.error(`❌ 모든 Supabase 업로드 시도 실패:`, uploadErr)
+              throw uploadErr
+            }
+          }
         }
         
-        console.log(`✅ Supabase 업로드 성공:`, data)
+        if (!uploadSuccess || !uploadData) {
+          throw new Error('Supabase 업로드 실패')
+        }
 
         // 공개 URL 생성
         const { data: urlData } = supabase.storage
@@ -801,19 +1093,56 @@ export function useImageManager() {
   // 이미지 메타데이터를 Supabase에 저장
   const saveImageMetadata = async (imageData) => {
     try {
+      console.log(`[ImageManager] saveImageMetadata 호출:`, {
+        part_num: imageData.part_num,
+        color_id: imageData.color_id,
+        element_id: imageData.element_id || '없음',
+        file_name: imageData.file_name
+      })
+      
       // element_id가 있으면 String으로 변환하여 일관성 유지
+      // element_id 컬럼이 없을 수 있으므로 조건부로 추가
       const metadataPayload = {
-        ...imageData,
-        ...(imageData.element_id && { element_id: String(imageData.element_id) })
+        original_url: imageData.original_url,
+        supabase_url: imageData.supabase_url,
+        file_path: imageData.file_path,
+        file_name: imageData.file_name,
+        part_num: imageData.part_num,
+        color_id: imageData.color_id,
+        ...(imageData.set_num && { set_num: imageData.set_num })
       }
+      
+      // element_id가 있으면 추가 (컬럼이 존재하는 경우에만)
+      if (imageData.element_id) {
+        metadataPayload.element_id = String(imageData.element_id)
+      }
+      
       const { error } = await supabase
         .from('image_metadata')
         .insert([metadataPayload], { returning: 'minimal' })
 
       if (error) {
+        // element_id 컬럼이 없는 경우 에러를 무시하고 계속 진행
+        if (error.message && error.message.includes('element_id')) {
+          console.warn(`[ImageManager] image_metadata 테이블에 element_id 컬럼이 없습니다. 마이그레이션을 실행해주세요: ${error.message}`)
+          // element_id 없이 다시 시도
+          delete metadataPayload.element_id
+          const { error: retryError } = await supabase
+            .from('image_metadata')
+            .insert([metadataPayload], { returning: 'minimal' })
+          
+          if (retryError) {
+            console.error(`[ImageManager] image_metadata 저장 실패 (재시도):`, retryError)
+            throw new Error(`Failed to save image metadata: ${retryError.message}`)
+          }
+          console.log(`[ImageManager] ✅ image_metadata 저장 완료 (element_id 제외): ${imageData.file_name}`)
+          return true
+        }
+        console.error(`[ImageManager] image_metadata 저장 실패:`, error)
         throw new Error(`Failed to save image metadata: ${error.message}`)
       }
 
+      console.log(`[ImageManager] ✅ image_metadata 저장 완료: ${imageData.file_name}`)
       return true
     } catch (err) {
       error.value = err.message
@@ -821,7 +1150,7 @@ export function useImageManager() {
     }
   }
 
-  // 업로드 직후 part_images 테이블에 동기화 (트리거 없이 앱 레벨에서 처리)
+  // 업로드 직후 part_images 테이블에 동기화 (트리거 없이 앱 레벨에서 처리, 색상 불일치 처리 포함)
   const upsertPartImage = async ({ partNum, colorId, uploadedUrl, filename, elementId }) => {
     try {
       if (!partNum || typeof colorId !== 'number' || !uploadedUrl) return
@@ -836,7 +1165,34 @@ export function useImageManager() {
         ...(elementId && { element_id: String(elementId) }) // element_id가 있으면 추가
       }
 
-      // 1) element_id가 있으면 element_id로 먼저 조회/업데이트 시도
+      // 색상 불일치 확인: element_id가 있으면 기존 레코드의 color_id 확인
+      if (elementId) {
+        const { data: existingImage, error: checkError } = await supabase
+          .from('part_images')
+          .select('color_id')
+          .eq('element_id', String(elementId))
+          .maybeSingle()
+        
+        if (!checkError && existingImage && existingImage.color_id !== colorId) {
+          console.warn(`⚠️ 색상 불일치 감지: element_id ${elementId}의 기존 색상(${existingImage.color_id})과 새 색상(${colorId})이 다릅니다.`)
+          console.warn(`⚠️ 기존 레코드 삭제 후 새로 삽입합니다.`)
+          
+          // 색상 불일치 시 기존 레코드 삭제
+          const { error: deleteError } = await supabase
+            .from('part_images')
+            .delete()
+            .eq('element_id', String(elementId))
+            .neq('color_id', colorId) // 다른 color_id만 삭제
+          
+          if (deleteError) {
+            console.warn(`⚠️ 색상 불일치 레코드 삭제 실패: ${deleteError.message}`)
+          } else {
+            console.log(`✅ 색상 불일치 레코드 삭제 완료: element_id ${elementId}`)
+          }
+        }
+      }
+
+      // 1) element_id가 있으면 element_id + color_id로 조회/업데이트 시도 (정확한 매칭)
       let updated = null
       let updateError = null
       
@@ -845,11 +1201,12 @@ export function useImageManager() {
           .from('part_images')
           .update(payload)
           .eq('element_id', String(elementId))
+          .eq('color_id', colorId) // color_id도 함께 확인
           .select('part_id')
         
         if (!elementUpdateError && updatedByElement && updatedByElement.length > 0) {
           updated = updatedByElement
-          console.log(`part_images updated by element_id: ${elementId}`)
+          console.log(`part_images updated by element_id + color_id: ${elementId}_${colorId}`)
         } else if (elementUpdateError) {
           updateError = elementUpdateError
         }
@@ -973,6 +1330,8 @@ export function useImageManager() {
     extractOriginalFilename,
     checkPartImageDuplicate,
     checkPartImageDuplicateByElementId,
+    checkPartImageDuplicateByElementIdAndColor,
+    upsertPartImage,
     // ✅ 캐시 관리 함수 추가
     clearImageCache: () => imageDuplicateCache.clear(),
     getImageCacheSize: () => imageDuplicateCache.size,

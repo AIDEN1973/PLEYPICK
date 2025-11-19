@@ -87,6 +87,13 @@ app.get('/api/upload/proxy-image', async (req, res) => {
     if (!sourceUrl) return res.status(400).json({ error: 'url query required' })
 
     console.log(`🖼️ Rebrickable 이미지 → WebP 변환 요청: ${sourceUrl}`)
+    
+    // URL 검증: element_id 추출 및 로깅
+    const elementIdMatch = sourceUrl.match(/\/elements\/(\d+)\.jpg/)
+    if (elementIdMatch) {
+      const elementId = elementIdMatch[1]
+      console.log(`📋 URL에서 추출한 Element ID: ${elementId}`)
+    }
 
     const resp = await fetch(sourceUrl, { 
       headers: { 
@@ -96,12 +103,16 @@ app.get('/api/upload/proxy-image', async (req, res) => {
     })
     
     if (!resp.ok) {
-      console.error(`❌ 원본 이미지 다운로드 실패: ${resp.status}`)
+      console.error(`❌ 원본 이미지 다운로드 실패: ${resp.status} (URL: ${sourceUrl})`)
       return res.status(resp.status).json({ error: 'source fetch failed' })
     }
+    
+    console.log(`✅ 원본 이미지 다운로드 성공: ${resp.status} (URL: ${sourceUrl})`)
 
     const arr = await resp.arrayBuffer()
     const buffer = Buffer.from(arr)
+    
+    console.log(`📦 다운로드된 이미지 크기: ${buffer.length} bytes`)
 
     // WebP 변환
     const webp = await sharp(buffer)

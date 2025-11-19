@@ -237,6 +237,30 @@
 | public       | inference_results_detailed      | output_bbox_count             | integer                     | YES         | null                                                       |
 | public       | inference_results_detailed      | detected_classes              | ARRAY                       | YES         | null                                                       |
 | public       | inference_results_detailed      | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | inspection_items                | id                            | uuid                        | NO          | gen_random_uuid()                                          |
+| public       | inspection_items                | session_id                    | uuid                        | NO          | null                                                       |
+| public       | inspection_items                | part_id                       | character varying           | NO          | null                                                       |
+| public       | inspection_items                | color_id                      | integer                     | NO          | null                                                       |
+| public       | inspection_items                | element_id                    | character varying           | YES         | null                                                       |
+| public       | inspection_items                | checked_count                 | integer                     | YES         | 0                                                          |
+| public       | inspection_items                | total_count                   | integer                     | NO          | null                                                       |
+| public       | inspection_items                | status                        | character varying           | NO          | 'pending'::character varying                               |
+| public       | inspection_items                | notes                         | text                        | YES         | null                                                       |
+| public       | inspection_items                | is_dirty                      | boolean                     | YES         | true                                                       |
+| public       | inspection_items                | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | inspection_items                | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | inspection_sessions             | id                            | uuid                        | NO          | gen_random_uuid()                                          |
+| public       | inspection_sessions             | set_id                        | uuid                        | NO          | null                                                       |
+| public       | inspection_sessions             | user_id                       | uuid                        | NO          | null                                                       |
+| public       | inspection_sessions             | status                        | character varying           | NO          | 'in_progress'::character varying                           |
+| public       | inspection_sessions             | progress                      | real                        | YES         | 0.0                                                        |
+| public       | inspection_sessions             | started_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | inspection_sessions             | last_saved_at                 | timestamp with time zone    | YES         | null                                                       |
+| public       | inspection_sessions             | completed_at                  | timestamp with time zone    | YES         | null                                                       |
+| public       | inspection_sessions             | is_synced                     | boolean                     | YES         | false                                                      |
+| public       | inspection_sessions             | device_local_id               | character varying           | YES         | null                                                       |
+| public       | inspection_sessions             | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | inspection_sessions             | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
 | public       | inventory_items                 | id                            | integer                     | NO          | nextval('inventory_items_id_seq'::regclass)                |
 | public       | inventory_items                 | part_id                       | character varying           | NO          | null                                                       |
 | public       | inventory_items                 | quantity                      | integer                     | NO          | 0                                                          |
@@ -625,8 +649,8 @@
 | public       | parts_master_features           | external_storage              | text                        | YES         | null                                                       |
 | public       | parts_master_features           | batch_id                      | text                        | YES         | null                                                       |
 | public       | parts_master_features           | image_embedding               | USER-DEFINED                | YES         | null                                                       |
-| public       | parts_master_features           | semantic_vector               | ARRAY                       | YES         | null                                                       |
-| public       | parts_master_features           | clip_text_emb                 | ARRAY                       | YES         | null                                                       |
+| public       | parts_master_features           | clip_text_emb                 | USER-DEFINED                | YES         | null                                                       |
+| public       | parts_master_features           | semantic_vector               | USER-DEFINED                | YES         | null                                                       |
 | public       | parts_master_features_stats     | total_parts                   | bigint                      | YES         | null                                                       |
 | public       | parts_master_features_stats     | unique_parts                  | bigint                      | YES         | null                                                       |
 | public       | parts_master_features_stats     | unique_colors                 | bigint                      | YES         | null                                                       |
@@ -831,18 +855,13 @@
 | public       | recognition_results             | processing_time_ms            | integer                     | YES         | 0                                                          |
 | public       | recognition_results             | model_version                 | character varying           | YES         | null                                                       |
 | public       | recognition_results             | created_at                    | timestamp with time zone    | YES         | now()                                                      |
-| public       | rendering_logs                  | id                            | integer                     | NO          | nextval('rendering_logs_id_seq'::regclass)                 |
-| public       | rendering_logs                  | created_at                    | timestamp with time zone    | YES         | now()                                                      |
-| public       | rendering_logs                  | rendering_speed               | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | image_count                   | integer                     | YES         | null                                                       |
-| public       | rendering_logs                  | total_size_mb                 | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | avg_processing_time           | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | success_rate                  | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | error_count                   | integer                     | YES         | null                                                       |
-| public       | rendering_logs                  | render_quality                | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | gpu_memory_usage              | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | cpu_usage                     | numeric                     | YES         | null                                                       |
-| public       | rendering_logs                  | notes                         | text                        | YES         | null                                                       |
+| public       | render_queue                    | id                            | bigint                      | NO          | nextval('render_queue_id_seq'::regclass)                   |
+| public       | render_queue                    | pair_uid                      | text                        | NO          | null                                                       |
+| public       | render_queue                    | part_id                       | text                        | NO          | null                                                       |
+| public       | render_queue                    | reason                        | text                        | NO          | null                                                       |
+| public       | render_queue                    | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | render_queue                    | processed_at                  | timestamp with time zone    | YES         | null                                                       |
+| public       | render_queue                    | status                        | text                        | YES         | 'pending'::text                                            |
 | public       | rendering_jobs                  | id                            | bigint                      | NO          | nextval('rendering_jobs_id_seq'::regclass)                 |
 | public       | rendering_jobs                  | element_id                    | character varying           | YES         | null                                                       |
 | public       | rendering_jobs                  | part_id                       | character varying           | NO          | null                                                       |
@@ -859,15 +878,18 @@
 | public       | rendering_jobs                  | completed_at                  | timestamp with time zone    | YES         | null                                                       |
 | public       | rendering_jobs                  | created_at                    | timestamp with time zone    | YES         | now()                                                      |
 | public       | rendering_jobs                  | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
-| public       | validation_cache                | id                            | bigint                      | NO          | nextval('validation_cache_id_seq'::regclass)               |
-| public       | validation_cache                | dataset_path                  | character varying           | NO          | null                                                       |
-| public       | validation_cache                | file_path                     | character varying           | NO          | null                                                       |
-| public       | validation_cache                | file_hash                     | character varying           | NO          | null                                                       |
-| public       | validation_cache                | file_type                     | character varying           | YES         | null                                                       |
-| public       | validation_cache                | validation_result             | jsonb                       | NO          | '{}'::jsonb                                                |
-| public       | validation_cache                | is_valid                      | boolean                     | NO          | true                                                       |
-| public       | validation_cache                | created_at                    | timestamp with time zone    | YES         | now()                                                      |
-| public       | validation_cache                | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | rendering_logs                  | id                            | integer                     | NO          | nextval('rendering_logs_id_seq'::regclass)                 |
+| public       | rendering_logs                  | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | rendering_logs                  | rendering_speed               | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | image_count                   | integer                     | YES         | null                                                       |
+| public       | rendering_logs                  | total_size_mb                 | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | avg_processing_time           | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | success_rate                  | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | error_count                   | integer                     | YES         | null                                                       |
+| public       | rendering_logs                  | render_quality                | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | gpu_memory_usage              | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | cpu_usage                     | numeric                     | YES         | null                                                       |
+| public       | rendering_logs                  | notes                         | text                        | YES         | null                                                       |
 | public       | set_images                      | id                            | bigint                      | NO          | nextval('set_images_id_seq'::regclass)                     |
 | public       | set_images                      | set_num                       | character varying           | NO          | null                                                       |
 | public       | set_images                      | original_url                  | text                        | YES         | null                                                       |
@@ -877,6 +899,14 @@
 | public       | set_images                      | set_id                        | uuid                        | YES         | null                                                       |
 | public       | set_images                      | created_at                    | timestamp with time zone    | NO          | now()                                                      |
 | public       | set_images                      | updated_at                    | timestamp with time zone    | NO          | now()                                                      |
+| public       | set_inspection_notes            | id                            | uuid                        | NO          | gen_random_uuid()                                          |
+| public       | set_inspection_notes            | set_id                        | uuid                        | NO          | null                                                       |
+| public       | set_inspection_notes            | part_id                       | character varying           | YES         | null                                                       |
+| public       | set_inspection_notes            | note_type                     | character varying           | NO          | null                                                       |
+| public       | set_inspection_notes            | note_text                     | text                        | NO          | null                                                       |
+| public       | set_inspection_notes            | created_by                    | uuid                        | NO          | null                                                       |
+| public       | set_inspection_notes            | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | set_inspection_notes            | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
 | public       | set_parts                       | id                            | uuid                        | NO          | gen_random_uuid()                                          |
 | public       | set_parts                       | set_id                        | uuid                        | YES         | null                                                       |
 | public       | set_parts                       | part_id                       | character varying           | YES         | null                                                       |
@@ -1151,19 +1181,12 @@
 | public       | v_embedding_queue               | recognition_hints             | jsonb                       | YES         | null                                                       |
 | public       | v_embedding_queue               | updated_at                    | timestamp without time zone | YES         | null                                                       |
 | public       | v_embedding_queue               | age_seconds                   | numeric                     | YES         | null                                                       |
-| public       | v_embedding_status              | id                            | integer                     | YES         | null                                                       |
 | public       | v_embedding_status              | part_id                       | character varying           | YES         | null                                                       |
-| public       | v_embedding_status              | part_name                     | character varying           | YES         | null                                                       |
 | public       | v_embedding_status              | color_id                      | integer                     | YES         | null                                                       |
-| public       | v_embedding_status              | color_name                    | character varying           | YES         | null                                                       |
-| public       | v_embedding_status              | color_rgb                     | character varying           | YES         | null                                                       |
-| public       | v_embedding_status              | clip_text_emb                 | ARRAY                       | YES         | null                                                       |
-| public       | v_embedding_status              | feature_text                  | text                        | YES         | null                                                       |
-| public       | v_embedding_status              | confidence                    | double precision            | YES         | null                                                       |
-| public       | v_embedding_status              | created_at                    | timestamp without time zone | YES         | null                                                       |
-| public       | v_embedding_status              | updated_at                    | timestamp without time zone | YES         | null                                                       |
 | public       | v_embedding_status              | embedding_status              | text                        | YES         | null                                                       |
-| public       | v_embedding_status              | embedding_dimension           | integer                     | YES         | null                                                       |
+| public       | v_embedding_status              | has_clip                      | integer                     | YES         | null                                                       |
+| public       | v_embedding_status              | has_semantic                  | integer                     | YES         | null                                                       |
+| public       | v_embedding_status              | updated_at                    | timestamp without time zone | YES         | null                                                       |
 | public       | v_error_recovery_summary        | metric_date                   | date                        | YES         | null                                                       |
 | public       | v_error_recovery_summary        | operation_type                | character varying           | YES         | null                                                       |
 | public       | v_error_recovery_summary        | error_category                | character varying           | YES         | null                                                       |
@@ -1391,6 +1414,15 @@
 | public       | v_vector_statistics             | validated_vectors             | bigint                      | YES         | null                                                       |
 | public       | v_vector_statistics             | oldest_vector                 | timestamp without time zone | YES         | null                                                       |
 | public       | v_vector_statistics             | newest_vector                 | timestamp without time zone | YES         | null                                                       |
+| public       | validation_cache                | id                            | bigint                      | NO          | nextval('validation_cache_id_seq'::regclass)               |
+| public       | validation_cache                | dataset_path                  | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_path                     | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_hash                     | character varying           | NO          | null                                                       |
+| public       | validation_cache                | file_type                     | character varying           | YES         | null                                                       |
+| public       | validation_cache                | validation_result             | jsonb                       | NO          | '{}'::jsonb                                                |
+| public       | validation_cache                | is_valid                      | boolean                     | NO          | true                                                       |
+| public       | validation_cache                | created_at                    | timestamp with time zone    | YES         | now()                                                      |
+| public       | validation_cache                | updated_at                    | timestamp with time zone    | YES         | now()                                                      |
 | public       | validation_samples              | id                            | integer                     | NO          | nextval('validation_samples_id_seq'::regclass)             |
 | public       | validation_samples              | image_path                    | character varying           | NO          | null                                                       |
 | public       | validation_samples              | ground_truth                  | character varying           | NO          | null                                                       |

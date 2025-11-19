@@ -74,12 +74,14 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 
 export default {
   name: 'Login',
   setup() {
     const router = useRouter()
-    const { signIn, signUp } = useSupabase()
+    const { signIn, signUp, supabase } = useSupabase()
+    const { getStoreInfoByEmail } = useSupabasePleyon()
     
     const email = ref('')
     const password = ref('')
@@ -97,10 +99,88 @@ export default {
       
       if (loginError) {
         error.value = loginError.message
+        loading.value = false
+        return
+      }
+
+      if (data?.user) {
+        // 관리자 확인
+        const { data: adminData } = await supabase
+          .from('admin_users')
+          .select('id, role, is_active, email')
+          .eq('email', data.user.email)
+          .eq('is_active', true)
+          .maybeSingle()
+
+        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
+
+        const storeInfo = await getStoreInfoByEmail(data.user.email)
+        if (storeInfo) {
+          const { store } = storeInfo
+          const { error: storeSyncError } = await supabase
+            .from('stores')
+            .upsert({
+              id: store.id,
+              name: store.name,
+              location: store.address || null,
+              contact: store.store_phone || store.owner_phone || null,
+              status: store.is_active ? 'active' : 'inactive',
+              config: {
+                pleyon_store_id: store.id,
+                owner_name: store.store_owner_name,
+                owner_phone: store.owner_phone
+              },
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'id'
+            })
+
+          if (storeSyncError) {
+            console.error('[Login] 매장 정보 동기화 실패:', storeSyncError)
+          } else {
+            // users 테이블 업데이트
+            const updateData = {
+              store_id: store.id,
+              updated_at: new Date().toISOString()
+            }
+            
+            // 관리자가 아니면 role 업데이트, 관리자면 role은 admin 유지
+            if (!isAdmin) {
+              updateData.role = storeInfo.storeUserRole === 'owner' ? 'store_owner' : 'store_manager'
+            } else {
+              updateData.role = 'admin'
+            }
+
+            const { error: userUpdateError } = await supabase
+              .from('users')
+              .update(updateData)
+              .eq('id', data.user.id)
+
+            if (userUpdateError) {
+              console.error('[Login] 사용자 정보 업데이트 실패:', userUpdateError)
+            } else {
+              console.log('[Login] 사용자 정보 업데이트 완료 (role:', updateData.role, ')')
+            }
+          }
+        } else if (isAdmin) {
+          // 관리자이지만 매장 정보가 없는 경우 role만 admin으로 업데이트
+          const { error: userUpdateError } = await supabase
+            .from('users')
+            .update({
+              role: 'admin',
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', data.user.id)
+
+          if (userUpdateError) {
+            console.error('[Login] 관리자 role 업데이트 실패:', userUpdateError)
       } else {
-        router.push('/dashboard')
+            console.log('[Login] 관리자 role 업데이트 완료')
+          }
+        }
       }
       
+      router.push('/dashboard')
       loading.value = false
     }
 
@@ -108,17 +188,74 @@ export default {
       loading.value = true
       error.value = ''
       success.value = ''
+
+      const emailToCheck = signupEmail.value.trim()
+      if (!emailToCheck) {
+        error.value = '이메일을 입력해주세요.'
+        loading.value = false
+        return
+      }
+
+      const storeInfo = await getStoreInfoByEmail(emailToCheck)
       
       const { data, error: signupError } = await signUp(signupEmail.value, signupPassword.value)
       
       if (signupError) {
         error.value = signupError.message
+        loading.value = false
+        return
+      }
+
+      if (data?.user && storeInfo) {
+        const { store } = storeInfo
+        const { error: storeSyncError } = await supabase
+          .from('stores')
+          .upsert({
+            id: store.id,
+            name: store.name,
+            location: store.address || null,
+            contact: store.store_phone || store.owner_phone || null,
+            status: store.is_active ? 'active' : 'inactive',
+            config: {
+              pleyon_store_id: store.id,
+              owner_name: store.store_owner_name,
+              owner_phone: store.owner_phone
+            },
+            registered_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          })
+
+        if (storeSyncError) {
+          console.error('[SignUp] 매장 정보 등록 실패:', storeSyncError)
+          error.value = '매장 정보 등록 중 오류가 발생했습니다.'
+          loading.value = false
+          return
+        }
+
+        // users 테이블의 store_id 업데이트
+        const { error: userUpdateError } = await supabase
+          .from('users')
+          .update({
+            store_id: store.id,
+            role: storeInfo.storeUserRole === 'owner' ? 'store_owner' : 'store_manager',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', data.user.id)
+
+        if (userUpdateError) {
+          console.error('[SignUp] 사용자 매장 정보 업데이트 실패:', userUpdateError)
+        } else {
+          console.log('[SignUp] 사용자 매장 정보 업데이트 완료')
+        }
+
+        success.value = '회원가입이 완료되었습니다! 매장 정보가 연동되었습니다.'
       } else {
         success.value = '회원가입이 완료되었습니다! 이메일을 확인해주세요.'
-        signupEmail.value = ''
-        signupPassword.value = ''
       }
       
+      signupEmail.value = ''
+      signupPassword.value = ''
       loading.value = false
     }
 

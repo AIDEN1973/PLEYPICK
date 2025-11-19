@@ -1,39 +1,60 @@
 <template>
   <div class="part-to-set-search-page">
-    <div class="page-header">
-      <h1>부품으로 세트찾기</h1>
-      <p>부품번호를 입력하여 해당 부품이 포함된 세트를 찾을 수 있습니다</p>
-    </div>
+    <div class="layout-container">
+      <div class="page-header">
+        <h1>부품으로 세트찾기</h1>
+        <p>부품번호를 입력하여 해당 부품이 포함된 세트를 찾을 수 있습니다</p>
+      </div>
 
-    <div class="search-content">
+      <div class="search-content">
       <div class="search-section">
         <div class="setup-card">
           <div class="card-body">
             <div class="form-group">
               <label for="element-id-input">부품번호를 입력하세요.</label>
-              <div class="set-search-input-row">
-                <div class="set-search-input-wrapper">
-                  <input
-                    id="element-id-input"
-                    v-model="elementIdInput"
-                    type="text"
-                    class="set-search-input"
-                    placeholder="예 : 306923"
-                    @keyup.enter="searchByElementId"
-                    :disabled="loading"
-                  />
-                  <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                    <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M14 14L11.1 11.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
+              <div class="set-search-wrapper">
+                <div class="set-search-input-row">
+                  <div class="set-search-input-wrapper">
+                    <input
+                      id="element-id-input"
+                      v-model="elementIdInput"
+                      type="text"
+                      class="set-search-input"
+                      placeholder="예 : 306923"
+                      @keyup.enter="searchByElementId"
+                      :disabled="loading"
+                    />
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M14 14L11.1 11.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                  <button
+                    @click="searchByElementId"
+                    class="search-button"
+                    :disabled="!elementIdInput || loading"
+                  >
+                    {{ loading ? '검색 중...' : '검색' }}
+                  </button>
                 </div>
-                <button
-                  @click="searchByElementId"
-                  class="search-button"
-                  :disabled="!elementIdInput || loading"
-                >
-                  {{ loading ? '검색 중...' : '검색' }}
-                </button>
+                <div v-if="searchResult" class="result-part-card">
+                  <div class="part-image-container">
+                    <img
+                      v-if="searchResult.part_image_url"
+                      :src="searchResult.part_image_url"
+                      :alt="searchResult.part_name"
+                      class="part-image"
+                      @error="handlePartImageError"
+                    />
+                    <div v-else class="no-part-image">이미지 없음</div>
+                  </div>
+                  <div class="part-info">
+                    <div v-if="searchResult.element_id" class="element-id-badge">
+                      {{ searchResult.element_id }}
+                    </div>
+                    <div class="part-name-text">{{ searchResult.part_name }}</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -45,25 +66,7 @@
       </div>
 
       <div v-if="searchResult" class="result-section">
-        <div class="result-header">
-          <h3>검색결과</h3>
-          <div class="result-info">
-            <div v-if="searchResult.part_image_url" class="result-part-image">
-              <img
-                :src="searchResult.part_image_url"
-                :alt="searchResult.part_name"
-                @error="handlePartImageError"
-              />
-            </div>
-            <div class="result-part-details">
-              <div v-if="searchResult.element_id" class="element-id-badge" :style="{ backgroundColor: getColorRgb(searchResult.color_rgb) || '#f3f4f6', color: getContrastColor(searchResult.color_rgb) }">
-                {{ searchResult.element_id }}
-              </div>
-              <span class="part-name">{{ searchResult.part_name }}</span>
-            </div>
-          </div>
-        </div>
-
+        <div class="result-header"><h3>검색결과</h3></div><!-- // 🔧 수정됨 -->
         <div v-if="searchResult.sets && searchResult.sets.length > 0" class="sets-grid">
           <div
             v-for="set in searchResult.sets"
@@ -102,26 +105,37 @@
                 :data-color-id="color.color_id"
                 @click="searchByAlternativeElementId(color.element_id)"
               >
-                <div class="part-image-container">
-                  <img
-                    v-if="color.image_url"
-                    :src="color.image_url"
-                    :alt="searchResult.alternatives[0].part_name"
-                    @error="handlePartImageError"
-                    class="part-image"
-                  />
-                  <div v-else class="no-part-image">이미지 없음</div>
-                </div>
-                <div class="part-info">
-                  <div v-if="color.element_id" class="element-id-badge" :style="{ backgroundColor: getColorRgb(color.rgb) || '#f3f4f6', color: getContrastColor(color.rgb) }">
-                    {{ color.element_id }}
+                <div class="card-header">
+                  <div class="part-info">
+                    <div v-if="color.element_id" class="element-id">{{ color.element_id }}</div>
+                    <h4 class="part-name">{{ searchResult.alternatives[0].part_name }}</h4>
+                    <span 
+                      class="color-badge"
+                      :style="{ 
+                        backgroundColor: getColorRgb(color.rgb) || '#ccc'
+                      }"
+                    >
+                      {{ color.name || color.color_id }}
+                    </span>
                   </div>
-                  <div class="part-name-text">{{ searchResult.alternatives[0].part_name }}</div>
+                </div>
+                <div class="card-body">
+                  <div class="part-image-section">
+                    <img
+                      v-if="color.image_url"
+                      :src="color.image_url"
+                      :alt="searchResult.alternatives[0].part_name"
+                      @error="handlePartImageError"
+                      class="part-image"
+                    />
+                    <div v-else class="no-part-image">이미지 없음</div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -173,22 +187,50 @@
         </div>
       </div>
     </div>
+    
+    <!-- 부품 정보 동기화 모달 -->
+    <SetPartsSyncModal
+      :show="showSyncModal"
+      :set-num="syncSetNum"
+      :syncing="syncing"
+      :sync-progress="syncProgress"
+      :sync-status="syncStatus"
+      :completed="syncCompleted"
+      :parts-count="syncPartsCount"
+      :error="syncError"
+      @confirm="handleSyncConfirm"
+      @cancel="handleSyncCancel"
+      @close="handleSyncClose"
+      @retry="handleSyncRetry"
+    />
   </div>
 </template>
 
 <script>
-import { ref } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router' // 🔧 수정됨
 import { useSupabase } from '../composables/useSupabase'
 import { usePartSearch } from '../composables/usePartSearch'
+import { usePleyonInventorySync } from '../composables/usePleyonInventorySync'
+import { useSupabasePleyon } from '../composables/useSupabasePleyon'
+import { useRebrickable } from '../composables/useRebrickable'
+import SetPartsSyncModal from '../components/SetPartsSyncModal.vue'
 import { formatSetDisplay } from '../utils/setDisplay'
 
 export default {
   name: 'PartToSetSearch',
+  components: {
+    SetPartsSyncModal
+  },
   setup() {
-    const { supabase } = useSupabase()
+    const { supabase, user } = useSupabase()
+    const route = useRoute() // 🔧 수정됨
     const { findSetsByPart, findAlternativeParts, loading } = usePartSearch()
+    const { checkSetPartsExist, syncSetParts, syncing, syncProgress, syncStatus, error: syncError } = usePleyonInventorySync()
+    const { getStoreInfoByEmail, getStoreInventory } = useSupabasePleyon()
 
     const elementIdInput = ref('')
+    const lastQuerySignature = ref('') // 🔧 수정됨
     const searchResult = ref(null)
     const error = ref(null)
     const showSetPartsModal = ref(false)
@@ -196,6 +238,94 @@ export default {
     const setParts = ref([])
     const setPartsLoading = ref(false)
     const setPartsError = ref(null)
+    
+    // 동기화 모달 관련
+    const showSyncModal = ref(false)
+    const syncSetNum = ref('')
+    const syncCompleted = ref(false)
+    const syncPartsCount = ref(0)
+    
+    // 매장 인벤토리 관련
+    const storeInventory = ref([])
+    const storeInfo = ref(null)
+    
+    // 매장 인벤토리 로드
+    const loadStoreInventory = async () => {
+      if (!user.value || !user.value.email) {
+        storeInfo.value = null
+        storeInventory.value = []
+        return
+      }
+
+      try {
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        if (storeData && storeData.store) {
+          storeInfo.value = storeData
+          const inventoryData = await getStoreInventory(storeData.store.id)
+          storeInventory.value = inventoryData || []
+          console.log('[PartToSetSearch] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
+        } else {
+          storeInfo.value = null
+          storeInventory.value = []
+        }
+      } catch (err) {
+        console.error('[PartToSetSearch] 매장 인벤토리 로드 실패:', err)
+        storeInfo.value = null
+        storeInventory.value = []
+      }
+    }
+    
+    const resolveElementIdByPart = async (partId, colorId = null) => { // 🔧 수정됨
+      if (!partId) return null // 🔧 수정됨
+      try {
+        let elementQuery = supabase
+          .from('set_parts')
+          .select('element_id')
+          .eq('part_id', partId)
+          .not('element_id', 'is', null)
+        
+        if (colorId !== null && colorId !== undefined) {
+          elementQuery = elementQuery.eq('color_id', colorId)
+        }
+        
+        const { data, error } = await elementQuery
+          .limit(1)
+          .maybeSingle()
+        
+        if (error) {
+          console.warn('[PartToSetSearch] element_id 조회 실패:', error)
+          return null
+        }
+        
+        return data?.element_id ? String(data.element_id) : null
+      } catch (err) {
+        console.error('[PartToSetSearch] element_id 해석 실패:', err)
+        return null
+      }
+    }
+    
+    // 매장 인벤토리의 세트 번호 목록 추출
+    const inventorySetNumbers = computed(() => {
+      if (storeInventory.value.length === 0) {
+        return new Set()
+      }
+      
+      return new Set(
+        storeInventory.value
+          .map(item => {
+            const legoSet = item.lego_sets
+            if (!legoSet) return null
+            if (Array.isArray(legoSet) && legoSet.length > 0) {
+              return legoSet[0].number
+            }
+            if (!Array.isArray(legoSet)) {
+              return legoSet.number
+            }
+            return null
+          })
+          .filter(Boolean)
+      )
+    })
 
     const searchByElementId = async () => {
       if (!elementIdInput.value.trim()) {
@@ -276,13 +406,42 @@ export default {
           }
         }
 
-        // part_images에서 찾지 못했으면 part_img_url 사용
+        // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
+        if (!partImageUrl && elementIdInput.value.trim()) {
+          try {
+            const { getElement } = useRebrickable()
+            const elementData = await getElement(elementIdInput.value.trim())
+            if (elementData?.element_img_url) {
+              partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
+            } else if (elementData?.part_img_url) {
+              partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+            }
+          } catch (elementErr) {
+            console.warn(`⚠️ element_id ${elementIdInput.value.trim()} 이미지 조회 실패:`, elementErr)
+          }
+        }
+
+        // element_id 실패 시 part_img_url 사용 (fallback)
         if (!partImageUrl && partInfo?.part_img_url) {
           partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
         }
 
         // 세트 찾기
-        const sets = await findSetsByPart(setPart.part_id, setPart.color_id)
+        const allSets = await findSetsByPart(setPart.part_id, setPart.color_id)
+        let sets = allSets
+        
+        // 매장 인벤토리가 있으면 매장 보유 세트만 필터링
+        if (inventorySetNumbers.value.size > 0) {
+          sets = allSets.filter(set => {
+            const setNum = set.set_num
+            // 세트 번호 정규화 (하이픈 제거하여 비교)
+            const normalizedSetNum = setNum.replace(/-.*$/, '')
+            return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
+          })
+          console.log(`[PartToSetSearch] 매장 보유 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개)`)
+        } else {
+          console.log('[PartToSetSearch] 매장 인벤토리가 없어 전체 세트 표시')
+        }
         
         // 유사부품 찾기
         const alternatives = await findAlternativeParts(setPart.part_id, setPart.color_id)
@@ -334,14 +493,47 @@ export default {
                 }
               }
 
-              // part_images에서 찾지 못했으면 part_img_url 사용
+              // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
+              if (!imageUrl && color.element_id) {
+                try {
+                  const { getElement } = useRebrickable()
+                  const elementData = await getElement(color.element_id)
+                  if (elementData?.element_img_url) {
+                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
+                  } else if (elementData?.part_img_url) {
+                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+                  }
+                } catch (elementErr) {
+                  console.warn(`⚠️ element_id ${color.element_id} 이미지 조회 실패:`, elementErr)
+                }
+              }
+
+              // part_images에서 찾지 못했으면 part_img_url 사용 (fallback)
               if (imageUrl) {
                 color.image_url = imageUrl
               } else if (alternatives[0].part_img_url) {
                 color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
               }
             } catch (err) {
-              if (alternatives[0].part_img_url) {
+              // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
+              if (color.element_id) {
+                try {
+                  const { getElement } = useRebrickable()
+                  const elementData = await getElement(color.element_id)
+                  if (elementData?.element_img_url) {
+                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
+                  } else if (elementData?.part_img_url) {
+                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+                  } else if (alternatives[0].part_img_url) {
+                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+                  }
+                } catch (elementErr) {
+                  console.warn(`⚠️ element_id ${color.element_id} 이미지 조회 실패:`, elementErr)
+                  if (alternatives[0].part_img_url) {
+                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+                  }
+                }
+              } else if (alternatives[0].part_img_url) {
                 color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
               }
             }
@@ -367,6 +559,24 @@ export default {
 
     const openSetPartsModal = async (set) => {
       selectedSet.value = set
+      
+      // 부품 정보가 있는지 확인
+      try {
+        const partsStatus = await checkSetPartsExist(set.set_num)
+        
+        if (!partsStatus.partsExist) {
+          // 부품 정보가 없으면 모달 표시
+          showSyncModal.value = true
+          syncSetNum.value = set.set_num
+          syncCompleted.value = false
+          syncPartsCount.value = 0
+          return
+        }
+      } catch (checkError) {
+        console.error(`[PartToSetSearch] 부품 정보 확인 실패:`, checkError)
+        // 확인 실패해도 계속 진행
+      }
+      
       showSetPartsModal.value = true
       setParts.value = []
       setPartsError.value = null
@@ -427,8 +637,39 @@ export default {
               if (!imgError && partImage?.uploaded_url) {
                 imageUrl = partImage.uploaded_url
               }
+
+              // part_images에 없으면 Storage에서 직접 확인
+              if (!imageUrl) {
+                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+                const fileName = `${String(part.element_id)}.webp`
+                const directUrl = `${supabaseUrl}/storage/v1/object/public/lego_parts_images/images/${fileName}`
+                try {
+                  const response = await fetch(directUrl, { method: 'HEAD' })
+                  if (response.ok) {
+                    imageUrl = directUrl
+                  }
+                } catch (fetchError) {
+                  // 파일이 없으면 무시
+                }
+              }
+              
+              // Storage에도 없으면 Rebrickable API에서 element_img_url 가져오기
+              if (!imageUrl) {
+                try {
+                  const { getElement } = useRebrickable()
+                  const elementData = await getElement(part.element_id)
+                  if (elementData?.element_img_url) {
+                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
+                  } else if (elementData?.part_img_url) {
+                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+                  }
+                } catch (elementErr) {
+                  console.warn(`⚠️ element_id ${part.element_id} 이미지 조회 실패:`, elementErr)
+                }
+              }
             }
 
+            // element_id 실패 시 part_img_url 사용 (fallback)
             if (!imageUrl && partInfo?.part_img_url) {
               imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
             }
@@ -470,11 +711,34 @@ export default {
       
       // 검색 결과로 스크롤
       setTimeout(() => {
-        const resultSection = document.querySelector('.result-section')
-        if (resultSection) {
-          resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
       }, 100)
+    }
+    
+    const searchByQueryParams = async () => { // 🔧 수정됨
+      const { element, element_id: elementIdAlias, part, color } = route.query // 🔧 수정됨
+      const signature = JSON.stringify({ element, elementIdAlias, part, color }) // 🔧 수정됨
+      if (signature === lastQuerySignature.value) return // 🔧 수정됨
+      lastQuerySignature.value = signature // 🔧 수정됨
+      
+      const elementParam = element ?? elementIdAlias // 🔧 수정됨
+      if (elementParam) { // 🔧 수정됨
+        const normalizedElementId = String(elementParam).trim() // 🔧 수정됨
+        if (normalizedElementId) { // 🔧 수정됨
+          elementIdInput.value = normalizedElementId // 🔧 수정됨
+          await searchByElementId() // 🔧 수정됨
+        }
+        return // 🔧 수정됨
+      }
+      
+      if (part) { // 🔧 수정됨
+        const normalizedPartId = String(part).trim() // 🔧 수정됨
+        if (!normalizedPartId) return // 🔧 수정됨
+        const resolvedElementId = await resolveElementIdByPart(normalizedPartId, color ?? null) // 🔧 수정됨
+        if (resolvedElementId) { // 🔧 수정됨
+          elementIdInput.value = resolvedElementId // 🔧 수정됨
+          await searchByElementId() // 🔧 수정됨
+        }
+      }
     }
 
     const handleImageError = (event) => {
@@ -532,6 +796,60 @@ export default {
       img.style.display = 'none'
     }
 
+    const handleSyncConfirm = async () => {
+      try {
+        syncCompleted.value = false
+        const result = await syncSetParts(syncSetNum.value, true)
+        if (result && result.success) {
+          syncCompleted.value = true
+          syncPartsCount.value = result.partsCount || 0
+        }
+      } catch (err) {
+        console.error('[PartToSetSearch] 동기화 실패:', err)
+      }
+    }
+    
+    const handleSyncClose = () => {
+      showSyncModal.value = false
+      syncSetNum.value = ''
+      syncCompleted.value = false
+      syncPartsCount.value = 0
+      if (selectedSet.value) {
+        openSetPartsModal(selectedSet.value)
+      }
+    }
+    
+    const handleSyncCancel = () => {
+      showSyncModal.value = false
+      syncSetNum.value = ''
+      syncCompleted.value = false
+      syncPartsCount.value = 0
+    }
+    
+    const handleSyncRetry = () => {
+      handleSyncConfirm()
+    }
+
+    // 사용자 변경 시 매장 인벤토리 로드
+    watch(user, async (newUser) => {
+      if (newUser) {
+        await loadStoreInventory()
+      } else {
+        storeInfo.value = null
+        storeInventory.value = []
+      }
+    }, { immediate: true })
+    
+    watch(() => route.query, () => { // 🔧 수정됨
+      searchByQueryParams() // 🔧 수정됨
+    }, { immediate: true }) // 🔧 수정됨
+    
+    onMounted(async () => {
+      if (user.value) {
+        await loadStoreInventory()
+      }
+    })
+
     return {
       elementIdInput,
       searchResult,
@@ -539,6 +857,18 @@ export default {
       loading,
       searchByElementId,
       openSetPartsModal,
+      showSyncModal,
+      syncSetNum,
+      syncing,
+      syncProgress,
+      syncStatus,
+      syncCompleted,
+      syncPartsCount,
+      syncError,
+      handleSyncConfirm,
+      handleSyncClose,
+      handleSyncCancel,
+      handleSyncRetry,
       closeSetPartsModal,
       searchByAlternativeElementId,
       handleImageError,
@@ -562,17 +892,25 @@ export default {
   background: #f9fafb;
   display: flex;
   flex-direction: column;
+  padding: 2rem;
+}
+
+.layout-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .page-header {
   margin-bottom: 2rem;
-  padding: 2rem 0 0 0;
+  padding: 0;
 }
 
 .search-content {
   flex: 1;
-  padding: 0 2rem 2rem 2rem;
+  padding: 0;
   overflow-y: auto;
+  width: 100%;
 }
 
 .page-header h1 {
@@ -741,38 +1079,40 @@ export default {
 }
 
 .result-section {
-  margin-top: 2rem;
-  max-width: 800px;
-  margin-left: auto;
-  margin-right: auto;
+  margin-top: 1.5rem;
+  width: 100%;
+  max-width: 100%;
 }
 
-.result-header {
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #e5e7eb;
-}
 
-.result-header h3 {
-  font-size: 1.25rem;
-  font-weight: bold;
-  color: #1f2937;
-  margin-bottom: 0.75rem;
-}
-
-.result-info {
+.set-search-wrapper {
+  position: relative;
   display: flex;
-  gap: 1rem;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.result-part-image {
-  width: 120px;
-  height: 120px;
-  background: #ffffff;
+.result-part-card {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.part-image-container {
+  width: 100px;
+  height: 100px;
+  min-width: 100px;
+  min-height: 100px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -780,30 +1120,60 @@ export default {
   flex-shrink: 0;
 }
 
-.result-part-image img {
+.part-image {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  display: block;
   padding: 0.5rem;
 }
 
-.result-part-details {
+.no-part-image {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0.5rem;
+  background: #f9fafb;
+}
+
+.part-info {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.25rem;
   flex: 1;
+  min-width: 0;
 }
 
-.result-info .element-id-badge {
-  margin-bottom: 0;
-  width: fit-content;
-  align-self: flex-start;
+.result-header {
+  margin-bottom: 1rem;
 }
 
-.part-name {
-  font-size: 1rem;
-  font-weight: 500;
+.result-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
   color: #1f2937;
+}
+/* // 🔧 수정됨 */
+
+.element-id-badge {
+  display: block;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.part-name-text {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #374151;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
 .part-color {
@@ -816,8 +1186,27 @@ export default {
 
 .sets-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .sets-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
 }
 
 @media (max-width: 1024px) {
@@ -834,6 +1223,9 @@ export default {
   overflow: hidden;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
 }
 
 .set-card:hover {
@@ -911,64 +1303,139 @@ export default {
 
 .alternative-parts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .alternative-parts-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .alternative-parts-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .alternative-parts-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
 }
 
 .alternative-part-card {
-  background: white;
+  background: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  overflow: hidden;
-  transition: transform 0.2s, box-shadow 0.2s;
+  border-radius: 12px;
+  padding: 1.25rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
   cursor: pointer;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .alternative-part-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-.part-image-container {
+.alternative-part-card .card-header {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.alternative-part-card .part-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  width: 0;
+}
+
+.alternative-part-card .element-id {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+
+.alternative-part-card .part-name {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #111827;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.alternative-part-card .color-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border: none;
+  width: fit-content;
+}
+
+.alternative-part-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.alternative-part-card .part-image-section {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem 0;
+  min-height: 120px;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.alternative-part-card .part-image {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.alternative-part-card .no-part-image {
   width: 100%;
   height: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-}
-
-.part-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  padding: 1rem;
-}
-
-.no-part-image {
   color: #9ca3af;
   font-size: 0.875rem;
-}
-
-.part-info {
-  padding: 1rem;
-}
-
-.element-id-badge {
-  display: inline-block;
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.875rem;
-  font-weight: bold;
-  margin-bottom: 0.75rem;
-}
-
-.part-name-text {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #1f2937;
-  margin-bottom: 0.75rem;
-  line-height: 1.4;
+  background: #f9fafb;
+  border-radius: 4px;
 }
 
 .color-badge {
@@ -1009,8 +1476,8 @@ export default {
     padding: 1rem 0 0 0;
   }
 
-  .search-content {
-    padding: 0 1.5rem 1.5rem 1.5rem;
+  .part-to-set-search-page {
+    padding: 1rem;
   }
 
   .search-section {
@@ -1066,8 +1533,49 @@ export default {
     font-size: 0.9375rem !important;
   }
 
-  .part-name-text {
-    font-size: 0.9375rem !important;
+  .alternative-part-card {
+    padding: 1rem;
+  }
+
+  .alternative-part-card .card-header {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: flex-start !important;
+    gap: 0.5rem !important;
+    overflow: visible !important;
+  }
+
+  .alternative-part-card .part-info {
+    width: auto !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    overflow: visible !important;
+  }
+
+  .alternative-part-card .part-name {
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    font-size: 0.875rem !important;
+  }
+
+  .alternative-part-card .element-id {
+    display: block !important;
+    font-size: 0.875rem !important;
+  }
+
+  .alternative-part-card .color-badge {
+    display: inline-block !important;
+    font-size: 0.8125rem !important;
+  }
+
+  .alternative-part-card .part-image-section {
+    min-height: 100px;
+    padding: 0.75rem 0;
+  }
+
+  .alternative-part-card .part-image {
+    max-height: 150px;
   }
 
   .page-header h1 {
@@ -1111,19 +1619,24 @@ export default {
     font-size: 1rem !important;
   }
 
-  .result-info {
+
+  .part-image-container {
+    width: 80px !important;
+    height: 80px !important;
+    min-width: 80px !important;
+    min-height: 80px !important;
+  }
+
+  .part-info {
+    gap: 0.25rem;
+  }
+
+  .element-id-badge {
+    font-size: 0.8125rem !important;
+  }
+
+  .part-name-text {
     font-size: 0.875rem !important;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .result-part-image {
-    width: 100px;
-    height: 100px;
-  }
-
-  .result-part-details {
-    width: 100%;
   }
 
   .set-info {
@@ -1332,4 +1845,5 @@ export default {
   }
 }
 </style>
+
 

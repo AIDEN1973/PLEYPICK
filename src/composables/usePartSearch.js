@@ -82,32 +82,130 @@ export function usePartSearch() {
   }
 
   // 2. 부품으로 대체부품 찾기 (동일 모양, 색상만 다른 부품)
-  const findAlternativeParts = async (partId, currentColorId = null) => {
+  const findAlternativeParts = async (partId, currentColorId = null, excludeSetId = null) => {
     try {
       loading.value = true
       error.value = null
 
       // 동일 part_id를 가진 다른 색상 부품 찾기 (set_parts에서)
-      const { data: partColors, error: colorsError } = await supabase
+      // 현재 세트를 제외하고 조회
+      let query = supabase
         .from('set_parts')
-        .select('color_id, lego_colors:color_id (color_id, name, rgb)')
+        .select('color_id, set_id')
         .eq('part_id', partId)
-        .limit(100)
+      
+      // 현재 세트를 제외
+      if (excludeSetId) {
+        query = query.neq('set_id', excludeSetId)
+      }
+      
+      const { data: partColors, error: colorsError } = await query.limit(100)
 
-      if (colorsError) throw colorsError
+      if (colorsError) {
+        console.error('[usePartSearch] set_parts 조회 오류:', colorsError)
+        throw colorsError
+      }
 
       if (!partColors || partColors.length === 0) {
+        console.log('[usePartSearch] 대체부품 없음: part_id=', partId)
         return []
       }
 
+      console.log('[usePartSearch] partColors 샘플:', partColors.slice(0, 3))
+
+      // 모든 색상 ID 수집 (현재 색상 포함)
+      // color_id: 0도 유효한 색상이므로 filter(Boolean) 대신 null/undefined만 필터링
+      const allColorIds = [...new Set(
+        partColors
+          .map(pc => pc.color_id)
+          .filter(id => id !== null && id !== undefined)
+      )]
+      console.log('[usePartSearch] allColorIds (현재 색상 포함):', allColorIds)
+
       // 현재 색상 제외하고 다른 색상만 필터링
-      const alternativeColors = partColors
-        .filter(pc => currentColorId === null || pc.color_id !== currentColorId)
-        .map(pc => ({
-          color_id: pc.color_id,
-          name: pc.lego_colors?.name || `Color ${pc.color_id}`,
-          rgb: pc.lego_colors?.rgb || null
-        }))
+      const uniqueColorIds = [...new Set(
+        partColors
+          .filter(pc => {
+            const isDifferent = currentColorId === null || 
+              (pc.color_id !== null && pc.color_id !== undefined && pc.color_id !== currentColorId)
+            console.log('[usePartSearch] 색상 필터링:', {
+              color_id: pc.color_id,
+              currentColorId: currentColorId,
+              isDifferent: isDifferent
+            })
+            return isDifferent
+          })
+          .map(pc => pc.color_id)
+          .filter(id => id !== null && id !== undefined)
+      )]
+
+      console.log('[usePartSearch] uniqueColorIds (현재 색상 제외):', uniqueColorIds)
+
+      let alternativeColors = []
+
+      if (uniqueColorIds.length > 0) {
+        // lego_colors에서 색상 정보 조회
+        const { data: legoColors, error: legoColorsError } = await supabase
+          .from('lego_colors')
+          .select('color_id, name, rgb')
+          .in('color_id', uniqueColorIds)
+
+        if (legoColorsError) {
+          console.error('[usePartSearch] lego_colors 조회 오류:', legoColorsError)
+          throw legoColorsError
+        }
+
+        console.log('[usePartSearch] legoColors:', legoColors)
+
+        // 색상 정보 매핑
+        const colorMap = new Map((legoColors || []).map(c => [c.color_id, c]))
+
+        // 각 색상별 element_id 조회 (현재 세트 제외)
+        const elementIdMap = new Map()
+        for (const colorId of uniqueColorIds) {
+          let elementQuery = supabase
+            .from('set_parts')
+            .select('element_id')
+            .eq('part_id', partId)
+            .eq('color_id', colorId)
+          
+          // 현재 세트를 제외
+          if (excludeSetId) {
+            elementQuery = elementQuery.neq('set_id', excludeSetId)
+          }
+          
+          const { data: setPartData, error: setPartError } = await elementQuery
+            .limit(1)
+            .maybeSingle()
+
+          if (!setPartError && setPartData?.element_id) {
+            elementIdMap.set(colorId, setPartData.element_id)
+          }
+        }
+
+        // 대체 색상 배열 생성
+        alternativeColors = uniqueColorIds.map(colorId => {
+          const colorInfo = colorMap.get(colorId)
+          return {
+            color_id: colorId,
+            name: colorInfo?.name || `Color ${colorId}`,
+            rgb: colorInfo?.rgb || null,
+            element_id: elementIdMap.get(colorId) || null
+          }
+        })
+
+        console.log('[usePartSearch] alternativeColors:', alternativeColors)
+      } else {
+        // 대체 색상이 없으면 빈 배열 반환 (현재 색상과 동일한 부품만 있는 경우)
+        console.log('[usePartSearch] 대체 색상 없음: part_id=', partId, 'currentColorId=', currentColorId, 'allColorIds=', allColorIds)
+        alternativeColors = []
+      }
+
+      // 대체 색상이 없으면 빈 배열 반환
+      if (alternativeColors.length === 0) {
+        console.log('[usePartSearch] 대체 색상이 없어 빈 배열 반환')
+        return []
+      }
 
       // 부품 정보 가져오기
       const { data: partInfo, error: partError } = await supabase

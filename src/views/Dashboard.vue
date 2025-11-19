@@ -64,6 +64,79 @@
         </div>
       </div>
       
+      <div v-if="storeInfo && storeInfo.store" class="store-info">
+        <h3>매장 정보</h3>
+        <div class="info-grid">
+          <div class="info-item">
+            <label>매장명:</label>
+            <span>{{ storeInfo.store.name }}</span>
+          </div>
+          <div class="info-item">
+            <label>주소:</label>
+            <span>{{ storeInfo.store.address || '정보 없음' }}</span>
+          </div>
+          <div class="info-item">
+            <label>연락처:</label>
+            <span>{{ storeInfo.store.store_phone || storeInfo.store.owner_phone || '정보 없음' }}</span>
+          </div>
+          <div class="info-item">
+            <label>역할:</label>
+            <span>{{ storeInfo.storeUserRole }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="storeInfo && storeInfo.store" class="inventory-section">
+        <h3>레고 인벤토리 <span v-if="inventory && inventory.length > 0">({{ inventory.length }}개)</span></h3>
+        <div v-if="loadingInventory" class="loading">로딩 중...</div>
+        <template v-else>
+          <div v-if="!inventory || inventory.length === 0" class="empty-inventory">
+            등록된 레고 세트가 없습니다.
+          </div>
+          <div v-else-if="inventory && inventory.length > 0" class="inventory-grid">
+            <div v-for="item in inventory" :key="item.id || `inventory-${item.lego_set_id}`" class="inventory-item">
+              <div class="inventory-header">
+                <h4>{{ getLegoSetName(item) }}</h4>
+                <span class="quantity">수량: {{ item.quantity || 0 }}</span>
+              </div>
+              <div class="inventory-details">
+                <div class="detail-item">
+                  <label>세트 번호:</label>
+                  <span>{{ getLegoSetField(item, 'number') || '-' }}</span>
+                </div>
+                <div class="detail-item">
+                  <label>시리즈:</label>
+                  <span>{{ getLegoSetField(item, 'series') || '-' }}</span>
+                </div>
+                <div class="detail-item">
+                  <label>부품 수:</label>
+                  <span>{{ getLegoSetField(item, 'part_count') || '-' }}</span>
+                </div>
+                <div class="detail-item">
+                  <label>사용 연령:</label>
+                  <span>{{ getLegoSetField(item, 'age_range') || '-' }}</span>
+                </div>
+                <div v-if="item.assigned_size" class="detail-item">
+                  <label>크기:</label>
+                  <span>{{ item.assigned_size }}</span>
+                </div>
+                <div v-if="item.assigned_grade" class="detail-item">
+                  <label>등급:</label>
+                  <span>{{ item.assigned_grade }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+      
+      <div v-else-if="user" class="inventory-section">
+        <h3>레고 인벤토리</h3>
+        <div class="empty-inventory">
+          매장 정보를 불러오는 중이거나 플레이온에 등록되지 않은 계정입니다.
+        </div>
+      </div>
+
       <div class="user-info">
         <h3>사용자 정보</h3>
         <div class="info-grid">
@@ -92,35 +165,325 @@
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
+import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 
 export default {
   name: 'Dashboard',
   setup() {
-    const { user } = useSupabase()
+    const { user, supabase, loading: userLoading } = useSupabase()
+    const { getStoreInfoByEmail, getStoreInventory, subscribeToInventoryChanges } = useSupabasePleyon()
     const userCount = ref(0)
     const isOnline = ref(navigator.onLine)
+    const storeInfo = ref(null)
+    const inventory = ref([])
+    const loadingInventory = ref(false)
+    let inventorySubscription = null
 
     const formatDate = (dateString) => {
       if (!dateString) return '정보 없음'
       return new Date(dateString).toLocaleString('ko-KR')
     }
 
-    onMounted(() => {
-      // 온라인 상태 감지
+    const getLegoSetName = (item) => {
+      if (!item.lego_sets) return '이름 없음'
+      if (Array.isArray(item.lego_sets) && item.lego_sets.length > 0) {
+        return item.lego_sets[0].name || '이름 없음'
+      }
+      if (!Array.isArray(item.lego_sets)) {
+        return item.lego_sets.name || '이름 없음'
+      }
+      return '이름 없음'
+    }
+
+    const getLegoSetField = (item, field) => {
+      if (!item.lego_sets) return null
+      if (Array.isArray(item.lego_sets) && item.lego_sets.length > 0) {
+        return item.lego_sets[0][field]
+      }
+      if (!Array.isArray(item.lego_sets)) {
+        return item.lego_sets[field]
+      }
+      return null
+    }
+
+    // 브릭박스 DB에 인벤토리 동기화 저장 (별도 테이블 사용)
+    const syncInventoryToBrickbox = async (storeId, inventoryData) => {
+      try {
+        console.log('[Dashboard] 브릭박스 DB에 인벤토리 동기화 시작:', inventoryData.length, '개')
+        
+        if (!inventoryData || inventoryData.length === 0) {
+          console.log('[Dashboard] 동기화할 인벤토리가 없습니다.')
+          return
+        }
+        
+        // 각 인벤토리 항목을 store_inventory 테이블에 upsert
+        const inventoryItems = inventoryData.map(item => {
+          const legoSet = item.lego_sets
+          const legoSetNumber = legoSet?.number || null
+          
+          // lego_set_num으로 lego_sets 테이블에서 id 조회
+          let legoSetId = null
+          if (legoSetNumber) {
+            // 나중에 조회하도록 처리
+          }
+          
+          return {
+            store_id: storeId,
+            pleyon_inventory_id: item.id,
+            lego_set_num: legoSetNumber,
+            quantity: item.quantity || 1,
+            assigned_size: item.assigned_size || null,
+            assigned_grade: item.assigned_grade || null,
+            assigned_fee: item.assigned_fee || null,
+            is_store_display: item.is_store_display !== false,
+            pleyon_data: {
+              lego_set_id: item.lego_set_id,
+              lego_set: legoSet ? {
+                id: legoSet.id,
+                number: legoSet.number,
+                name: legoSet.name,
+                series: legoSet.series,
+                part_count: legoSet.part_count,
+                age_range: legoSet.age_range
+              } : null
+            },
+            synced_at: new Date().toISOString(),
+            last_updated_at: new Date().toISOString()
+          }
+        })
+        
+        // lego_set_num으로 lego_sets 테이블에서 id 조회
+        const setNumbers = inventoryItems
+          .map(item => item.lego_set_num)
+          .filter(Boolean)
+        
+        if (setNumbers.length > 0) {
+          const { data: legoSets, error: setsError } = await supabase
+            .from('lego_sets')
+            .select('id, set_num')
+            .in('set_num', setNumbers)
+          
+          if (!setsError && legoSets) {
+            const setNumToIdMap = new Map(legoSets.map(set => [set.set_num, set.id]))
+            inventoryItems.forEach(item => {
+              if (item.lego_set_num && setNumToIdMap.has(item.lego_set_num)) {
+                item.lego_set_id = setNumToIdMap.get(item.lego_set_num)
+              }
+            })
+          }
+        }
+        
+        // 배치로 upsert (최대 100개씩)
+        const batchSize = 100
+        let successCount = 0
+        let errorCount = 0
+        
+        for (let i = 0; i < inventoryItems.length; i += batchSize) {
+          const batch = inventoryItems.slice(i, i + batchSize)
+          
+          const { data, error } = await supabase
+            .from('store_inventory')
+            .upsert(batch, {
+              onConflict: 'store_id,pleyon_inventory_id',
+              ignoreDuplicates: false
+            })
+            .select()
+          
+          if (error) {
+            console.error(`[Dashboard] 인벤토리 배치 ${i / batchSize + 1} 저장 실패:`, error)
+            errorCount += batch.length
+          } else {
+            successCount += batch.length
+            console.log(`[Dashboard] 인벤토리 배치 ${i / batchSize + 1} 저장 완료: ${batch.length}개`)
+          }
+        }
+        
+        console.log(`[Dashboard] 브릭박스 DB 인벤토리 동기화 완료: 성공 ${successCount}개, 실패 ${errorCount}개`)
+      } catch (err) {
+        console.error('[Dashboard] 브릭박스 DB 인벤토리 동기화 중 오류:', err)
+      }
+    }
+
+    const loadStoreInventory = async () => {
+      if (!user.value) {
+        console.log('[Dashboard] 사용자 정보 없음')
+        return
+      }
+
+      loadingInventory.value = true
+      try {
+        console.log('[Dashboard] 매장 정보 조회 시작:', user.value.email)
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        console.log('[Dashboard] 매장 정보 조회 결과:', storeData)
+        
+        if (storeData && storeData.store) {
+          storeInfo.value = storeData
+
+          const { store } = storeData
+          const { error: storeSyncError } = await supabase
+            .from('stores')
+            .upsert({
+              id: store.id,
+              name: store.name,
+              location: store.address || null,
+              contact: store.store_phone || store.owner_phone || null,
+              status: store.is_active ? 'active' : 'inactive',
+              config: {
+                pleyon_store_id: store.id,
+                owner_name: store.store_owner_name,
+                owner_phone: store.owner_phone
+              },
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'id'
+            })
+
+          if (storeSyncError) {
+            console.error('[Dashboard] 매장 정보 동기화 실패:', storeSyncError)
+          } else {
+            console.log('[Dashboard] 매장 정보 동기화 완료')
+            
+            // 관리자 확인
+            const { data: adminData } = await supabase
+              .from('admin_users')
+              .select('id, role, is_active, email')
+              .eq('email', user.value.email)
+              .eq('is_active', true)
+              .maybeSingle()
+
+            const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
+            
+            // users 테이블 업데이트
+            const updateData = {
+              store_id: store.id,
+              updated_at: new Date().toISOString()
+            }
+            
+            // 관리자가 아니면 role 업데이트, 관리자면 role은 admin 유지
+            if (!isAdmin) {
+              updateData.role = storeData.storeUserRole === 'owner' ? 'store_owner' : 'store_manager'
+            } else {
+              updateData.role = 'admin'
+            }
+
+            const { error: userUpdateError } = await supabase
+              .from('users')
+              .update(updateData)
+              .eq('id', user.value.id)
+
+            if (userUpdateError) {
+              console.error('[Dashboard] 사용자 정보 업데이트 실패:', userUpdateError)
+            } else {
+              console.log('[Dashboard] 사용자 정보 업데이트 완료 (role:', updateData.role, ')')
+            }
+          }
+
+          console.log('[Dashboard] 인벤토리 조회 시작:', store.id)
+          const inventoryData = await getStoreInventory(store.id)
+          console.log('[Dashboard] 인벤토리 조회 결과:', inventoryData)
+          console.log('[Dashboard] 인벤토리 개수:', inventoryData?.length || 0)
+          if (inventoryData && inventoryData.length > 0) {
+            console.log('[Dashboard] 첫 번째 인벤토리 아이템 샘플:', JSON.stringify(inventoryData[0], null, 2))
+            console.log('[Dashboard] 첫 번째 아이템의 lego_sets:', inventoryData[0].lego_sets)
+          }
+          inventory.value = inventoryData || []
+          console.log('[Dashboard] inventory.value 설정 완료:', inventory.value.length)
+          console.log('[Dashboard] storeInfo.value 상태:', storeInfo.value)
+          console.log('[Dashboard] inventory.value 상태:', inventory.value)
+          
+          // 브릭박스 DB에 인벤토리 동기화 저장
+          await syncInventoryToBrickbox(store.id, inventoryData || [])
+          
+          // Pleyon Realtime 구독 시작
+          if (inventorySubscription) {
+            inventorySubscription.unsubscribe()
+          }
+          inventorySubscription = subscribeToInventoryChanges(
+            store.id,
+            // INSERT: 신규 인벤토리 등록
+            async (newItem) => {
+              console.log('[Dashboard] 신규 인벤토리 감지, 동기화 중...', newItem)
+              const updatedInventory = await getStoreInventory(store.id)
+              inventory.value = updatedInventory || []
+              await syncInventoryToBrickbox(store.id, updatedInventory || [])
+            },
+            // UPDATE: 인벤토리 업데이트
+            async (newItem, oldItem) => {
+              console.log('[Dashboard] 인벤토리 업데이트 감지, 동기화 중...', newItem)
+              const updatedInventory = await getStoreInventory(store.id)
+              inventory.value = updatedInventory || []
+              await syncInventoryToBrickbox(store.id, updatedInventory || [])
+            },
+            // DELETE: 인벤토리 삭제
+            async (oldItem) => {
+              console.log('[Dashboard] 인벤토리 삭제 감지, 동기화 중...', oldItem)
+              const updatedInventory = await getStoreInventory(store.id)
+              inventory.value = updatedInventory || []
+              await syncInventoryToBrickbox(store.id, updatedInventory || [])
+            }
+          )
+        } else {
+          console.log('[Dashboard] 매장 정보 없음 - 플레이온에 등록되지 않은 계정일 수 있습니다.')
+          storeInfo.value = null
+          inventory.value = []
+        }
+      } catch (err) {
+        console.error('[Dashboard] 인벤토리 로드 실패:', err)
+        storeInfo.value = null
+        inventory.value = []
+      } finally {
+        loadingInventory.value = false
+      }
+    }
+
+    watch(user, async (newUser) => {
+      if (newUser && !userLoading.value) {
+        console.log('[Dashboard] watch user - 사용자 확인:', newUser.email)
+        await loadStoreInventory()
+        console.log('[Dashboard] watch user - 인벤토리 로드 완료, storeInfo:', storeInfo.value)
+        console.log('[Dashboard] watch user - inventory:', inventory.value)
+      }
+    }, { immediate: true })
+
+    onMounted(async () => {
       window.addEventListener('online', () => isOnline.value = true)
       window.addEventListener('offline', () => isOnline.value = false)
       
-      // 실제 데이터 연동 필요
       userCount.value = 0
+
+      if (!userLoading.value && user.value) {
+        console.log('[Dashboard] onMounted - 사용자 확인:', user.value.email)
+        await loadStoreInventory()
+        console.log('[Dashboard] onMounted - 인벤토리 로드 완료, storeInfo:', storeInfo.value)
+        console.log('[Dashboard] onMounted - inventory:', inventory.value)
+      } else if (userLoading.value) {
+        console.log('[Dashboard] onMounted - 사용자 로딩 중...')
+      } else {
+        console.log('[Dashboard] onMounted - 사용자 없음')
+      }
+    })
+
+    onUnmounted(() => {
+      // Realtime 구독 해제
+      if (inventorySubscription) {
+        inventorySubscription.unsubscribe()
+        inventorySubscription = null
+        console.log('[Dashboard] Realtime 구독 해제 완료')
+      }
     })
 
     return {
       user,
       userCount,
       isOnline,
-      formatDate
+      formatDate,
+      storeInfo,
+      inventory,
+      loadingInventory,
+      getLegoSetName,
+      getLegoSetField
     }
   }
 }
@@ -258,6 +621,100 @@ export default {
   padding: 0.5rem;
   border-radius: 6px;
   word-break: break-all;
+}
+
+.store-info {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  margin-bottom: 2rem;
+}
+
+.store-info h3 {
+  color: #333;
+  margin-bottom: 1.5rem;
+  font-size: 1.3rem;
+}
+
+.inventory-section {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+  margin-bottom: 2rem;
+}
+
+.inventory-section h3 {
+  color: #333;
+  margin-bottom: 1.5rem;
+  font-size: 1.3rem;
+}
+
+.loading, .empty-inventory {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.inventory-item {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 1px solid #e1e5e9;
+}
+
+.inventory-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid #e1e5e9;
+}
+
+.inventory-header h4 {
+  margin: 0;
+  color: #333;
+  font-size: 1.1rem;
+}
+
+.quantity {
+  background: #667eea;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.inventory-details {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.detail-item label {
+  font-size: 0.85rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.detail-item span {
+  color: #333;
+  font-size: 0.95rem;
 }
 
 .verified {

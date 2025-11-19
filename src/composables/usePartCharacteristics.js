@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import { useRebrickable } from './useRebrickable'
 
 export function usePartCharacteristics() {
   const loading = ref(false)
@@ -59,7 +60,7 @@ export function usePartCharacteristics() {
 
     try {
       // 이미지 URL 우선순위 설정 (WebP 우선 사용)
-      let finalImageUrl = imageUrl || partData.part?.part_img_url || partData.part_img_url
+      let finalImageUrl = imageUrl || null
       
       // WebP 이미지 우선 사용 로직
       if (partData.supabase_image_url) {
@@ -68,8 +69,33 @@ export function usePartCharacteristics() {
       } else if (partData.llm_image_url) {
         finalImageUrl = partData.llm_image_url
         console.log(`✅ LLM 분석용 WebP 이미지 사용: ${finalImageUrl}`)
-      } else {
-        console.log(`⚠️ WebP 없음, Rebrickable 원본 사용: ${finalImageUrl}`)
+      }
+      
+      // element_id가 있고 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
+      if (!finalImageUrl && partData.element_id) {
+        try {
+          const { getElement } = useRebrickable()
+          const elementData = await getElement(partData.element_id)
+          if (elementData?.element_img_url) {
+            finalImageUrl = elementData.element_img_url
+            console.log(`✅ element_id ${partData.element_id} 기반 이미지 URL 획득: ${finalImageUrl}`)
+          } else if (elementData?.part_img_url) {
+            finalImageUrl = elementData.part_img_url
+            console.log(`⚠️ element_id 이미지 없음, part_img_url 사용`)
+          }
+        } catch (elementErr) {
+          console.warn(`⚠️ element_id ${partData.element_id} 이미지 조회 실패:`, elementErr)
+        }
+      }
+      
+      // element_id 실패 시 part_img_url 사용 (fallback)
+      if (!finalImageUrl) {
+        finalImageUrl = partData.part?.part_img_url || partData.part_img_url
+        if (finalImageUrl) {
+          console.log(`⚠️ WebP 없음, Rebrickable 원본 사용: ${finalImageUrl}`)
+        } else {
+          console.warn(`⚠️ 이미지 URL을 찾을 수 없습니다.`)
+        }
       }
 
       const messages = [
@@ -284,8 +310,30 @@ export function usePartCharacteristics() {
         try {
           console.log(`Analyzing part: ${part.part.part_num} (${part.color.name})`)
           
+          // 이미지 URL 결정: element_id가 있으면 Rebrickable API에서 element_img_url 가져오기
+          let imageUrl = part.supabase_image_url || part.llm_image_url || null
+          
+          // element_id가 있고 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
+          if (!imageUrl && part.element_id) {
+            try {
+              const { getElement } = useRebrickable()
+              const elementData = await getElement(part.element_id)
+              if (elementData?.element_img_url) {
+                imageUrl = elementData.element_img_url
+              } else if (elementData?.part_img_url) {
+                imageUrl = elementData.part_img_url
+              }
+            } catch (elementErr) {
+              console.warn(`⚠️ element_id ${part.element_id} 이미지 조회 실패:`, elementErr)
+            }
+          }
+          
+          // element_id 실패 시 part_img_url 사용 (fallback)
+          if (!imageUrl) {
+            imageUrl = part.part.part_img_url
+          }
+          
           // LLM 분석 (WebP 이미지 전달)
-          const imageUrl = part.supabase_image_url || part.llm_image_url || part.part.part_img_url
           const llmAnalysis = await analyzePartWithLLM(part, imageUrl)
           
           // 특징 정보 저장
@@ -297,7 +345,6 @@ export function usePartCharacteristics() {
           )
           
           // CLIP 임베딩 생성 및 저장 (WebP 우선 사용)
-          const imageUrl = part.supabase_image_url || part.llm_image_url || part.part.part_img_url
           const embedding = await generateClipEmbedding(imageUrl)
           await saveClipEmbedding(
             part.part.part_num,

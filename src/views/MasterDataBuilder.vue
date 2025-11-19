@@ -713,10 +713,18 @@ const saveSetToMasterPartsDB = async () => {
               // element_id 우선 사용 (가장 정확한 색상 매칭)
               let imageUrl = null
               let imageSource = 'unknown'
+              let effectiveColorId = originalPart.color.id
               
               if (originalPart.element_id) {
                 try {
                   const elementData = await getElement(originalPart.element_id)
+                  
+                  // Element ID는 색상 정보를 포함하므로, API에서 가져온 색상 정보를 사용
+                  if (elementData?.color?.id) {
+                    effectiveColorId = elementData.color.id
+                    console.log(`✅ element_id ${originalPart.element_id}의 실제 색상: ${elementData.color.name} (ID: ${effectiveColorId})`)
+                  }
+                  
                   if (elementData?.element_img_url) {
                     imageUrl = elementData.element_img_url
                     imageSource = 'element_id'
@@ -735,11 +743,25 @@ const saveSetToMasterPartsDB = async () => {
                 imageSource = 'part_num'
               }
               
+              // URL 검증: element_id와 URL의 element_id가 일치하는지 확인 (경고만, 계속 진행)
+              if (originalPart.element_id && imageUrl.includes('/elements/')) {
+                const urlElementIdMatch = imageUrl.match(/\/elements\/(\d+)\.jpg/)
+                if (urlElementIdMatch) {
+                  const urlElementId = urlElementIdMatch[1]
+                  if (urlElementId !== String(originalPart.element_id)) {
+                    console.warn(`⚠️ URL 불일치: 요청 element_id=${originalPart.element_id}, URL의 element_id=${urlElementId}`)
+                    console.warn(`⚠️ Rebrickable API가 다른 element_id의 URL을 반환했습니다. API 응답을 신뢰하고 계속 진행합니다.`)
+                    console.warn(`⚠️ URL: ${imageUrl}`)
+                    // API가 반환한 URL을 신뢰하고 계속 진행 (요청한 element_id는 그대로 사용)
+                  }
+                }
+              }
+              
               // processRebrickableImage 사용 (element_id 기반 파일명 생성 및 중복 검사 포함)
               const imageResult = await processRebrickableImage(
                 imageUrl,
                 originalPart.part.part_num,
-                originalPart.color.id,
+                effectiveColorId,
                 { elementId: originalPart.element_id || null, imageSource }
               )
               
@@ -751,7 +773,7 @@ const saveSetToMasterPartsDB = async () => {
                   file_path: imageResult.path,
                   file_name: imageResult.filename,
                   part_num: originalPart.part.part_num,
-                  color_id: originalPart.color.id,
+                  color_id: effectiveColorId,
                   element_id: originalPart.element_id || null,
                   set_num: targetSetNumber.value
                 })
@@ -781,18 +803,18 @@ const saveSetToMasterPartsDB = async () => {
             console.log(`세트 ${targetSetNumber.value} lego_sets 테이블 저장 완료`)
           }
           
-          // 4단계: 세트-부품 관계를 set_parts 테이블에 저장
+          // 4단계: 세트-부품 관계를 set_parts 테이블에 저장 (effectiveColorId 사용)
           const { saveSetPart } = useDatabase()
           await saveSetPart(
             null, // set_id는 UUID이므로 null로 설정 (실제로는 세트 ID 필요)
             originalPart.part.part_num,
-            originalPart.color.id, // color_id는 integer
+            effectiveColorId, // element_id 기반 색상 사용 (핵심 수정)
             originalPart.quantity || 1,
             originalPart.is_spare || false,
             originalPart.element_id,
             originalPart.num_sets || 1
           )
-          console.log(`세트-부품 관계 저장 완료: ${embedding.part_num}`)
+          console.log(`세트-부품 관계 저장 완료: ${embedding.part_num} (color_id: ${effectiveColorId})`)
           
           // 5단계: 분석 결과와 임베딩을 결합하여 마스터 특징 저장
           const analysis = setAnalysisResults.value.find(a => a.part_num === embedding.part_num)

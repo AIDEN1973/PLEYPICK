@@ -284,6 +284,35 @@ export function useBatchPartLoading() {
       if (!metadataError && imageMetadata?.supabase_url) {
         return imageMetadata.supabase_url
       }
+
+      // 4. Storage에서 직접 확인 (element_id 우선, 파일명 기반)
+      // 주의: HEAD 요청은 최소화하여 무한 반복 방지
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+      if (supabaseUrl) {
+        const bucketName = 'lego_parts_images'
+        const fileName = elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId}.webp`
+        const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+        
+        // 이미지 존재 여부 확인 (타임아웃 설정으로 무한 대기 방지)
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 2000) // 2초 타임아웃
+          
+          const response = await fetch(directUrl, { 
+            method: 'HEAD',
+            signal: controller.signal
+          })
+          
+          clearTimeout(timeoutId)
+          
+          if (response.ok) {
+            return directUrl
+          }
+        } catch (fetchError) {
+          // 파일이 없거나 타임아웃이면 무시 (정상적인 경우)
+          // 무한 반복 방지를 위해 로그 출력하지 않음
+        }
+      }
       
       return null
     } catch (error) {

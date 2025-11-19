@@ -64,12 +64,21 @@
                   >
                     세트부품
                   </router-link>
+                  <router-link 
+                    v-if="user"
+                    to="/set-instructions" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    설명서
+                  </router-link>
 
                   <!-- 관리 드롭다운 -->
                   <div v-if="user && isAdmin" class="relative" ref="managementDropdown">
                     <button
                       @click="showManagementMenu = !showManagementMenu"
-                      class="text-sm xl:text-base font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
+                      class="text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 whitespace-nowrap"
+                      :class="{ 'text-blue-600': showManagementMenu }"
                     >
                       관리
                       <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2"
@@ -86,6 +95,7 @@
                           <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">레고 관리</div>
                           <router-link to="/new-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">신규 레고 등록</router-link>
                           <router-link to="/saved-lego" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">저장된 레고</router-link>
+                          <router-link to="/parts" @click="showManagementMenu = false" class="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded">부품 정보</router-link>
                         </div>
                         <div class="mb-2">
                           <div class="px-3 py-1 text-xs font-semibold text-gray-500 uppercase">데이터셋</div>
@@ -192,19 +202,47 @@
                   >
                     세트부품
                   </router-link>
-                  <div v-if="isAdmin" class="mobile-dropdown-divider">
-                    <div class="mobile-dropdown-label">관리</div>
+                  <router-link 
+                    to="/set-instructions" 
+                    @click="showMobileMenu = false"
+                    class="mobile-dropdown-item"
+                    :class="{ 'mobile-dropdown-item-active': isActiveRoute('/set-instructions') }"
+                  >
+                    설명서
+                  </router-link>
+                  <template v-if="isAdmin">
+                    <div class="mobile-dropdown-divider">
+                      <div class="mobile-dropdown-label">관리자 메뉴</div>
+                    </div>
                     <router-link 
-                      to="/dashboard" 
+                      to="/new-lego" 
                       @click="showMobileMenu = false"
                       class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/new-lego') }"
                     >
-                      대시보드
+                      신규 레고 등록
+                    </router-link>
+                    <router-link 
+                      to="/saved-lego" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/saved-lego') }"
+                    >
+                      저장된 레고
+                    </router-link>
+                    <router-link 
+                      to="/parts" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/parts') }"
+                    >
+                      부품 정보
                     </router-link>
                     <router-link 
                       to="/synthetic-dataset" 
                       @click="showMobileMenu = false"
                       class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/synthetic-dataset') }"
                     >
                       합성 데이터셋
                     </router-link>
@@ -212,10 +250,115 @@
                       to="/automated-training" 
                       @click="showMobileMenu = false"
                       class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/automated-training') }"
                     >
                       AI 학습
                     </router-link>
-                  </div>
+                    <router-link 
+                      to="/hybrid-detection" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/hybrid-detection') }"
+                    >
+                      부품 검출
+                    </router-link>
+                    <router-link 
+                      to="/dashboard" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/dashboard') }"
+                    >
+                      대시보드
+                    </router-link>
+                    <router-link 
+                      to="/element-search" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/element-search') }"
+                    >
+                      Element ID 검색
+                    </router-link>
+                    <router-link 
+                      to="/metadata-management" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/metadata-management') }"
+                    >
+                      메타데이터 관리
+                    </router-link>
+                    <router-link 
+                      to="/render-optimization" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/render-optimization') }"
+                    >
+                      렌더링 최적화
+                    </router-link>
+                    <router-link 
+                      to="/dataset-converter" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/dataset-converter') }"
+                    >
+                      데이터셋 변환
+                    </router-link>
+                    <router-link 
+                      to="/store-manager" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/store-manager') }"
+                    >
+                      매장 관리
+                    </router-link>
+                    <router-link 
+                      to="/store-management" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/store-management') }"
+                    >
+                      매장 대시보드
+                    </router-link>
+                    <router-link 
+                      to="/monitoring" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/monitoring') }"
+                    >
+                      모니터링
+                    </router-link>
+                    <router-link 
+                      to="/model-monitoring" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/model-monitoring') }"
+                    >
+                      모델 모니터링
+                    </router-link>
+                    <router-link 
+                      to="/system-monitoring" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/system-monitoring') }"
+                    >
+                      시스템 모니터링
+                    </router-link>
+                    <router-link 
+                      to="/quality-healing" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/quality-healing') }"
+                    >
+                      품질 회복 대시보드
+                    </router-link>
+                    <router-link 
+                      to="/category-management" 
+                      @click="showMobileMenu = false"
+                      class="mobile-dropdown-item mobile-dropdown-item-sub"
+                      :class="{ 'mobile-dropdown-item-active': isActiveRoute('/category-management') }"
+                    >
+                      카테고리 관리
+                    </router-link>
+                  </template>
                 </div>
               </div>
             </div>
@@ -246,6 +389,51 @@
                     <div class="account-dropdown-name">BrickBox</div>
                     <div class="account-dropdown-email">{{ user?.email || '사용자' }}</div>
                   </div>
+
+                  <div v-if="storeInfo && storeInfo.store" class="account-dropdown-store-section">
+                    <div class="account-dropdown-section-title">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                      </svg>
+                      매장 정보
+                    </div>
+                    <div class="account-dropdown-store-info">
+                      <div class="account-dropdown-store-item">
+                        <span class="account-dropdown-store-label">매장명:</span>
+                        <span class="account-dropdown-store-value">{{ storeInfo.store.name }}</span>
+                      </div>
+                      <div v-if="storeInfo.store.address" class="account-dropdown-store-item">
+                        <span class="account-dropdown-store-label">주소:</span>
+                        <span class="account-dropdown-store-value">{{ storeInfo.store.address }}</span>
+                      </div>
+                      <div v-if="storeInfo.store.store_phone || storeInfo.store.owner_phone" class="account-dropdown-store-item">
+                        <span class="account-dropdown-store-label">연락처:</span>
+                        <span class="account-dropdown-store-value">{{ storeInfo.store.store_phone || storeInfo.store.owner_phone }}</span>
+                      </div>
+                      <div class="account-dropdown-store-item">
+                        <span class="account-dropdown-store-label">역할:</span>
+                        <span class="account-dropdown-store-value">{{ storeInfo.storeUserRole }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-if="storeInfo && storeInfo.store" class="account-dropdown-divider"></div>
+
+                  <router-link
+                    v-if="storeInfo && storeInfo.store"
+                    to="/dashboard"
+                    @click="showUserMenu = false"
+                    class="account-dropdown-item"
+                  >
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                      <rect x="3" y="3" width="7" height="7"></rect>
+                      <rect x="14" y="3" width="7" height="7"></rect>
+                      <rect x="14" y="14" width="7" height="7"></rect>
+                      <rect x="3" y="14" width="7" height="7"></rect>
+                    </svg>
+                    레고 인벤토리 보기
+                  </router-link>
 
                   <button
                     @click="showUserMenu = false"
@@ -291,6 +479,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSupabase } from './composables/useSupabase'
+import { useSupabasePleyon } from './composables/useSupabasePleyon'
 
 export default {
   name: 'App',
@@ -298,8 +487,11 @@ export default {
     const router = useRouter()
     const route = useRoute()
     const { supabase, user } = useSupabase()
+    const { getStoreInfoByEmail } = useSupabasePleyon()
     const showManagementMenu = ref(false)
     const isAdmin = ref(false)
+    const isStoreUser = ref(false)
+    const storeInfo = ref(null)
     const managementDropdown = ref(null)
     const showUserMenu = ref(false)
     const userMenuDropdown = ref(null)
@@ -361,49 +553,151 @@ export default {
       }
     }
 
-    const checkAdminRole = async () => {
+    const checkUserRole = async () => {
       if (!user.value) {
         isAdmin.value = false
+        isStoreUser.value = false
+        storeInfo.value = null
         return
       }
 
       try {
-        const { data, error } = await supabase
+        const { data: adminData, error: adminError } = await supabase
           .from('admin_users')
           .select('id, role, is_active, email')
           .eq('email', user.value.email)
           .eq('is_active', true)
           .maybeSingle()
 
-        if (error) {
-          console.error('관리자 권한 확인 실패:', error)
-          isAdmin.value = false
+        if (adminData && !adminError) {
+          isAdmin.value = adminData.role === 'admin' || adminData.role === 'super_admin'
+          isStoreUser.value = false
+          storeInfo.value = null
+          
+          // 관리자는 users 테이블의 role을 admin으로 유지
+          // 플레이온 매장 정보가 있어도 role은 admin으로 유지
+          const pleyonStoreInfo = await getStoreInfoByEmail(user.value.email)
+          let updateData = {
+            role: 'admin',
+            updated_at: new Date().toISOString()
+          }
+          
+          // 플레이온 매장 정보가 있으면 store_id만 업데이트 (role은 admin 유지)
+          if (pleyonStoreInfo && pleyonStoreInfo.store) {
+            const { store } = pleyonStoreInfo
+            
+            // stores 테이블 동기화
+            const { error: storeSyncError } = await supabase
+              .from('stores')
+              .upsert({
+                id: store.id,
+                name: store.name,
+                location: store.address || null,
+                contact: store.store_phone || store.owner_phone || null,
+                status: store.is_active ? 'active' : 'inactive',
+                config: {
+                  pleyon_store_id: store.id,
+                  owner_name: store.store_owner_name,
+                  owner_phone: store.owner_phone
+                },
+                updated_at: new Date().toISOString()
+              }, {
+                onConflict: 'id'
+              })
+            
+            if (!storeSyncError) {
+              updateData.store_id = store.id
+            }
+          }
+          
+          // users 테이블의 role을 admin으로 업데이트 (store_id는 선택적)
+          const { error: userUpdateError } = await supabase
+            .from('users')
+            .update(updateData)
+            .eq('id', user.value.id)
+          
+          if (userUpdateError) {
+            console.error('[App] 관리자 role 업데이트 실패:', userUpdateError)
+          } else {
+            console.log('[App] 관리자 role 업데이트 완료 (role: admin)')
+          }
+          
           return
         }
 
-        if (!data) {
+        // 관리자가 아닌 경우에만 매장 사용자 확인
+        const pleyonStoreInfo = await getStoreInfoByEmail(user.value.email)
+        if (pleyonStoreInfo && pleyonStoreInfo.store) {
+          isStoreUser.value = true
+          storeInfo.value = pleyonStoreInfo
           isAdmin.value = false
-          return
-        }
 
-        isAdmin.value = data.role === 'admin' || data.role === 'super_admin'
+          const { store } = pleyonStoreInfo
+          const { error: storeSyncError } = await supabase
+            .from('stores')
+            .upsert({
+              id: store.id,
+              name: store.name,
+              location: store.address || null,
+              contact: store.store_phone || store.owner_phone || null,
+              status: store.is_active ? 'active' : 'inactive',
+              config: {
+                pleyon_store_id: store.id,
+                owner_name: store.store_owner_name,
+                owner_phone: store.owner_phone
+              },
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'id'
+            })
+
+          if (storeSyncError) {
+            console.error('[App] 매장 정보 동기화 실패:', storeSyncError)
+          } else {
+            console.log('[App] 플레이온 매장 정보 동기화 완료:', store.name)
+            
+            // users 테이블의 store_id와 role 업데이트
+            const { error: userUpdateError } = await supabase
+              .from('users')
+              .update({
+                store_id: store.id,
+                role: pleyonStoreInfo.storeUserRole === 'owner' ? 'store_owner' : 'store_manager',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', user.value.id)
+
+            if (userUpdateError) {
+              console.error('[App] 사용자 매장 정보 업데이트 실패:', userUpdateError)
+            } else {
+              console.log('[App] 사용자 매장 정보 업데이트 완료')
+            }
+          }
+        } else {
+          isStoreUser.value = false
+          storeInfo.value = null
+          isAdmin.value = false
+        }
       } catch (err) {
-        console.error('관리자 권한 확인 오류:', err)
+        console.error('사용자 역할 확인 오류:', err)
         isAdmin.value = false
+        isStoreUser.value = false
+        storeInfo.value = null
       }
     }
 
     watch(user, (newUser) => {
       if (newUser) {
-        checkAdminRole()
+        checkUserRole()
       } else {
         isAdmin.value = false
+        isStoreUser.value = false
+        storeInfo.value = null
       }
     }, { immediate: true })
 
     onMounted(() => {
       if (user.value) {
-        checkAdminRole()
+        checkUserRole()
       }
       document.addEventListener('click', handleClickOutside)
     })
@@ -446,6 +740,8 @@ export default {
     return {
       user,
       isAdmin,
+      isStoreUser,
+      storeInfo,
       logout,
       showManagementMenu,
       managementDropdown,
@@ -862,7 +1158,7 @@ body {
   position: absolute;
   right: 0;
   margin-top: 0.75rem;
-  width: 260px;
+  width: 300px;
   background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 0.75rem;
@@ -928,6 +1224,53 @@ body {
 .account-dropdown-item-danger:hover {
   background: #fef2f2;
   color: #b91c1c;
+}
+
+.account-dropdown-store-section {
+  padding: 12px 20px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.account-dropdown-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+.account-dropdown-section-title svg {
+  color: #9ca3af;
+}
+
+.account-dropdown-store-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-dropdown-store-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-dropdown-store-label {
+  font-size: 0.7rem;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.account-dropdown-store-value {
+  font-size: 0.8125rem;
+  color: #1f2937;
+  font-weight: 500;
+  word-break: break-word;
 }
 
 .right-0 {

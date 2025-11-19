@@ -82,13 +82,18 @@ export function useBatchProcessing() {
       // 2-2. 중복 제거 후 모든 색상 정보를 한 번에 upsert
       const uniqueColors = new Map()
       parts.forEach(partData => {
-        const colorId = partData.color.id
+        const colorId = partData.color?.id ?? partData.color?.color_id
+        // color_id가 null이거나 undefined인 경우 건너뛰기
+        if (colorId === null || colorId === undefined) {
+          console.warn(`⚠️ Skipping part with invalid color_id: ${partData.part?.part_num}`)
+          return
+        }
         if (!uniqueColors.has(colorId)) {
           uniqueColors.set(colorId, {
-            color_id: partData.color.id,
-            name: partData.color.name,
-            rgb: partData.color.rgb,
-            is_trans: partData.color.is_trans
+            color_id: colorId,
+            name: partData.color?.name || 'Unknown',
+            rgb: partData.color?.rgb || null,
+            is_trans: partData.color?.is_trans || false
           })
         }
       })
@@ -113,7 +118,13 @@ export function useBatchProcessing() {
       const setPartsMap = new Map()
       
       parts.forEach(partData => {
-        const key = `${savedSet.id}_${partData.part.part_num}_${partData.color.id}`
+        const colorId = partData.color?.id ?? partData.color?.color_id
+        // color_id가 null이거나 undefined인 경우 건너뛰기
+        if (colorId === null || colorId === undefined) {
+          console.warn(`⚠️ Skipping set-part relationship with invalid color_id: ${partData.part?.part_num}`)
+          return
+        }
+        const key = `${savedSet.id}_${partData.part.part_num}_${colorId}`
         
         if (setPartsMap.has(key)) {
           // 중복된 경우: 수량 합산
@@ -135,7 +146,7 @@ export function useBatchProcessing() {
           setPartsMap.set(key, {
             set_id: savedSet.id,
             part_id: partData.part.part_num,
-            color_id: partData.color.id,
+            color_id: colorId,
             quantity: partData.quantity,
             is_spare: partData.is_spare || false,
             element_id: partData.element_id,

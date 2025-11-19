@@ -219,7 +219,7 @@ export function useDatabase() {
           num_parts: setData.num_parts,
           set_img_url: setData.set_img_url,
           set_url: setData.set_url,
-          last_modified_date: setData.last_modified_date
+          last_modified_dt: setData.last_modified_date || setData.last_modified_dt
         }, {
           onConflict: 'set_num'
         })

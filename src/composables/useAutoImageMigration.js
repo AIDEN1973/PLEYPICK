@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { supabase } from './useSupabase'
+import { useRebrickable } from './useRebrickable'
 
 // UPLOAD_PROXY 상수 제거 - 직접 경로 사용
 
@@ -86,34 +87,79 @@ export function useAutoImageMigration() {
         console.log(`🔄 강제 재업로드 모드: ${partNum}${elementId ? ` (element_id: ${elementId})` : ''}`)
       }
 
-      // 2. 이미지 다운로드 (여러 방법 시도)
+      // 2. 이미지 다운로드 (여러 방법 시도, 실패 시 재시도)
       let imageBlob = null
       let downloadMethod = 'unknown'
       
-      try {
-        imageBlob = await downloadImage(originalUrl)
-        if (imageBlob) {
-          downloadMethod = 'proxy_or_direct'
+      // 다운로드 재시도 로직 (최대 3회)
+      const maxRetries = 3
+      let lastError = null
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          console.log(`📥 이미지 다운로드 시도 ${attempt}/${maxRetries}: ${originalUrl}`)
+          imageBlob = await downloadImage(originalUrl)
+          if (imageBlob) {
+            downloadMethod = 'proxy_or_direct'
+            console.log(`✅ 이미지 다운로드 성공 (시도 ${attempt}/${maxRetries})`)
+            break
+          }
+        } catch (downloadError) {
+          lastError = downloadError
+          console.warn(`⚠️ 이미지 다운로드 실패 (시도 ${attempt}/${maxRetries}): ${downloadError.message}`)
+          
+          // 마지막 시도가 아니면 재시도
+          if (attempt < maxRetries) {
+            const waitTime = attempt * 1000 // 1초, 2초, 3초 대기
+            console.log(`⏳ ${waitTime}ms 후 재시도...`)
+            await new Promise(resolve => setTimeout(resolve, waitTime))
+            continue
+          }
         }
-      } catch (downloadError) {
-        console.warn(`⚠️ 이미지 다운로드 실패: ${downloadError.message}`)
-        
-        // CORS 문제로 실패한 경우, 원본 URL을 그대로 반환
-        if (downloadError.message.includes('CORS') || 
-            downloadError.message.includes('blocked') ||
-            downloadError.message.includes('fetch')) {
-          console.log(`🔄 CORS 문제로 인한 다운로드 실패, 원본 URL 유지: ${partNum}`)
-          migrationStats.value.skipped++
-          return originalUrl
-        }
-        
-        throw downloadError
       }
       
+      // 모든 시도 실패 시 서버 사이드 프록시로 강제 시도
       if (!imageBlob) {
-        console.warn(`⚠️ 이미지 다운로드 실패, 원본 URL 유지: ${partNum}`)
-        migrationStats.value.skipped++
-        return originalUrl
+        console.warn(`⚠️ 모든 다운로드 시도 실패, 서버 사이드 프록시로 강제 시도: ${partNum}`)
+        try {
+          // 서버 사이드 프록시는 WebP로 변환된 이미지를 반환하므로, 이를 직접 사용
+          const proxyUrl = `/api/upload/proxy-image?url=${encodeURIComponent(originalUrl)}`
+          const proxyResponse = await fetch(proxyUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'image/webp',
+              'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+            }
+          })
+          
+          if (proxyResponse.ok) {
+            const webpBlob = await proxyResponse.blob()
+            if (webpBlob && webpBlob.type === 'image/webp') {
+              console.log(`✅ 서버 사이드 프록시 다운로드 성공 (이미 WebP): ${webpBlob.size} bytes`)
+              // 이미 WebP이므로 바로 업로드
+              const uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload, elementId })
+              console.log(`✅ Supabase 업로드 완료: ${uploadResult.url}`)
+              migrationStats.value.completed++
+              
+              // 데이터베이스에 등록
+              try {
+                await registerInDatabase(partNum, colorId, originalUrl, uploadResult.url, elementId)
+              } catch (dbError) {
+                console.warn(`⚠️ 데이터베이스 등록 실패하지만 마이그레이션은 성공: ${partNum}`, dbError)
+              }
+              
+              return uploadResult.url
+            }
+          } else {
+            console.warn(`⚠️ 서버 사이드 프록시 다운로드 실패: ${proxyResponse.status}`)
+          }
+        } catch (proxyError) {
+          console.error(`❌ 서버 사이드 프록시 오류: ${proxyError.message}`)
+        }
+        
+        // 최종 실패
+        console.error(`❌ 모든 다운로드 방법 실패: ${partNum}`)
+        throw new Error(`이미지 다운로드 실패: ${lastError?.message || '알 수 없는 오류'}`)
       }
 
       // 3. WebP로 변환
@@ -125,14 +171,37 @@ export function useAutoImageMigration() {
         webpBlob = imageBlob
       }
       
-      // 4. Supabase Storage에 업로드 (element_id 전달)
+      // 4. Supabase Storage에 업로드 (element_id 전달, 재시도 포함)
       let uploadResult
-      try {
-        uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload, elementId })
-      } catch (uploadError) {
-        console.warn(`⚠️ Supabase 업로드 실패, 원본 URL 유지: ${uploadError.message}`)
-        migrationStats.value.skipped++
-        return originalUrl
+      const maxUploadRetries = 3
+      let uploadSuccess = false
+      
+      for (let attempt = 1; attempt <= maxUploadRetries; attempt++) {
+        try {
+          console.log(`📤 Supabase 업로드 시도 ${attempt}/${maxUploadRetries}: ${partNum}`)
+          uploadResult = await uploadToSupabase(partNum, colorId, webpBlob, { verifyUpload: options.verifyUpload, elementId })
+          uploadSuccess = true
+          console.log(`✅ Supabase 업로드 성공 (시도 ${attempt}/${maxUploadRetries}): ${uploadResult.url}`)
+          break
+        } catch (uploadError) {
+          console.warn(`⚠️ Supabase 업로드 실패 (시도 ${attempt}/${maxUploadRetries}): ${uploadError.message}`)
+          
+          // 마지막 시도가 아니면 재시도
+          if (attempt < maxUploadRetries) {
+            const waitTime = attempt * 1000 // 1초, 2초, 3초 대기
+            console.log(`⏳ ${waitTime}ms 후 재시도...`)
+            await new Promise(resolve => setTimeout(resolve, waitTime))
+            continue
+          } else {
+            // 모든 시도 실패
+            console.error(`❌ 모든 Supabase 업로드 시도 실패: ${partNum}`)
+            throw new Error(`Supabase 업로드 실패: ${uploadError.message}`)
+          }
+        }
+      }
+      
+      if (!uploadSuccess || !uploadResult) {
+        throw new Error('Supabase 업로드 실패')
       }
       
       // 5. 데이터베이스에 등록 (실패해도 계속 진행)
@@ -152,9 +221,11 @@ export function useAutoImageMigration() {
       console.error(`❌ 마이그레이션 실패: ${partNum}`, error)
       migrationStats.value.failed++
       
-      // 최종 fallback: 원본 URL 반환
-      console.log(`🔄 최종 fallback: 원본 URL 유지 - ${partNum}`)
-      return originalUrl
+      // 최종 fallback: null 반환 (프록시 URL 생성하지 않음)
+      console.error(`❌ 마이그레이션 완전 실패: ${partNum} - ${error.message}`)
+      console.error(`   원본 URL: ${originalUrl}`)
+      console.error(`   주의: 프로덕션 모드에서는 이 이미지가 표시되지 않을 수 있습니다.`)
+      return null
     }
   }
 
@@ -647,6 +718,9 @@ export function useAutoImageMigration() {
       skipped: 0
     }
 
+    // Rebrickable API 호출을 순차적으로 처리하기 위한 락
+    let apiCallLock = Promise.resolve()
+
     try {
       const results = []
       let index = 0
@@ -664,11 +738,95 @@ export function useAutoImageMigration() {
 
           try {
             console.log(`🔄 [W${workerId}] ${i + 1}/${parts.length} - ${part.lego_parts.part_num}`)
-            const elementId = part.element_id || part.lego_parts?.element_id || null
+            // element_id 검증 및 정규화
+            let elementId = part.element_id || part.lego_parts?.element_id || null
+            if (elementId !== null && elementId !== undefined) {
+              const elementIdStr = String(elementId).trim()
+              if (elementIdStr === '' || elementIdStr === 'null' || elementIdStr === 'undefined' || elementIdStr === '0') {
+                elementId = null
+              } else {
+                elementId = elementIdStr
+              }
+            } else {
+              elementId = null
+            }
+            
+            console.log(`[AutoMigration] part_num=${part.lego_parts.part_num}, color_id=${part.lego_colors.color_id}, element_id=${elementId || '없음'}`)
+            
+            // element_id가 있으면 Rebrickable API에서 element_img_url 가져오기
+            let imageUrl = part.lego_parts.part_img_url
+            let effectiveColorId = part.lego_colors.color_id
+            
+            if (elementId) {
+              try {
+                // Rebrickable API 호출을 순차적으로 처리 (rate limit 방지)
+                const { getElement } = useRebrickable()
+                
+                // 락을 사용하여 순차 처리: 이전 API 호출이 완료될 때까지 대기
+                apiCallLock = apiCallLock.then(async () => {
+                  // API 호출 전 지연 (200ms)
+                  await new Promise(r => setTimeout(r, 200))
+                  return await getElement(elementId)
+                }).catch(err => {
+                  console.warn(`⚠️ element_id ${elementId} API 호출 실패:`, err)
+                  return null
+                })
+                
+                const elementData = await apiCallLock
+                
+                if (!elementData) {
+                  // API 호출 실패 시 기존 part_img_url 사용
+                  console.warn(`⚠️ element_id ${elementId} 이미지 조회 실패, part_img_url 사용`)
+                } else {
+                  // API 응답의 element_id 확인 (Rebrickable 데이터 불일치 감지)
+                  const apiElementId = elementData?.element_id ? String(elementData.element_id) : null
+                  if (apiElementId && apiElementId !== String(elementId)) {
+                    console.warn(`⚠️ API 응답 불일치: 요청 element_id=${elementId}, API 응답 element_id=${apiElementId}`)
+                    console.warn(`⚠️ API 응답의 element_id를 사용합니다: ${apiElementId}`)
+                  }
+                  
+                  // Element ID는 색상 정보를 포함하므로, API에서 가져온 색상 정보를 사용
+                  if (elementData?.color?.id) {
+                    effectiveColorId = elementData.color.id
+                    console.log(`✅ element_id ${apiElementId || elementId}의 실제 색상: ${elementData.color.name} (ID: ${effectiveColorId})`)
+                  }
+                  
+                  if (elementData?.element_img_url) {
+                    imageUrl = elementData.element_img_url
+                    console.log(`✅ element_id ${apiElementId || elementId} 기반 이미지 URL 획득: ${imageUrl}`)
+                    
+                    // URL 검증: API 응답의 element_id와 URL의 element_id 비교
+                    if (apiElementId && imageUrl.includes('/elements/')) {
+                      const urlElementIdMatch = imageUrl.match(/\/elements\/(\d+)\.jpg/)
+                      if (urlElementIdMatch) {
+                        const urlElementId = urlElementIdMatch[1]
+                        if (urlElementId !== apiElementId) {
+                          console.warn(`⚠️ Rebrickable 데이터 불일치 감지:`)
+                          console.warn(`   - API 응답 element_id: ${apiElementId}`)
+                          console.warn(`   - URL의 element_id: ${urlElementId}`)
+                          console.warn(`   - URL: ${imageUrl}`)
+                          console.warn(`   - 원인: Rebrickable API의 element_img_url 필드가 다른 element_id의 이미지를 가리키고 있습니다.`)
+                          console.warn(`   - 조치: API 응답의 element_id(${apiElementId})를 사용하고, URL은 그대로 사용합니다.`)
+                        } else {
+                          console.log(`✅ URL 검증 성공: API 응답 element_id(${apiElementId})와 URL의 element_id 일치`)
+                        }
+                      }
+                    }
+                  } else if (elementData?.part_img_url) {
+                    imageUrl = elementData.part_img_url
+                    console.log(`⚠️ element_id 이미지 없음, part_img_url 사용`)
+                  }
+                }
+              } catch (elementErr) {
+                console.warn(`⚠️ element_id ${elementId} 이미지 조회 실패:`, elementErr)
+                // 실패 시 기존 part_img_url 사용
+              }
+            }
+            
             const result = await migratePartImage(
               part.lego_parts.part_num,
-              part.lego_colors.color_id,
-              part.lego_parts.part_img_url,
+              effectiveColorId,
+              imageUrl,
               { force: options.force, verifyUpload, elementId }
             )
             results[i] = { part, success: !!result, supabaseUrl: result }
@@ -748,7 +906,7 @@ export function useAutoImageMigration() {
       // 단계별 조회로 문제 해결
       const { data: setParts, error: setPartsError } = await supabase
         .from('set_parts')
-        .select('part_id, color_id')
+        .select('part_id, color_id, element_id')
         // ✅ 제한 제거: 모든 부품 마이그레이션
       
       if (setPartsError) {
@@ -769,7 +927,7 @@ export function useAutoImageMigration() {
         throw new Error(`lego_parts 조회 실패: ${legoPartsError.message}`)
       }
       
-      // set_parts와 lego_parts 조합
+      // set_parts와 lego_parts 조합 (element_id 포함)
       const parts = setParts
         .filter(sp => legoParts.some(lp => lp.part_num === sp.part_id))
         .map(sp => {
@@ -777,6 +935,7 @@ export function useAutoImageMigration() {
           return {
             part_id: sp.part_id,
             color_id: sp.color_id,
+            element_id: sp.element_id || null, // element_id 포함
             lego_parts: legoPart,
             lego_colors: { color_id: sp.color_id }
           }

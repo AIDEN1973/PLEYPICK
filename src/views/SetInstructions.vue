@@ -1,0 +1,1209 @@
+<template>
+  <div class="set-instructions-page">
+    <div class="page-header">
+      <h1>세트 설명서</h1>
+      <p>레고번호를 입력하여 해당 세트의 공식 설명서를 확인할 수 있습니다.</p>
+    </div>
+
+    <div class="set-instructions-content">
+      <div class="search-section">
+        <div class="setup-card">
+          <div class="card-body">
+            <div class="form-group">
+              <label>레고번호를 입력하세요.</label>
+              <div class="set-search-wrapper" ref="setDropdownRef">
+                <div class="set-search-input-row">
+                  <div class="set-search-input-wrapper">
+                    <input
+                      type="text"
+                      v-model="setSearchQuery"
+                      @keyup.enter="handleSearchEnter"
+                      @blur="handleSearchBlur"
+                      placeholder="예 : 76917"
+                      class="set-search-input"
+                      :disabled="loading"
+                    />
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                      <path d="M7.33333 12.6667C10.2789 12.6667 12.6667 10.2789 12.6667 7.33333C12.6667 4.38781 10.2789 2 7.33333 2C4.38781 2 2 4.38781 2 7.33333C2 10.2789 4.38781 12.6667 7.33333 12.6667Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M14 14L11.1 11.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                  </div>
+                  <button
+                    type="button"
+                    @click="handleSearchEnter"
+                    class="search-button"
+                    :disabled="loading"
+                  >
+                    검색
+                  </button>
+                </div>
+
+                <transition name="select-fade">
+                  <div v-if="showSetDropdown && searchResults.length > 0" :key="`dropdown-${searchResultsKey}`" class="custom-select-dropdown">
+                    <button
+                      v-for="(set, index) in searchResults"
+                      :key="`${set.id}-${set.set_num}-${searchResultsKey}-${index}`"
+                      type="button"
+                      class="custom-select-option"
+                      :class="{ active: selectedSetId === set.id }"
+                      @click="handleSelectSet(set)"
+                    >
+                      <div class="option-content">
+                        <div class="option-image-wrapper" :data-set-num="set.set_num">
+                          <img
+                            v-if="set.webp_image_url || set.set_img_url"
+                            :src="set.webp_image_url || set.set_img_url"
+                            :alt="set.name || set.set_num"
+                            :data-set-id="set.id"
+                            class="option-set-image"
+                            @error="handleSetImageError($event, set)"
+                            loading="eager"
+                            crossorigin="anonymous"
+                          />
+                          <div v-else class="option-no-image">이미지 없음</div>
+                        </div>
+                        <div class="option-info">
+                          <span class="option-set-num">{{ formatSetNumber(set.set_num) }}</span>
+                          <span class="option-set-title">{{ [set.theme_name, set.name].filter(Boolean).join(' ') || (set.name || '') }}</span>
+                          <span class="option-set-parts">부품수 : {{ resolvePartCount(set) }}개</span>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </transition>
+                <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                  <div class="selected-set-row">
+                    <div class="selected-set-thumb-wrapper">
+                      <img
+                        v-if="selectedSet.webp_image_url || selectedSet.set_img_url"
+                        :src="selectedSet.webp_image_url || selectedSet.set_img_url"
+                        :alt="selectedSet.name || selectedSet.set_num"
+                        class="selected-set-thumb"
+                        @error="handleSelectedSetImageError"
+                      />
+                      <div v-else class="selected-set-no-image">이미지 없음</div>
+                    </div>
+                    <div class="selected-set-text">
+                      <div class="selected-set-number">{{ formatSetNumber(selectedSet.set_num) }}</div>
+                      <div class="selected-set-meta">
+                        <span v-if="selectedSet.theme_name" class="selected-set-theme">{{ selectedSet.theme_name }}</span>
+                        <span v-if="selectedSet.name" class="selected-set-name">{{ selectedSet.name }}</span>
+                      </div>
+                      <span class="selected-set-parts">부품수 : {{ resolvePartCount(selectedSet) }}개</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="instructionLoading" class="loading-state">로딩 중...</div>
+      <div v-else-if="instructionError" class="error-state">{{ instructionError }}</div>
+      <div v-else-if="!instructionLoading && selectedSet && instructions.length === 0" class="empty-state">설명서를 찾을 수 없습니다.</div>
+      <div v-if="!instructionLoading && instructions.length > 0" class="instructions-section">
+        <div class="instructions-header">
+          <h2>설명서 목록</h2>
+          <p>{{ instructions.length }}개 설명서를 찾았습니다.</p>
+        </div>
+        <div class="instructions-grid">
+          <div
+            v-for="instruction in instructions"
+            :key="instruction.id"
+            class="instruction-card"
+          >
+              <div v-if="instruction.thumbnail" class="instruction-thumbnail">
+                <img
+                  :src="instruction.thumbnail"
+                  :alt="instruction.title"
+                  @error="handleThumbnailError"
+                />
+              </div>
+            <div v-else class="instruction-thumbnail-placeholder">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+            </div>
+              <div class="instruction-info">
+                <h3 class="instruction-title">{{ instruction.title }}</h3>
+                <p v-if="instruction.description" class="instruction-description">{{ instruction.description }}</p>
+                <div class="instruction-meta">
+                <span v-if="instruction.source" class="instruction-source">{{ instruction.source }}</span>
+                <span v-if="instruction.fileSize" class="instruction-size">{{ instruction.fileSize }}</span>
+              </div>
+            </div>
+            <div class="instruction-actions">
+              <a
+                class="download-button"
+                :href="instruction.url"
+                target="_blank"
+                rel="noopener"
+              >
+                다운로드
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import { ref } from 'vue'
+import { useSupabase } from '../composables/useSupabase'
+import { formatSetNumber } from '../utils/setDisplay'
+
+export default {
+  name: 'SetInstructions',
+  setup() {
+    const { supabase } = useSupabase()
+
+    const loading = ref(false)
+    const instructionLoading = ref(false)
+    const instructionError = ref(null)
+    const instructions = ref([])
+    const setSearchQuery = ref('')
+    const searchResults = ref([])
+    const searchResultsKey = ref(0)
+    const selectedSet = ref(null)
+    const selectedSetId = ref('')
+    const showSetDropdown = ref(false)
+    const setDropdownRef = ref(null)
+
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+
+    const DEFAULT_THUMBNAIL = 'https://www.lego.com/cdn/product-assets/product.bi.core.img/6602638.png?format=webply&fit=crop&quality=75&width=230&height=230&dpr=1'
+
+    const deriveThumbnailFromPdfUrl = (pdfUrl) => {
+      if (!pdfUrl) return null
+      const match = pdfUrl.match(/product\.bi\.core\.pdf\/(\d+)\.pdf/i)
+      if (!match) return null
+      const assetId = match[1]
+      return `https://www.lego.com/cdn/product-assets/product.bi.core.img/${assetId}.png?format=webply&fit=crop&quality=75&width=230&height=230&dpr=1`
+    }
+
+    // 간단한 메모리 캐시 (세트 번호별로 캐싱)
+    const instructionCache = new Map()
+    const setSearchCache = new Map()
+    const CACHE_TTL = 5 * 60 * 1000 // 5분
+
+    const fetchLegoInstructionsFromWeb = async (setNum, fallbackThumbnail = null) => { // 🔧 수정됨
+      // 캐시 확인
+      const cacheKey = `${setNum}-${fallbackThumbnail || ''}`
+      const cached = instructionCache.get(cacheKey)
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        console.log('[SetInstructions] 캐시에서 설명서 로드:', setNum)
+        return cached.data
+      }
+
+      const locale = 'en-au'
+      const legoUrl = `https://www.lego.com/${locale}/service/buildinginstructions/${setNum}`
+      
+      // 타임아웃 설정 (5초)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 5000)
+
+      try {
+        // 직접 fetch 시도 (더 빠름)
+        let response
+        try {
+          response = await fetch(legoUrl, {
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            signal: controller.signal
+          })
+        } catch (directErr) {
+          // CORS 문제로 직접 fetch 실패 시 프록시 사용
+          console.log('[SetInstructions] 직접 fetch 실패, 프록시 사용:', directErr.message)
+          const proxyUrl = `https://r.jina.ai/${legoUrl}`
+          response = await fetch(proxyUrl, {
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml',
+              'User-Agent': 'Mozilla/5.0'
+            },
+            signal: controller.signal
+          })
+        }
+
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          throw new Error('레고 공식 웹사이트에 연결할 수 없습니다.')
+        }
+
+        const html = await response.text()
+
+      // window.__INITIAL_STATE__ 에서 설명서 정보 추출
+      const instructionEntries = []
+      const initialStateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/s)
+      if (initialStateMatch) {
+        try {
+          const stateData = JSON.parse(initialStateMatch[1])
+          const candidates = stateData?.instructions || stateData?.buildingInstructions || []
+          if (Array.isArray(candidates)) {
+            candidates.forEach((inst, index) => {
+              const url = inst?.url || inst?.pdfUrl || inst?.downloadUrl || null
+              if (!url || !url.includes('.pdf')) return
+              const pdfUrl = url
+              const resolvedThumbnail = inst?.thumbnail || inst?.image || deriveThumbnailFromPdfUrl(pdfUrl) || fallbackThumbnail || DEFAULT_THUMBNAIL
+              instructionEntries.push({
+                id: url || `instruction-${index}`,
+                title: inst?.title || inst?.name || `Building Instructions ${setNum} - Part ${index + 1}`,
+                description: inst?.description || null,
+                url,
+                thumbnail: resolvedThumbnail,
+                source: 'LEGO.com',
+                fileSize: inst?.fileSize || null
+              })
+            })
+          }
+        } catch (err) {
+          console.warn('[SetInstructions] 초기 상태 JSON 파싱 실패:', err)
+        }
+      }
+
+      if (instructionEntries.length > 0) {
+        // 캐시에 저장
+        instructionCache.set(cacheKey, {
+          data: instructionEntries,
+          timestamp: Date.now()
+        })
+        return instructionEntries
+      }
+
+      // 빠른 PDF URL 추출 (정규식만 사용)
+      const pdfRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
+      const matches = [...html.matchAll(pdfRegex)]
+      const urls = [...new Set(matches.map(m => m[0]).filter(Boolean))]
+
+      if (urls.length === 0) {
+        // 더 넓은 패턴 시도
+        const broadRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/[^"'\\s]*\.pdf/gi
+        const broadMatches = [...html.matchAll(broadRegex)]
+        urls.push(...broadMatches.map(m => m[0]).filter(Boolean))
+      }
+
+      const uniqueUrls = [...new Set(urls)]
+      const result = uniqueUrls.map((url, index) => {
+        const derivedThumbnail = deriveThumbnailFromPdfUrl(url) || fallbackThumbnail || DEFAULT_THUMBNAIL
+        return {
+        id: `${setNum}-pdf-${index}`,
+        title: `Building Instructions ${setNum} - Part ${index + 1}`,
+        description: null,
+        url,
+        thumbnail: derivedThumbnail,
+        source: 'LEGO.com',
+        fileSize: null
+        }
+      })
+
+      // 캐시에 저장
+      instructionCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      })
+
+      return result
+      } catch (err) {
+        clearTimeout(timeoutId)
+        if (err.name === 'AbortError') {
+          throw new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')
+        }
+        throw err
+      }
+    }
+
+    const createManualSetFromQuery = (query) => { // 🔧 수정됨
+      const value = String(query || '').trim()
+      if (!value) return null
+      return {
+        id: `manual-${value}`,
+        set_num: value,
+        name: null,
+        theme_name: null,
+        num_parts: null,
+        part_count: null,
+        webp_image_url: null,
+        set_img_url: null
+      }
+    }
+
+    const resolvePartCount = (set) => { // 🔧 수정됨
+      if (!set) return 0
+      const candidates = [set.part_count, set.num_parts]
+      for (const value of candidates) {
+        if (value === null || value === undefined) continue
+        const numeric = Number(value)
+        if (Number.isFinite(numeric)) {
+          return numeric
+        }
+      }
+      return 0
+    }
+
+    const getSetNumberForApi = (setNum) => { // 🔧 수정됨
+      if (!setNum) return ''
+      const value = String(setNum).trim()
+      if (!value) return ''
+      return value.includes('-') ? value : `${value}-1`
+    }
+
+    const formatFileSize = (bytes) => { // 🔧 수정됨
+      if (!bytes || Number.isNaN(Number(bytes))) return null
+      const size = Number(bytes)
+      if (size < 1024) return `${size} B`
+      if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+      if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`
+      return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`
+    }
+
+    const normalizeImageUrl = (set) => { // 🔧 수정됨
+      if (!set) return set
+      let webpImageUrl = set.webp_image_url
+      if (webpImageUrl) {
+        if (!webpImageUrl.startsWith('http')) {
+          if (webpImageUrl.startsWith('/storage/')) {
+            webpImageUrl = `${supabaseUrl}${webpImageUrl}`
+          } else if (webpImageUrl.startsWith('storage/')) {
+            webpImageUrl = `${supabaseUrl}/${webpImageUrl}`
+          }
+        }
+      } else if (set.set_img_url) {
+        webpImageUrl = set.set_img_url
+      }
+      return {
+        ...set,
+        webp_image_url: webpImageUrl,
+        part_count: resolvePartCount(set)
+      }
+    }
+
+    const isCacheValid = (entry) => entry && (Date.now() - entry.timestamp < CACHE_TTL)
+
+    const searchSets = async () => { // 🔧 수정됨
+      if (!setSearchQuery.value.trim()) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
+
+      try {
+        loading.value = true
+        const query = setSearchQuery.value.trim()
+        const mainSetNum = query.split('-')[0]
+        const cacheKey = `${query}:${mainSetNum}`
+        const cached = setSearchCache.get(cacheKey)
+        if (isCacheValid(cached)) {
+          searchResults.value = cached.data
+          showSetDropdown.value = searchResults.value.length > 0
+          loading.value = false
+          return
+        }
+
+        let results = []
+
+        const [exactMatchResult, mainMatchResult] = await Promise.allSettled([
+          supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+          .eq('set_num', query)
+            .limit(20),
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .eq('set_num', mainSetNum)
+            .limit(20)
+        ])
+
+        const exactMatch =
+          exactMatchResult.status === 'fulfilled' && !exactMatchResult.value.error
+            ? exactMatchResult.value.data || []
+            : []
+        const mainMatch =
+          mainMatchResult.status === 'fulfilled' && !mainMatchResult.value.error
+            ? mainMatchResult.value.data || []
+            : []
+
+        if (exactMatch.length > 0) {
+          results = exactMatch
+        } else if (mainMatch.length > 0) {
+            results = mainMatch
+          } else {
+            const { data: likeMatch, error: likeError } = await supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+              .ilike('set_num', `${mainSetNum}%`)
+              .order('set_num')
+              .limit(20)
+
+            if (!likeError && likeMatch && likeMatch.length > 0) {
+              results = likeMatch.filter(set => set.set_num === mainSetNum)
+
+              if (results.length === 0 && likeMatch.length > 0) {
+                const withoutHyphen = likeMatch.filter(set => !set.set_num.includes('-'))
+                if (withoutHyphen.length > 0) {
+                  results = [withoutHyphen.sort((a, b) => a.set_num.length - b.set_num.length)[0]]
+                } else {
+                  results = [likeMatch[0]]
+              }
+            }
+          }
+        }
+
+        if (results.length > 0) {
+          const themeIds = [...new Set(results.map(set => set.theme_id).filter(Boolean))]
+          if (themeIds.length > 0) {
+            const { data: themesData, error: themesError } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .in('theme_id', themeIds)
+
+            if (!themesError && themesData && themesData.length > 0) {
+              const themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
+              results = results.map(set => ({
+                ...set,
+                theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null
+              }))
+            } else {
+              results = results.map(set => ({ ...set, theme_name: null }))
+            }
+          } else {
+            results = results.map(set => ({ ...set, theme_name: null }))
+          }
+        } else if (
+          (exactMatchResult.status === 'rejected') ||
+          (mainMatchResult.status === 'rejected')
+        ) {
+          console.warn('[SetInstructions] set 검색 실패:', {
+            exact: exactMatchResult.status === 'rejected' ? exactMatchResult.reason : null,
+            main: mainMatchResult.status === 'rejected' ? mainMatchResult.reason : null
+          })
+        }
+
+        results = results.map(set => normalizeImageUrl(set))
+
+        // 캐시에 저장
+        setSearchCache.set(cacheKey, {
+          data: results,
+          timestamp: Date.now()
+        })
+
+        searchResults.value = results
+        searchResultsKey.value++
+        showSetDropdown.value = searchResults.value.length > 0
+      } catch (err) {
+        console.error('설명서용 세트 검색 실패:', err)
+        searchResults.value = []
+        showSetDropdown.value = false
+      } finally {
+        loading.value = false
+      }
+    }
+
+    const fetchInstructions = async (set) => { // 🔧 수정됨
+      if (!set) {
+        console.warn('[SetInstructions] fetchInstructions: set이 없습니다')
+        return
+      }
+      
+      console.log('[SetInstructions] fetchInstructions 시작:', { set_num: set.set_num, set })
+      instructionLoading.value = true
+      instructionError.value = null
+      instructions.value = []
+
+      try {
+        const mainSetNum = formatSetNumber(set.set_num)
+        console.log('[SetInstructions] 포맷된 세트 번호:', mainSetNum)
+        
+        const fallbackThumbnail = set.webp_image_url || set.set_img_url || null
+        const downloadableInstructions = await fetchLegoInstructionsFromWeb(mainSetNum, fallbackThumbnail)
+        instructions.value = downloadableInstructions
+        if (instructions.value.length === 0) {
+          instructionError.value = '다운로드 가능한 설명서를 찾을 수 없습니다.'
+        }
+      } catch (err) {
+        console.error('[SetInstructions] 설명서 조회 실패:', err)
+        instructionError.value = err?.message || '설명서를 불러오는데 실패했습니다.'
+      } finally {
+        instructionLoading.value = false
+        console.log('[SetInstructions] fetchInstructions 완료:', {
+          instructionsCount: instructions.value.length,
+          error: instructionError.value
+        })
+      }
+    }
+
+    const handleSearchEnter = async () => { // 🔧 수정됨
+      const query = setSearchQuery.value.trim()
+      if (!query) {
+        searchResults.value = []
+        showSetDropdown.value = false
+        return
+      }
+
+      await searchSets()
+
+      if (searchResults.value.length === 1) {
+        handleSelectSet(searchResults.value[0])
+      } else if (searchResults.value.length > 0) {
+        showSetDropdown.value = true
+      } else {
+        const manualSet = createManualSetFromQuery(query)
+        if (manualSet) {
+          selectedSet.value = manualSet
+          selectedSetId.value = manualSet.id
+          setSearchQuery.value = ''
+          searchResults.value = []
+          showSetDropdown.value = false
+          fetchInstructions(manualSet)
+        }
+      }
+    }
+
+    const handleSearchBlur = () => { // 🔧 수정됨
+      setTimeout(() => {
+        showSetDropdown.value = false
+      }, 200)
+    }
+
+    const handleSelectSet = (set) => { // 🔧 수정됨
+      selectedSet.value = set
+      selectedSetId.value = set.id
+      setSearchQuery.value = ''
+      searchResults.value = []
+      showSetDropdown.value = false
+      fetchInstructions(set)
+    }
+
+    const handleSetImageError = (event) => { // 🔧 수정됨
+      const img = event.target
+      const wrapper = img.closest('.option-image-wrapper')
+      if (wrapper) {
+        img.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important;'
+        let noImageDiv = wrapper.querySelector('.option-no-image')
+        if (!noImageDiv) {
+          noImageDiv = document.createElement('div')
+          noImageDiv.className = 'option-no-image'
+          noImageDiv.textContent = '이미지 없음'
+          wrapper.appendChild(noImageDiv)
+        }
+        noImageDiv.style.cssText = 'display: flex !important; z-index: 2 !important;'
+      }
+    }
+
+    const handleSelectedSetImageError = (event) => { // 🔧 수정됨
+      event.target.style.display = 'none'
+      const wrapper = event.target.closest('.selected-set-thumb-wrapper')
+      if (wrapper) {
+        const placeholder = document.createElement('div')
+        placeholder.className = 'selected-set-no-image'
+        placeholder.textContent = '이미지 없음'
+        wrapper.appendChild(placeholder)
+      }
+    }
+
+    const handleThumbnailError = (event) => { // 🔧 수정됨
+      event.target.style.display = 'none'
+    }
+
+    return {
+      loading,
+      instructionLoading,
+      instructionError,
+      instructions,
+      setSearchQuery,
+      searchResults,
+      searchResultsKey,
+      selectedSet,
+      selectedSetId,
+      showSetDropdown,
+      setDropdownRef,
+      formatSetNumber,
+      resolvePartCount,
+      handleSearchEnter,
+      handleSearchBlur,
+      handleSelectSet,
+      handleSetImageError,
+      handleSelectedSetImageError,
+      handleThumbnailError
+    }
+  }
+}
+</script>
+
+<style scoped>
+.set-instructions-page {
+  min-height: 100vh;
+  background: #f9fafb;
+  padding: 2rem;
+}
+
+.page-header {
+  margin-bottom: 2rem;
+  padding: 0;
+}
+
+.page-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 0.5rem 0;
+  text-align: center;
+}
+
+.page-header p {
+  font-size: 1rem;
+  color: #6b7280;
+  margin: 0;
+  text-align: center;
+}
+
+.set-instructions-content {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.search-section {
+  max-width: 800px;
+  margin: 0 auto 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.setup-card {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  overflow: hidden;
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+.form-group {
+  margin-bottom: 0rem;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  margin-bottom: 0.5rem;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
+}
+
+.set-search-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-search-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  position: relative;
+}
+
+.set-search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.set-search-input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+}
+
+.set-search-input:hover {
+  border-color: #9ca3af;
+}
+
+.set-search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.set-search-input:disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.8;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #6b7280;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.set-search-input:focus + .search-icon {
+  color: #2563eb;
+}
+
+.search-button {
+  padding: 0.75rem 1.5rem;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.search-button:hover {
+  background: #1d4ed8;
+}
+
+.search-button:active {
+  background: #1e40af;
+}
+
+.search-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.custom-select-dropdown {
+  position: relative;
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 18px 36px -12px rgba(15, 23, 42, 0.25);
+  z-index: 20;
+  padding: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.custom-select-option {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.custom-select-option:hover {
+  background: #f5f7ff;
+}
+
+.custom-select-option.active {
+  background: #e0e7ff;
+  color: #1d4ed8;
+}
+
+.option-content {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+}
+
+.option-image-wrapper {
+  width: 80px;
+  height: 80px;
+  min-width: 80px;
+  min-height: 80px;
+  flex-shrink: 0;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.option-set-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
+.option-no-image {
+  color: #9ca3af;
+  font-size: 0.75rem;
+  text-align: center;
+  padding: 0.5rem;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.option-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.option-set-num {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.option-set-title {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.option-set-parts {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.selected-set-info {
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+  padding: 0.75rem 1rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.selected-set-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.selected-set-thumb-wrapper {
+  width: 100px;
+  height: 100px;
+  min-width: 100px;
+  min-height: 100px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.selected-set-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  padding: 0.5rem;
+}
+
+.selected-set-no-image {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  background: #f9fafb;
+}
+
+.selected-set-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.selected-set-number {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.2;
+}
+
+.selected-set-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9375rem;
+  flex-wrap: wrap;
+}
+
+.selected-set-theme {
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.selected-set-name {
+  font-weight: 700;
+  color: #374151;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.selected-set-parts {
+  display: block;
+  font-size: 0.8125rem;
+  color: #6b7280;
+  margin-top: 0rem;
+}
+
+.loading-state,
+.error-state,
+.empty-state {
+  text-align: center;
+  padding: 3rem 2rem;
+  color: #6b7280;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.error-state {
+  color: #dc2626;
+}
+
+.instructions-section {
+  max-width: 1000px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.instructions-header h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.instructions-header p {
+  margin: 0.25rem 0 0;
+  color: #6b7280;
+}
+
+.instructions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+.instruction-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.instruction-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+  transform: translateY(-2px);
+}
+
+.instruction-thumbnail {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.instruction-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
+.instruction-thumbnail-placeholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+}
+
+.instruction-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.instruction-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.instruction-description {
+  font-size: 0.875rem;
+  color: #4b5563;
+  margin: 0;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.instruction-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.instruction-source {
+  padding: 0.25rem 0.5rem;
+  background: #f3f4f6;
+  border-radius: 4px;
+}
+
+.instruction-size {
+  color: #6b7280;
+}
+
+.instruction-actions {
+  display: flex;
+  justify-content: stretch;
+  margin-top: auto;
+}
+
+.download-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: #2563eb;
+  color: #ffffff;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.2s ease;
+}
+
+.download-button:hover {
+  background: #1d4ed8;
+}
+
+@media (max-width: 768px) {
+  .set-instructions-page {
+    padding: 1rem;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem;
+  }
+
+  .page-header p {
+    font-size: 0.875rem;
+  }
+
+  .search-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .card-body {
+    padding: 1rem;
+  }
+
+  .set-search-input-row {
+    flex-direction: row;
+  }
+
+  .instructions-section {
+    gap: 1rem;
+  }
+
+  .instructions-grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+  }
+
+  .instruction-card {
+    padding: 1rem;
+  }
+}
+</style>

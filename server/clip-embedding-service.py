@@ -11,6 +11,7 @@ import sys
 import json
 import asyncio
 from typing import List, Dict, Any, Optional
+from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -153,11 +154,23 @@ async def generate_clip_image_embedding(image_base64: str) -> List[float]:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Image embedding generation failed: {error_msg}")
 
+# Lifespan 이벤트 핸들러 (FastAPI 최신 방식)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """서비스 시작/종료 시 실행"""
+    # 시작 시 모델 로드
+    success = await load_clip_model()
+    if not success:
+        print("[ERROR] Failed to load CLIP model, service may not work properly")
+    yield
+    # 종료 시 정리 작업 (필요시)
+
 # FastAPI 앱 생성
 app = FastAPI(
     title="CLIP Embedding Service",
     description="CLIP ViT-L/14 기반 768차원 임베딩 서비스",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan # 🔧 수정됨: lifespan event handlers 사용
 )
 
 # CORS 설정
@@ -168,13 +181,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def startup_event():
-    """서비스 시작 시 모델 로드"""
-    success = await load_clip_model()
-    if not success:
-        print("[ERROR] Failed to load CLIP model, service may not work properly")
 
 @app.get("/health")
 async def health_check():

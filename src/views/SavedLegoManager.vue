@@ -465,11 +465,18 @@ export default {
           .select('*', { count: 'exact', head: true })
         totalSets.value = setsCount || 0
         
-        // 총 부품 수 (sum)
-        const { data: partsSumData } = await supabase
-          .from('lego_sets')
-          .select('num_parts')
-        totalParts.value = partsSumData?.reduce((sum, set) => sum + (set.num_parts || 0), 0) || 0
+        // 총 부품 수 (중복 제외: lego_parts 테이블의 고유 부품 수)
+        const { count: partsCount, error: partsError } = await supabase
+          .from('lego_parts')
+          .select('*', { count: 'exact', head: true })
+        
+        if (partsError) {
+          console.error('부품 수 조회 실패:', partsError)
+          totalParts.value = 0
+        } else {
+          // 중복 제외 고유 부품 수 (lego_parts 테이블은 이미 고유 부품만 저장)
+          totalParts.value = partsCount || 0
+        }
         
         // WebP 변환 이미지 수
         const { count: webpCount } = await supabase
@@ -686,20 +693,37 @@ export default {
     const searchSavedSets = async () => {
       if (!searchQuery.value.trim()) {
         await loadSavedSets()
+        selectedSet.value = null
+        setParts.value = []
         return
       }
       
       try {
+        const query = searchQuery.value.trim()
+        // 세트 번호 정규화 (71809 -> 71809-1)
+        const formattedQuery = query.includes('-') ? query : `${query}-1`
+        
         const { data, error } = await supabase
           .from('lego_sets')
           .select('*')
-          .or(`set_num.ilike.%${searchQuery.value}%,name.ilike.%${searchQuery.value}%`)
+          .or(`set_num.ilike.%${query}%,set_num.ilike.%${formattedQuery}%,name.ilike.%${query}%`)
           .order('created_at', { ascending: false })
 
         if (error) throw error
         savedSets.value = data || []
+        
+        // 검색 결과가 1개일 때 자동으로 선택
+        if (savedSets.value.length === 1) {
+          console.log(`[SavedLego] 검색 결과 1개, 자동 선택: ${savedSets.value[0].set_num}`)
+          await selectSet(savedSets.value[0])
+        } else {
+          // 검색 결과가 여러 개이거나 없을 때는 선택 해제
+          selectedSet.value = null
+          setParts.value = []
+        }
       } catch (err) {
         console.error('Search failed:', err)
+        error.value = `검색 실패: ${err.message}`
       }
     }
 
@@ -836,8 +860,12 @@ export default {
         return part.lego_parts.part_img_url
       }
       
-      // 3. 실제 이미지 로드 시도
-      return getRealSetImage(set.set_num)
+      // 3. 부품 번호가 있으면 기본 이미지 URL 반환 (이미지 로드 실패 시 fallback)
+      if (part.lego_parts?.part_num) {
+        return null // 이미지가 없으면 null 반환 (handleImageError에서 처리)
+      }
+      
+      return null
     }
 
     // LLM 분석 메타데이터 조회
@@ -2012,6 +2040,8 @@ export default {
   border-radius: 8px;
   padding: 1rem;
   border: 1px solid #e1e5e9;
+  display: flex;
+  flex-direction: column;
 }
 
 .part-image {
@@ -2106,16 +2136,29 @@ export default {
   color: white;
 }
 
-.part-info h4 {
+.part-card .part-info {
+  display: block !important;
+  width: 100% !important;
+  margin-top: 0.5rem !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  height: auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+}
+
+.part-card .part-info h4 {
   font-size: 0.9rem;
   margin-bottom: 0.5rem;
   color: #333;
+  display: block !important;
 }
 
-.part-info p {
+.part-card .part-info p {
   font-size: 0.8rem;
   color: #666;
   margin-bottom: 0.25rem;
+  display: block !important;
 }
 
 /* Element ID 스타일 */
