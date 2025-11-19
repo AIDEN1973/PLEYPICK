@@ -22,12 +22,16 @@ const getPleyonSupabaseClient = () => {
 
     try {
       console.log('[Pleyon] createClient 호출 전')
-      // Supabase 클라이언트 최소 설정 (Realtime 전용)
-      pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
+      
+      // Realtime 전용 클라이언트 설정
+      // REST API는 pleyonApiCall을 통해 직접 fetch 사용
+      const options = {
         auth: {
           persistSession: false,
           autoRefreshToken: false,
-          detectSessionInUrl: false
+          detectSessionInUrl: false,
+          storage: undefined,
+          storageKey: undefined
         },
         realtime: {
           params: {
@@ -36,12 +40,21 @@ const getPleyonSupabaseClient = () => {
         },
         db: {
           schema: 'public'
+        },
+        global: {
+          headers: {}
         }
-      })
-      console.log('[Pleyon] createClient 호출 완료, 클라이언트:', pleyonSupabaseClient)
+      }
+      
+      console.log('[Pleyon] createClient 호출 with options:', options)
+      pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, options)
+      
+      console.log('[Pleyon] createClient 호출 완료, 클라이언트 타입:', typeof pleyonSupabaseClient)
+      console.log('[Pleyon] 클라이언트 키들:', Object.keys(pleyonSupabaseClient || {}))
       console.log('[Pleyon] Supabase 클라이언트 초기화 완료')
     } catch (err) {
       console.error('[Pleyon] Supabase 클라이언트 초기화 실패:', err)
+      console.error('[Pleyon] 오류 메시지:', err.message)
       console.error('[Pleyon] 오류 스택:', err.stack)
       throw err
     }
