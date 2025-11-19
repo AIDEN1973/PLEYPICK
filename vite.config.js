@@ -125,6 +125,13 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         external: ['dotenv']
+      },
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          drop_console: false, // 프로덕션 빌드에서도 console.log 유지
+          drop_debugger: true
+        }
       }
     },
     optimizeDeps: {

@@ -24,12 +24,28 @@ let supabaseInstance = null
 
 const getSupabaseClient = () => {
   if (!supabaseInstance) {
-    supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+    console.log('[BrickBox Supabase] 클라이언트 초기화 시작')
+    console.log('[BrickBox Supabase] URL:', supabaseUrl)
+    console.log('[BrickBox Supabase] Options:', JSON.stringify(supabaseOptions, null, 2))
+    
+    try {
+      supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+      console.log('[BrickBox Supabase] 클라이언트 초기화 성공')
+      console.log('[BrickBox Supabase] 클라이언트 타입:', typeof supabaseInstance)
+      console.log('[BrickBox Supabase] 클라이언트 키:', Object.keys(supabaseInstance || {}).slice(0, 10))
+    } catch (err) {
+      console.error('[BrickBox Supabase] 클라이언트 초기화 실패:', err)
+      console.error('[BrickBox Supabase] 오류 메시지:', err.message)
+      console.error('[BrickBox Supabase] 오류 스택:', err.stack)
+      throw err
+    }
   }
   return supabaseInstance
 }
 
+console.log('[BrickBox Supabase] 모듈 로드 시작')
 export const supabase = getSupabaseClient()
+console.log('[BrickBox Supabase] 모듈 로드 완료')
 
 export function useSupabase() {
   const user = ref(null)
