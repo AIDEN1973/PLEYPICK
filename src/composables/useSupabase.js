@@ -1,14 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
-// Supabase 클라이언트 옵션 (global.headers는 Supabase에서 지원하지 않음)
-const supabaseOptions = {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true
-  }
-}
-
 // 환경 변수 가져오기
 const getSupabaseConfig = () => {
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 
@@ -29,27 +21,82 @@ const getSupabaseConfig = () => {
   return { supabaseUrl, supabaseKey }
 }
 
-// 싱글톤 패턴으로 Supabase 클라이언트 생성
+// 싱글톤 패턴으로 Supabase 클라이언트 생성 (지연 초기화)
 let supabaseInstance = null
 
 const getSupabaseClient = () => {
   if (!supabaseInstance) {
     const { supabaseUrl, supabaseKey } = getSupabaseConfig()
-    supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+    
+    // Supabase 클라이언트 옵션 (최소한의 옵션만 사용)
+    const supabaseOptions = {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true
+      }
+    }
+    
+    try {
+      supabaseInstance = createClient(supabaseUrl, supabaseKey, supabaseOptions)
+    } catch (error) {
+      console.error('[ERROR] Supabase 클라이언트 생성 실패:', error)
+      throw new Error(`Supabase 클라이언트 초기화 실패: ${error.message}`)
+    }
   }
   return supabaseInstance
 }
 
-// 클라이언트를 지연 초기화하되, 접근 시 즉시 생성
-export const supabase = getSupabaseClient()
+// 클라이언트 초기화 (안전한 방식)
+let supabaseExport = null
+
+try {
+  supabaseExport = getSupabaseClient()
+} catch (error) {
+  console.error('[ERROR] Supabase 초기화 실패:', error)
+  // 개발 모드에서는 fallback 사용
+  if (!import.meta.env.PROD) {
+    try {
+      const fallbackUrl = 'https://npferbxuxocbfnfbpcnz.supabase.co'
+      const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
+      supabaseExport = createClient(fallbackUrl, fallbackKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true
+        }
+      })
+      console.warn('[WARNING] Fallback Supabase 클라이언트 사용')
+    } catch (fallbackError) {
+      console.error('[ERROR] Fallback 클라이언트 생성도 실패:', fallbackError)
+    }
+  }
+}
+
+export const supabase = supabaseExport
 
 export function useSupabase() {
   const user = ref(null)
   const loading = ref(true)
 
+  // supabase 클라이언트가 초기화되었는지 확인
+  if (!supabase) {
+    console.error('[ERROR] Supabase 클라이언트가 초기화되지 않았습니다.')
+    loading.value = false
+    return {
+      supabase: null,
+      user,
+      loading,
+      signUp: async () => ({ data: null, error: { message: 'Supabase 클라이언트가 초기화되지 않았습니다.' } }),
+      signIn: async () => ({ data: null, error: { message: 'Supabase 클라이언트가 초기화되지 않았습니다.' } }),
+      signOut: async () => ({ error: { message: 'Supabase 클라이언트가 초기화되지 않았습니다.' } })
+    }
+  }
+
   // 현재 세션 확인
   supabase.auth.getSession().then(({ data: { session } }) => {
     user.value = session?.user ?? null
+    loading.value = false
+  }).catch((error) => {
+    console.error('[ERROR] 세션 확인 실패:', error)
     loading.value = false
   })
 
