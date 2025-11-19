@@ -5,16 +5,18 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfn
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
 
 // CORS 및 Storage 접근을 위한 추가 옵션
-// 주의: 'global' 키는 Vite의 define 설정과 충돌하므로 제거
-// Supabase는 기본적으로 필요한 헤더를 자동으로 설정함
 const supabaseOptions = {
   auth: {
     persistSession: true,
     autoRefreshToken: true
+  },
+  global: {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
   }
-  // global.headers는 Supabase가 자동으로 처리하므로 명시할 필요 없음
-  // Vite의 define에서 'global'을 'globalThis'로 변환하므로
-  // Supabase 옵션에서 global 키를 사용하면 undefined가 됨
 }
 
 // 싱글톤 패턴으로 Supabase 클라이언트 생성

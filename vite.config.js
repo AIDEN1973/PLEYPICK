@@ -144,7 +144,8 @@ export default defineConfig(({ mode }) => {
     define: {
       __VUE_OPTIONS_API__: true,
       __VUE_PROD_DEVTOOLS__: false,
-      'global': 'globalThis', // [FIX] 수정됨: 브라우저에서 global 변수 지원
+      // 'global': 'globalThis' 제거 - Supabase 옵션의 'global' 키와 충돌 방지
+      // 브라우저에서는 이미 globalThis가 기본값이므로 별도 변환 불필요
     },
     server: {
       port: portConfig.frontend,
