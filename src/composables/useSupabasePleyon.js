@@ -9,21 +9,43 @@ let pleyonSupabaseClient = null
 const getPleyonSupabaseClient = async () => {
   if (!pleyonSupabaseClient && typeof window !== 'undefined') {
     try {
-      const { createClient } = await import('@supabase/supabase-js')
-      pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
-        realtime: {
-          params: {
-            eventsPerSecond: 10
-          }
-        },
-        auth: {
-          storage: {
-            getItem: () => null,
-            setItem: () => {},
-            removeItem: () => {}
-          }
+      let createClient = null
+      
+      // 1. 전역 변수에서 로드 (index.html의 CDN 스크립트)
+      if (window.supabase && window.supabase.createClient) {
+        createClient = window.supabase.createClient
+        console.log('[Pleyon] Supabase 전역 변수에서 로드')
+      }
+      // 2. 동적 import 시도 (개발 모드)
+      else {
+        try {
+          const supabaseModule = await import('@supabase/supabase-js')
+          createClient = supabaseModule.createClient
+          console.log('[Pleyon] Supabase 동적 import로 로드')
+        } catch (importError) {
+          console.warn('[Pleyon] Supabase 모듈 import 실패:', importError)
         }
-      })
+      }
+      
+      if (createClient) {
+        pleyonSupabaseClient = createClient(pleyonSupabaseUrl, pleyonSupabaseKey, {
+          realtime: {
+            params: {
+              eventsPerSecond: 10
+            }
+          },
+          auth: {
+            storage: {
+              getItem: () => null,
+              setItem: () => {},
+              removeItem: () => {}
+            }
+          }
+        })
+        console.log('[Pleyon] Supabase 클라이언트 런타임 초기화 성공')
+      } else {
+        console.error('[Pleyon] Supabase createClient를 찾을 수 없습니다')
+      }
     } catch (error) {
       console.error('[Pleyon] Supabase 클라이언트 초기화 실패:', error)
     }

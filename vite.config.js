@@ -126,7 +126,19 @@ export default defineConfig(({ mode }) => {
     build: {
       target: 'es2020', // 브라우저 호환성
       rollupOptions: {
-        external: ['dotenv']
+        external: ['dotenv'],
+        output: {
+          manualChunks: (id) => {
+            // Supabase는 별도 청크로 분리하지 않음 (동적 import로 처리)
+            if (id.includes('@supabase/supabase-js')) {
+              return null // 번들에 포함하지 않음
+            }
+            // node_modules는 vendor 청크로
+            if (id.includes('node_modules')) {
+              return 'vendor'
+            }
+          }
+        }
       },
       // CommonJS 변환 방지 (ESM 유지)
       commonjsOptions: {
