@@ -14,6 +14,22 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // 🔧 수정됨: 프로덕션 번들에서 Request/Response/Headers가 undefined인 환경 보호
+      (function () {
+        try {
+          var g = (typeof globalThis !== 'undefined') ? globalThis : (typeof window !== 'undefined' ? window : self);
+          if (typeof window !== 'undefined') {
+            if (!g.fetch && typeof window.fetch === 'function') g.fetch = window.fetch.bind(window);
+            if (!g.Headers && typeof window.Headers !== 'undefined') g.Headers = window.Headers;
+            if (!g.Request && typeof window.Request !== 'undefined') g.Request = window.Request;
+            if (!g.Response && typeof window.Response !== 'undefined') g.Response = window.Response;
+          }
+        } catch (e) {
+          // no-op
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
