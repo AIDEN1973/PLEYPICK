@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
 // 환경 변수 가져오기 (프로덕션 빌드 시 Vercel에서 주입됨)
@@ -20,22 +19,65 @@ if (import.meta.env.PROD) {
   }
 }
 
-// Supabase 클라이언트 생성 (원래 방식: 모듈 레벨에서 즉시 초기화)
+// Supabase 클라이언트 런타임 초기화 (빌드 시점이 아닌 실행 시점)
 let supabaseInstance = null
 
-try {
-  if (supabaseUrl && supabaseKey) {
-    // 옵션 없이 기본값만 사용 (useSupabasePleyon과 동일한 방식)
-    supabaseInstance = createClient(supabaseUrl, supabaseKey)
-  } else {
-    console.warn('[WARN] Supabase URL or Key is missing, client not initialized')
+const getSupabaseClient = async () => {
+  if (!supabaseInstance) {
+    // 브라우저 환경에서만 동적 import로 Supabase 클라이언트 생성
+    if (typeof window !== 'undefined') {
+      try {
+        const { createClient } = await import('@supabase/supabase-js')
+        
+        if (supabaseUrl && supabaseKey) {
+          supabaseInstance = createClient(supabaseUrl, supabaseKey)
+          console.log('[DEBUG] Supabase 클라이언트 런타임 초기화 성공')
+        } else {
+          console.warn('[WARN] Supabase URL or Key is missing')
+        }
+      } catch (error) {
+        console.error('[ERROR] Supabase 클라이언트 초기화 실패:', error)
+      }
+    }
   }
-} catch (error) {
-  console.error('[ERROR] Supabase 클라이언트 초기화 실패:', error)
-  // 초기화 실패해도 앱이 크래시되지 않도록 null 유지
+  return supabaseInstance
 }
 
-export const supabase = supabaseInstance
+// 동기 접근을 위한 Proxy (비동기 초기화 래핑)
+export const supabase = new Proxy({}, {
+  get(target, prop) {
+    if (prop === 'then') {
+      // Promise로 사용될 때
+      return undefined
+    }
+    
+    // 이미 초기화된 경우
+    if (supabaseInstance) {
+      const value = supabaseInstance[prop]
+      if (typeof value === 'function') {
+        return value.bind(supabaseInstance)
+      }
+      return value
+    }
+    
+    // 아직 초기화 안된 경우 - 초기화 트리거
+    getSupabaseClient().then(client => {
+      if (!client) {
+        console.error('[ERROR] Supabase 클라이언트를 초기화할 수 없습니다')
+      }
+    })
+    
+    // 임시로 에러 방지용 객체 반환
+    if (prop === 'auth') {
+      return {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: null } })
+      }
+    }
+    
+    return undefined
+  }
+})
 
 export function useSupabase() {
   const user = ref(null)
