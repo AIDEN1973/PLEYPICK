@@ -48,13 +48,31 @@
                       :class="{ active: selectedSetId === set.id }"
                       @click="handleSelectSet(set)"
                     >
-                      <span class="option-set-num">{{ formatSetNumber(set.set_num) }}</span>
-                      <span class="option-set-title">{{ [set.theme_name, set.name].filter(Boolean).join(' ') || (set.name || '') }}</span>
-                      <span class="option-set-parts">부품수 : {{ resolvePartCount(set) }}개</span>
+                      <div class="option-set-image-wrapper">
+                        <img
+                          v-if="set.webp_image_url || set.set_img_url"
+                          :src="set.webp_image_url || set.set_img_url"
+                          :alt="set.name || set.set_num"
+                          class="option-set-image"
+                          @error="handleSetImageError"
+                        />
+                        <div v-else class="option-set-no-image">이미지 없음</div>
+                      </div>
+                      <div class="option-set-content">
+                        <span class="option-set-num">{{ formatSetNumber(set.set_num) }}</span>
+                        <span class="option-set-title">{{ [set.theme_name, set.name].filter(Boolean).join(' ') || (set.name || '') }}</span>
+                        <span class="option-set-parts">부품수 : {{ resolvePartCount(set) }}개</span>
+                      </div>
                     </button>
                   </div>
                 </transition>
                 <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                  <button class="close-result-button" @click="resetPage" title="초기화">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                   <div class="selected-set-row">
                     <div class="selected-set-thumb-wrapper">
                       <img
@@ -82,6 +100,65 @@
         </div>
       </div>
 
+      <!-- 검수 중인 세트 목록 -->
+      <div v-if="!loading && !error && inspectionSets && inspectionSets.length > 0 && !setSearchQuery.trim() && !selectedSetId && missingPartsBySet.length === 0" class="inspection-sets-section">
+        <div class="result-header"><h3>검수 중인 레고</h3></div>
+        <div class="sets-grid">
+          <div
+            v-for="set in inspectionSets"
+            :key="set.id"
+            class="set-card"
+            @click="handleSelectSet(set)"
+          >
+            <div class="set-image">
+              <img
+                v-if="set.image_url"
+                :src="set.image_url"
+                :alt="set.name"
+                @error="handleSetImageError"
+              />
+              <div v-else class="no-image">이미지 없음</div>
+              <button
+                class="set-parts-icon-button"
+                @click.stop="openMissingPartsModal(set)"
+                :title="'누락부품 정보 보기'"
+              >
+                <svg class="search-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="set-info">
+              <div class="set-name-container">
+                <span class="set-number-badge">{{ formatSetNumber(set.set_num) }}</span>
+                <div class="set-name-wrapper">
+                  <span v-if="set.theme_name" class="set-theme-name">{{ set.theme_name }}</span>
+                  <span v-if="set.theme_name && set.name" class="set-name-divider">|</span>
+                  <span v-if="set.name" class="set-name-text">{{ set.name }}</span>
+                </div>
+              </div>
+              <div class="set-stats">
+                <div class="status-badges">
+                  <span v-if="set.status === 'in_progress'" class="status-badge in-progress">진행 중</span>
+                  <span v-if="set.status === 'paused'" class="status-badge paused">일시정지</span>
+                  <span v-if="set.status === 'completed'" class="status-badge completed">완료</span>
+                  <span v-if="set.progress !== undefined && set.progress !== null" class="progress-badge">
+                    {{ set.progress }}%
+                  </span>
+                  <span v-if="set.missingInfo" class="missing-badge">
+                    {{ set.missingInfo.partTypes }}개 분류, 총 {{ set.missingInfo.totalCount }}개
+                  </span>
+                  <span v-if="set.last_saved_at || set.completed_at" class="time-badge">
+                    {{ formatTime(set.last_saved_at || set.completed_at) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div v-if="loading" class="loading-state">
         <span>로딩 중...</span>
       </div>
@@ -90,7 +167,7 @@
         <span>{{ error }}</span>
       </div>
 
-      <div v-if="!loading && !error && missingPartsBySet.length > 0" class="missing-parts-list">
+      <div v-if="!loading && !error && missingPartsBySet && missingPartsBySet.length > 0" class="missing-parts-list">
         <div
           v-for="setGroup in missingPartsBySet"
           :key="setGroup.set_id"
@@ -128,10 +205,11 @@
                   <span 
                     class="color-badge"
                     :style="{ 
-                      backgroundColor: getColorRgb(part.color_rgb) || '#ccc'
+                      backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                      color: getColorTextColor(part.color_rgb)
                     }"
                   >
-                    {{ (part.color_name && part.color_name.trim()) ? part.color_name : `Color ${part.color_id}` }}
+                    {{ formatColorLabel(part.color_name, part.color_id) }}
                   </span>
                 </div>
               </div>
@@ -144,7 +222,10 @@
                     class="part-image"
                     @error="handleImageError($event)"
                   />
-                  <div v-else class="no-part-image">이미지 없음</div>
+                  <div v-else class="no-part-image">
+                    <span>이미지 없음</span>
+                    <small v-if="part.element_id" style="display:block;font-size:0.7rem;margin-top:4px;">ID: {{ part.element_id }}</small>
+                  </div>
                 </div>
                 <div class="quantity-section">
                   <div class="quantity-badge">{{ part.missing_count }}개</div>
@@ -152,6 +233,63 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 누락부품 정보 모달 -->
+    <div v-if="showMissingPartsModal" class="modal-overlay" @click.self="closeMissingPartsModal">
+      <div class="modal-container">
+        <div class="modal-header">
+          <h3>{{ selectedModalSet ? formatSetDisplay(selectedModalSet.set_num, selectedModalSet.theme_name, selectedModalSet.name) : '' }}</h3>
+          <button class="modal-close-button" @click="closeMissingPartsModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="missingPartsModalLoading" class="loading-message">로딩 중...</div>
+          <div v-else-if="missingPartsModalError" class="error-message">{{ missingPartsModalError }}</div>
+          <div v-else-if="missingPartsModalData && missingPartsModalData.length > 0" class="set-parts-list">
+            <div class="parts-grid modal-parts-grid">
+              <div
+                v-for="(part, index) in missingPartsModalData"
+                :key="`${part.part_id}-${part.color_id}-${index}`"
+                class="part-card"
+              >
+                <div class="card-header">
+                  <div class="part-info">
+                    <div v-if="part.element_id" class="element-id">
+                      {{ part.element_id }}
+                    </div>
+                    <h4 class="part-name">{{ part.part_name }}</h4>
+                    <span 
+                      class="color-badge"
+                      :style="{ 
+                        backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                        color: getColorTextColor(part.color_rgb)
+                      }"
+                    >
+                      {{ formatColorLabel(part.color_name, part.color_id) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="part-image-section">
+                    <img
+                      v-if="part.image_url"
+                      :src="part.image_url"
+                      :alt="part.part_name"
+                      class="part-image"
+                      @error="handlePartImageError"
+                    />
+                    <div v-else class="no-part-image">이미지 없음</div>
+                  </div>
+                  <div class="quantity-section">
+                    <div class="quantity-badge">누락 {{ part.missing_count }}개</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-message">누락부품이 없습니다.</div>
         </div>
       </div>
     </div>
@@ -188,6 +326,14 @@ export default {
     const storeInfo = ref(null)
 
     const sessionInfoMap = ref(new Map())
+    const inspectionSets = ref([])
+
+    // 누락부품 모달 관련
+    const showMissingPartsModal = ref(false)
+    const selectedModalSet = ref(null)
+    const missingPartsModalData = ref([])
+    const missingPartsModalLoading = ref(false)
+    const missingPartsModalError = ref(null)
 
     const missingPartsBySet = computed(() => {
       const grouped = new Map()
@@ -217,7 +363,7 @@ export default {
             part_name: part.part_name,
             color_name: part.color_name,
             color_rgb: part.color_rgb,
-            part_img_url: part.part_img_url,
+            supabase_image_url: part.supabase_image_url,
             missing_count: part.missing_count
           })
         }
@@ -260,7 +406,9 @@ export default {
     }
 
     const searchSets = async () => {
+      console.log('[MissingParts] searchSets 호출:', { query: setSearchQuery.value })
       if (!setSearchQuery.value.trim()) {
+        console.log('[MissingParts] 검색 쿼리 없음, 검색 결과 초기화')
         searchResults.value = []
         showSetDropdown.value = false
         return
@@ -269,10 +417,12 @@ export default {
       try {
         const query = setSearchQuery.value.trim()
         const mainSetNum = query.split('-')[0]
+        console.log('[MissingParts] 검색 시작:', { query, mainSetNum })
         let results = []
 
         // 매장 인벤토리에서만 검색
         if (storeInventory.value.length === 0) {
+          console.log('[MissingParts] 매장 인벤토리 로드 필요')
           await loadStoreInventory()
         }
 
@@ -298,48 +448,151 @@ export default {
           })
           .filter(Boolean)
 
-        console.log('[MissingParts] 매장 인벤토리 세트 번호:', inventorySetNumbers.length, '개')
+        console.log('[MissingParts] 매장 인벤토리 세트 번호:', inventorySetNumbers.length, '개', { sample: inventorySetNumbers.slice(0, 5) })
 
         // 1단계: 정확한 매칭 시도 (인벤토리 내에서만)
         const exactMatches = inventorySetNumbers.filter(num => num === query || num === mainSetNum)
+        console.log('[MissingParts] 정확한 매칭 시도:', { 
+          query, 
+          mainSetNum, 
+          exactMatches: exactMatches.length, 
+          matches: exactMatches 
+        })
         
         if (exactMatches.length > 0) {
           const matchedSetNums = [...new Set(exactMatches)]
+          console.log('[MissingParts] 정확한 매칭 세트 번호:', matchedSetNums)
+          
+          // 세트 번호 형식 변환 시도 (예: '71834' -> '71834-1', '71834-2' 등)
+          const allPossibleSetNums = new Set(matchedSetNums)
+          matchedSetNums.forEach(num => {
+            // 기본 세트 번호에 -1, -2 등을 추가하여 검색
+            allPossibleSetNums.add(`${num}-1`)
+            allPossibleSetNums.add(`${num}-2`)
+          })
+          
           const { data: exactMatch, error: exactError } = await supabase
             .from('lego_sets')
             .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-            .in('set_num', matchedSetNums)
+            .in('set_num', Array.from(allPossibleSetNums))
             .limit(20)
 
+          if (exactError) {
+            console.error('[MissingParts] 정확한 매칭 조회 오류:', exactError)
+          } else {
+            console.log('[MissingParts] 정확한 매칭 결과:', exactMatch?.length || 0, { exactMatch })
+          }
+
           if (!exactError && exactMatch && exactMatch.length > 0) {
-            results = exactMatch
+            // 원본 쿼리와 일치하는 것 우선 선택
+            const exactQueryMatch = exactMatch.find(set => set.set_num === query || set.set_num === mainSetNum)
+            if (exactQueryMatch) {
+              results = [exactQueryMatch]
+            } else {
+              // 세트 번호가 쿼리로 시작하는 것 선택
+              const startsWithMatch = exactMatch.find(set => 
+                set.set_num.startsWith(mainSetNum) || set.set_num.startsWith(query)
+              )
+              if (startsWithMatch) {
+                results = [startsWithMatch]
+              } else {
+                results = [exactMatch[0]]
+              }
+            }
+            console.log('[MissingParts] 정확한 매칭으로 결과 설정:', results.length, { results })
           }
         }
 
         // 2단계: LIKE 패턴으로 검색 (인벤토리 내에서만)
         if (results.length === 0) {
+          console.log('[MissingParts] LIKE 패턴 검색 시도')
           const likeMatches = inventorySetNumbers.filter(num => 
             num.startsWith(mainSetNum) || num.includes(mainSetNum)
           )
+          console.log('[MissingParts] LIKE 매칭:', { likeMatches: likeMatches.length, matches: likeMatches })
 
           if (likeMatches.length > 0) {
             const matchedSetNums = [...new Set(likeMatches)]
-            const { data: likeMatch, error: likeError } = await supabase
+            console.log('[MissingParts] LIKE 매칭 세트 번호:', matchedSetNums)
+            
+            // 세트 번호 변형 생성 (예: '71834' -> ['71834', '71834-1', '71834-2'])
+            const setNumVariations = new Set()
+            matchedSetNums.forEach(num => {
+              setNumVariations.add(num)
+              setNumVariations.add(`${num}-1`)
+              setNumVariations.add(`${num}-2`)
+            })
+            
+            console.log('[MissingParts] 세트 번호 변형:', Array.from(setNumVariations))
+            
+            // 1단계: 정확한 매칭 시도 (변형 포함)
+            const { data: exactVariations, error: exactVarError } = await supabase
               .from('lego_sets')
               .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-              .in('set_num', matchedSetNums)
+              .in('set_num', Array.from(setNumVariations))
               .order('set_num')
               .limit(20)
 
-            if (!likeError && likeMatch && likeMatch.length > 0) {
-              results = likeMatch.filter(set => set.set_num === mainSetNum)
-              
-              if (results.length === 0 && likeMatch.length > 0) {
-                const withoutHyphen = likeMatch.filter(set => !set.set_num.includes('-'))
-                if (withoutHyphen.length > 0) {
-                  results = [withoutHyphen.sort((a, b) => a.set_num.length - b.set_num.length)[0]]
+            if (exactVarError) {
+              console.error('[MissingParts] 세트 번호 변형 조회 오류:', exactVarError)
+            } else {
+              console.log('[MissingParts] 세트 번호 변형 조회 결과:', exactVariations?.length || 0, { exactVariations })
+            }
+
+            if (!exactVarError && exactVariations && exactVariations.length > 0) {
+              // 원본 쿼리와 정확히 일치하는 것 우선
+              const exactQueryMatch = exactVariations.find(set => 
+                set.set_num === query || set.set_num === mainSetNum
+              )
+              if (exactQueryMatch) {
+                results = [exactQueryMatch]
+                console.log('[MissingParts] 정확한 쿼리 매칭:', results[0]?.set_num)
+              } else {
+                // 세트 번호로 시작하는 것 선택 (하이픈 없는 것 우선)
+                const startsWithMatch = exactVariations.find(set => 
+                  set.set_num.startsWith(mainSetNum) && !set.set_num.includes('-')
+                )
+                if (startsWithMatch) {
+                  results = [startsWithMatch]
+                  console.log('[MissingParts] 하이픈 없는 시작 매칭:', results[0]?.set_num)
                 } else {
-                  results = [likeMatch[0]]
+                  // 하이픈 있는 것 중 가장 짧은 것 선택
+                  const sorted = exactVariations.sort((a, b) => a.set_num.length - b.set_num.length)
+                  results = [sorted[0]]
+                  console.log('[MissingParts] 가장 짧은 세트 번호 선택:', results[0]?.set_num)
+                }
+              }
+            } else {
+              // 2단계: ilike로 시작하는 패턴 검색
+              const { data: likeMatch, error: likeError } = await supabase
+                .from('lego_sets')
+                .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+                .ilike('set_num', `${mainSetNum}%`)
+                .order('set_num')
+                .limit(20)
+
+              if (likeError) {
+                console.error('[MissingParts] ilike 조회 오류:', likeError)
+              } else {
+                console.log('[MissingParts] ilike 조회 결과:', likeMatch?.length || 0, { likeMatch })
+              }
+
+              if (!likeError && likeMatch && likeMatch.length > 0) {
+                // 정확히 일치하는 것 우선
+                const exactMatch = likeMatch.find(set => set.set_num === mainSetNum || set.set_num === query)
+                if (exactMatch) {
+                  results = [exactMatch]
+                  console.log('[MissingParts] ilike 정확한 매칭:', results[0]?.set_num)
+                } else {
+                  // 하이픈 없는 것 우선
+                  const withoutHyphen = likeMatch.filter(set => !set.set_num.includes('-'))
+                  if (withoutHyphen.length > 0) {
+                    results = [withoutHyphen.sort((a, b) => a.set_num.length - b.set_num.length)[0]]
+                    console.log('[MissingParts] ilike 하이픈 없는 세트 선택:', results[0]?.set_num)
+                  } else {
+                    results = [likeMatch[0]]
+                    console.log('[MissingParts] ilike 첫 번째 결과 선택:', results[0]?.set_num)
+                  }
                 }
               }
             }
@@ -362,31 +615,38 @@ export default {
               results = results.map(set => ({
                 ...set,
                 theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
-                part_count: set.num_parts || 0
+                part_count: set.num_parts || 0,
+                num_parts: set.num_parts || 0
               }))
             } else {
               results = results.map(set => ({
                 ...set,
                 theme_name: null,
-                part_count: set.num_parts || 0
+                part_count: set.num_parts || 0,
+                num_parts: set.num_parts || 0
               }))
             }
           } else {
             results = results.map(set => ({
               ...set,
               theme_name: null,
-              part_count: set.num_parts || 0
+              part_count: set.num_parts || 0,
+              num_parts: set.num_parts || 0
             }))
           }
         }
         
+        console.log('[MissingParts] 최종 검색 결과:', results.length, { results })
         searchResults.value = results
         searchResultsKey.value++
+        console.log('[MissingParts] searchResults 설정 완료:', searchResults.value.length, 'showSetDropdown:', showSetDropdown.value)
         
         if (searchResults.value.length > 0) {
           showSetDropdown.value = true
+          console.log('[MissingParts] 드롭다운 표시')
         } else {
           showSetDropdown.value = false
+          console.log('[MissingParts] 드롭다운 숨김 (결과 없음)')
         }
       } catch (err) {
         console.error('[MissingParts] 세트 검색 실패:', err)
@@ -396,18 +656,25 @@ export default {
     }
 
     const handleSearchEnter = async () => {
+      console.log('[MissingParts] handleSearchEnter 호출:', { query: setSearchQuery.value })
       if (!setSearchQuery.value.trim()) {
+        console.log('[MissingParts] 검색 쿼리 없음')
         searchResults.value = []
         showSetDropdown.value = false
         return
       }
       
       await searchSets()
+      console.log('[MissingParts] searchSets 완료, 검색 결과 수:', searchResults.value.length)
       
       if (searchResults.value.length === 1) {
+        console.log('[MissingParts] 검색 결과 1개, 자동 선택:', searchResults.value[0])
         handleSelectSet(searchResults.value[0])
       } else if (searchResults.value.length > 0) {
+        console.log('[MissingParts] 검색 결과 여러 개, 드롭다운 표시')
         showSetDropdown.value = true
+      } else {
+        console.log('[MissingParts] 검색 결과 없음')
       }
     }
 
@@ -419,15 +686,93 @@ export default {
     }
 
     const handleSelectSet = async (set) => {
-      selectedSet.value = set
+      console.log('[MissingParts] handleSelectSet 호출:', { 
+        setNum: set?.set_num, 
+        setId: set?.id,
+        setName: set?.name,
+        hasImage: !!(set?.image_url || set?.webp_image_url || set?.set_img_url),
+        numParts: set?.num_parts || set?.part_count,
+        source: '레고카드 클릭'
+      })
+      
+      // 검색 입력란에 세트 번호 설정 (접미어 제거)
+      const formattedSetNum = formatSetNumber(set.set_num) || ''
+      setSearchQuery.value = formattedSetNum
+      
+      // DB에서 세트 정보를 다시 조회하여 num_parts 확보 (검색창 직접 검색과 동일한 로직)
+      let setWithParts = { ...set }
+      try {
+        const { data: setData, error: setError } = await supabase
+          .from('lego_sets')
+          .select('id, set_num, name, theme_id, num_parts, webp_image_url, set_img_url')
+          .eq('id', set.id)
+          .single()
+        
+        if (!setError && setData) {
+          // 테마 정보 조회
+          if (setData.theme_id) {
+            const { data: themeData, error: themeError } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .eq('theme_id', setData.theme_id)
+              .single()
+            
+            if (!themeError && themeData) {
+              setWithParts.theme_name = themeData.name
+            }
+          }
+          
+          setWithParts = {
+            ...setWithParts,
+            ...setData,
+            theme_name: setWithParts.theme_name || null,
+            num_parts: setData.num_parts || 0,
+            part_count: setData.num_parts || 0
+          }
+          console.log('[MissingParts] DB에서 세트 정보 조회 완료:', {
+            num_parts: setWithParts.num_parts,
+            part_count: setWithParts.part_count
+          })
+        }
+      } catch (err) {
+        console.error('[MissingParts] 세트 정보 조회 실패:', err)
+        // 조회 실패 시 기존 데이터 사용
+      }
+      
+      // selectedSet을 검색 결과 형식으로 변환하여 설정
+      const searchResultSet = {
+        ...setWithParts,
+        set_num: setWithParts.set_num,
+        name: setWithParts.name,
+        theme_name: setWithParts.theme_name,
+        num_parts: setWithParts.num_parts || 0,
+        webp_image_url: setWithParts.webp_image_url || setWithParts.image_url,
+        set_img_url: setWithParts.set_img_url || setWithParts.image_url,
+        part_count: setWithParts.num_parts || 0
+      }
+      
+      selectedSet.value = searchResultSet
       selectedSetId.value = set.id
-      setSearchQuery.value = ''
-      searchResults.value = []
+      searchResults.value = [searchResultSet]
       showSetDropdown.value = false
+      
+      console.log('[MissingParts] 상태 설정 완료:', { 
+        selectedSetId: selectedSetId.value, 
+        setSearchQuery: setSearchQuery.value,
+        formattedSetNum,
+        selectedSet: {
+          ...selectedSet.value,
+          num_parts: selectedSet.value.num_parts,
+          part_count: selectedSet.value.part_count
+        },
+        searchResults: searchResults.value.length
+      })
       
       // 부품 정보가 있는지 확인
       try {
+        console.log('[MissingParts] 부품 정보 확인 시작:', set.set_num)
         const partsStatus = await checkSetPartsExist(set.set_num)
+        console.log('[MissingParts] 부품 정보 확인 결과:', partsStatus)
         
         if (!partsStatus.partsExist) {
           // 부품 정보가 없으면 자동으로 동기화
@@ -449,15 +794,259 @@ export default {
         // 확인 실패해도 계속 진행
       }
       
-      loadMissingParts()
+      console.log('[MissingParts] loadMissingParts 호출 전, 상태:', {
+        selectedSetId: selectedSetId.value,
+        setSearchQuery: setSearchQuery.value,
+        hasUser: !!user.value
+      })
+      await loadMissingParts()
+      console.log('[MissingParts] loadMissingParts 완료:', {
+        missingParts: missingParts.value.length,
+        missingPartsBySet: missingPartsBySet.value.length,
+        loading: loading.value,
+        error: error.value
+      })
+    }
+
+    // 각 set_id별로 가장 최신 세션만 선택하는 함수
+    const getSessionTimestamp = (session) => {
+      if (session.completed_at) return new Date(session.completed_at).getTime()
+      if (session.last_saved_at) return new Date(session.last_saved_at).getTime()
+      if (session.started_at) return new Date(session.started_at).getTime()
+      return 0
+    }
+
+    const getLatestSessionsBySet = (sessionList) => {
+      const latestSessionsBySet = new Map()
+      sessionList.forEach(session => {
+        const setId = session.set_id
+        if (!setId) return
+
+        const existing = latestSessionsBySet.get(setId)
+        if (!existing) {
+          latestSessionsBySet.set(setId, session)
+        } else {
+          const sessionTime = getSessionTimestamp(session)
+          const existingTime = getSessionTimestamp(existing)
+          if (sessionTime > existingTime) {
+            latestSessionsBySet.set(setId, session)
+          }
+        }
+      })
+      return Array.from(latestSessionsBySet.values())
+    }
+
+    // 검수 중인 세트 목록 로드 (항상 실행)
+    const loadInspectionSets = async () => {
+      console.log('[MissingParts] loadInspectionSets 시작')
+      if (!user.value) {
+        console.log('[MissingParts] 사용자 없음, inspectionSets 초기화')
+        inspectionSets.value = []
+        return
+      }
+
+      try {
+        console.log('[MissingParts] 관리자 여부 확인 중...', { email: user.value.email })
+        // 관리자 여부 확인
+        const { data: adminData } = await supabase
+          .from('admin_users')
+          .select('id, role, is_active')
+          .eq('email', user.value.email)
+          .eq('is_active', true)
+          .maybeSingle()
+        
+        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
+        console.log('[MissingParts] 관리자 여부:', isAdmin, { adminData })
+
+        // 모든 검수 중인 세션 조회
+        let allSessionsQuery = supabase
+          .from('inspection_sessions')
+          .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
+          .in('status', ['in_progress', 'paused', 'completed'])
+
+        if (!isAdmin) {
+          allSessionsQuery = allSessionsQuery.eq('user_id', user.value.id)
+          console.log('[MissingParts] 일반 사용자 필터 적용:', user.value.id)
+        }
+
+        console.log('[MissingParts] 세션 조회 시작...')
+        const { data: allSessions, error: allSessionsError } = await allSessionsQuery
+        if (allSessionsError) {
+          console.error('[MissingParts] 세션 조회 오류:', allSessionsError)
+          throw allSessionsError
+        }
+
+        console.log('[MissingParts] 조회된 세션 수:', allSessions?.length || 0, { allSessions })
+
+        if (!allSessions || allSessions.length === 0) {
+          console.log('[MissingParts] 세션 없음, inspectionSets 초기화')
+          inspectionSets.value = []
+          return
+        }
+
+        // 각 set_id별로 가장 최신 세션만 선택
+        const latestSessionsBySet = new Map()
+        allSessions.forEach(session => {
+          const setId = session.set_id
+          if (!setId) return
+
+          const existing = latestSessionsBySet.get(setId)
+          if (!existing) {
+            latestSessionsBySet.set(setId, session)
+          } else {
+            const sessionTime = getSessionTimestamp(session)
+            const existingTime = getSessionTimestamp(existing)
+            if (sessionTime > existingTime) {
+              latestSessionsBySet.set(setId, session)
+            }
+          }
+        })
+
+        const latestSessions = Array.from(latestSessionsBySet.values())
+        const setIds = [...new Set(latestSessions.map(s => s.set_id).filter(Boolean))]
+        console.log('[MissingParts] 최신 세션 수:', latestSessions.length, { latestSessions })
+        console.log('[MissingParts] 세트 ID 목록:', setIds)
+
+        if (setIds.length === 0) {
+          console.log('[MissingParts] 세트 ID 없음, inspectionSets 초기화')
+          inspectionSets.value = []
+          return
+        }
+
+        // 세트 정보 조회
+        console.log('[MissingParts] 세트 정보 조회 시작...', { setIds })
+        const { data: setsData, error: setsError } = await supabase
+          .from('lego_sets')
+          .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+          .in('id', setIds)
+
+        if (setsError) {
+          console.error('[MissingParts] 세트 정보 조회 오류:', setsError)
+          throw setsError
+        }
+        console.log('[MissingParts] 조회된 세트 수:', setsData?.length || 0, { setsData })
+
+        // 테마 정보 조회
+        const themeIds = [...new Set((setsData || []).map(s => s.theme_id).filter(Boolean))]
+        let themeMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (!themesError && themesData) {
+            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
+
+        // 모든 세션의 아이템 조회하여 누락 정보 계산
+        const sessionIds = latestSessions.map(s => s.id)
+        const { data: allItems } = await supabase
+          .from('inspection_items')
+          .select('session_id, part_id, color_id, total_count, checked_count, status')
+          .in('session_id', sessionIds)
+
+        const allMissingItems = (allItems || []).filter(item => item.status === 'missing')
+        const sessionSetMap = new Map(latestSessions.map(s => [s.id, s.set_id]))
+        const sessionProgressMap = new Map(latestSessions.map(s => [s.set_id, s.progress || 0]))
+        const setMissingInfoMap = new Map()
+
+        allMissingItems.forEach(item => {
+          const setId = sessionSetMap.get(item.session_id)
+          if (!setId) return
+
+          const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
+          if (missingCount <= 0) return
+
+          if (!setMissingInfoMap.has(setId)) {
+            setMissingInfoMap.set(setId, {
+              partTypes: new Set(),
+              totalCount: 0
+            })
+          }
+
+          const info = setMissingInfoMap.get(setId)
+          info.partTypes.add(`${item.part_id}_${item.color_id}`)
+          info.totalCount += missingCount
+        })
+
+        // 세션 정보를 세트별로 매핑
+        const sessionInfoBySetId = new Map()
+        latestSessions.forEach(session => {
+          if (session.set_id) {
+            sessionInfoBySetId.set(session.set_id, {
+              status: session.status,
+              progress: session.progress || 0,
+              last_saved_at: session.last_saved_at,
+              completed_at: session.completed_at,
+              started_at: session.started_at
+            })
+          }
+        })
+
+        // 검수 중인 세트 목록 구성
+        const inspectionSetsData = (setsData || []).map(set => {
+          const missingInfo = setMissingInfoMap.get(set.id)
+          const sessionInfo = sessionInfoBySetId.get(set.id)
+          let imageUrl = null
+
+          if (set.webp_image_url) {
+            imageUrl = set.webp_image_url
+          } else if (set.set_img_url) {
+            if (set.set_img_url.includes('cdn.rebrickable.com')) {
+              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(set.set_img_url)}`
+            } else {
+              imageUrl = set.set_img_url
+            }
+          }
+
+          return {
+            id: set.id,
+            set_num: set.set_num,
+            name: set.name,
+            theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
+            image_url: imageUrl,
+            missingInfo: missingInfo ? {
+              partTypes: missingInfo.partTypes.size,
+              totalCount: missingInfo.totalCount
+            } : null,
+            status: sessionInfo?.status || null,
+            progress: sessionInfo?.progress || null,
+            last_saved_at: sessionInfo?.last_saved_at || null,
+            completed_at: sessionInfo?.completed_at || null
+          }
+        }).sort((a, b) => {
+          return a.set_num.localeCompare(b.set_num, 'ko')
+        })
+
+        console.log('[MissingParts] 검수 중인 세트 목록 구성 완료:', inspectionSetsData.length, { inspectionSetsData })
+        inspectionSets.value = inspectionSetsData
+        console.log('[MissingParts] inspectionSets.value 설정 완료:', inspectionSets.value.length)
+      } catch (err) {
+        console.error('[MissingParts] 검수 중인 세트 목록 로드 실패:', err)
+        inspectionSets.value = []
+      }
     }
 
     const loadMissingParts = async () => {
-      if (!user.value) return
+      console.log('[MissingParts] loadMissingParts 시작:', { hasUser: !!user.value, selectedSetId: selectedSetId.value })
+      if (!user.value) {
+        console.log('[MissingParts] 사용자 없음, 종료')
+        return
+      }
 
       try {
         loading.value = true
         error.value = null
+
+        // 검수 중인 세트 목록 먼저 로드 (selectedSetId가 없을 때만)
+        if (!selectedSetId.value) {
+          console.log('[MissingParts] selectedSetId 없음, loadInspectionSets 호출')
+          await loadInspectionSets()
+        } else {
+          console.log('[MissingParts] selectedSetId 있음, loadInspectionSets 건너뜀:', selectedSetId.value)
+        }
 
         // 일반 사용자는 자신의 세션만 조회
         // 관리자는 모든 세션 조회 가능하도록 구현
@@ -487,18 +1076,15 @@ export default {
 
           if (!sessionData) {
             missingParts.value = []
-            return
-          }
-
-          // 관리자가 아니면 본인 세션만 확인
-          if (!isAdmin && sessionData.user_id !== user.value.id) {
+            // 검수 중인 세트 목록은 아래에서 설정
+          } else if (!isAdmin && sessionData.user_id !== user.value.id) {
             missingParts.value = []
-            return
+            // 검수 중인 세트 목록은 아래에서 설정
+          } else {
+            sessions = [sessionData]
           }
-
-          sessions = [sessionData]
         } else {
-          // 모든 상태의 세션 조회 (진행중, 임시저장, 완료)
+          // 누락 부품 조회용: selectedSetId가 있으면 필터링
           let sessionsQuery = supabase
             .from('inspection_sessions')
             .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
@@ -509,54 +1095,45 @@ export default {
           }
 
           if (selectedSetId.value) {
+            console.log('[MissingParts] selectedSetId로 세션 필터링:', selectedSetId.value)
             sessionsQuery = sessionsQuery.eq('set_id', selectedSetId.value)
           }
 
-          const { data: allSessions, error: sessionsError } = await sessionsQuery
-
+          const { data: filteredSessions, error: sessionsError } = await sessionsQuery
           if (sessionsError) throw sessionsError
 
-          if (!allSessions || allSessions.length === 0) {
-            missingParts.value = []
-            return
+          console.log('[MissingParts] 필터링된 세션 수:', filteredSessions?.length || 0, { filteredSessions })
+
+          // 누락 부품 조회용 세션 (selectedSetId 필터 적용)
+          if (!filteredSessions || filteredSessions.length === 0) {
+            console.log('[MissingParts] 세션 없음, sessions 빈 배열로 설정')
+            sessions = []
+          } else {
+            sessions = getLatestSessionsBySet(filteredSessions)
+            console.log('[MissingParts] 최신 세션으로 필터링 후 세션 수:', sessions.length)
           }
-
-          // 각 set_id별로 가장 최신 세션만 선택
-          // 우선순위: completed_at > last_saved_at > started_at
-          const getSessionTimestamp = (session) => {
-            if (session.completed_at) {
-              return new Date(session.completed_at).getTime()
-            }
-            if (session.last_saved_at) {
-              return new Date(session.last_saved_at).getTime()
-            }
-            if (session.started_at) {
-              return new Date(session.started_at).getTime()
-            }
-            return 0
-          }
-
-          const latestSessionsBySet = new Map()
-          allSessions.forEach(session => {
-            const setId = session.set_id
-            if (!setId) return
-
-            const existing = latestSessionsBySet.get(setId)
-            if (!existing) {
-              latestSessionsBySet.set(setId, session)
-            } else {
-              const sessionTime = getSessionTimestamp(session)
-              const existingTime = getSessionTimestamp(existing)
-              if (sessionTime > existingTime) {
-                latestSessionsBySet.set(setId, session)
-              }
-            }
-          })
-
-          sessions = Array.from(latestSessionsBySet.values())
         }
+
         const sessionIds = sessions.map(s => s.id)
         const setIds = [...new Set(sessions.map(s => s.set_id).filter(Boolean))]
+
+        console.log('[MissingParts] 세션 정보:', { 
+          sessionsCount: sessions.length, 
+          sessionIds: sessionIds.length, 
+          setIds: setIds.length,
+          sessionIds: sessionIds,
+          setIds: setIds
+        })
+
+        // 누락 부품 조회용: 세션이 없거나 setIds가 비어있으면 누락 부품만 비움
+        // 검수 중인 세트 목록은 위에서 이미 설정했으므로 여기서는 누락 부품만 처리
+        if (sessions.length === 0 || setIds.length === 0) {
+          console.log('[MissingParts] 세션이 없거나 setIds가 비어있음, missingParts 빈 배열로 설정')
+          missingParts.value = []
+          // inspectionSets는 위에서 이미 설정했으므로 여기서는 건드리지 않음
+          loading.value = false
+          return
+        }
 
         // 세션 정보를 세트별로 매핑
         sessionInfoMap.value.clear()
@@ -572,64 +1149,169 @@ export default {
         })
 
         // 모든 아이템 조회 (누락 판단을 위해)
+        console.log('[MissingParts] inspection_items 조회 시작, sessionIds:', sessionIds)
         const { data: items, error: itemsError } = await supabase
           .from('inspection_items')
           .select('session_id, part_id, color_id, element_id, total_count, checked_count, status')
           .in('session_id', sessionIds)
 
-        if (itemsError) throw itemsError
-
-        if (!items || items.length === 0) {
-          missingParts.value = []
-          return
+        if (itemsError) {
+          console.error('[MissingParts] inspection_items 조회 오류:', itemsError)
+          throw itemsError
         }
+
+        console.log('[MissingParts] 조회된 아이템 수:', items?.length || 0, { items })
 
         // 누락 부품 필터링: ManualInspection.vue와 동일하게 status가 'missing'인 아이템만
-        const missingItems = items.filter(item => item.status === 'missing')
-
-        if (missingItems.length === 0) {
-          missingParts.value = []
-          return
-        }
-
-        // 세트 메타데이터 가져오기
-        const metadataMap = await fetchSetMetadata(supabase, setIds)
+        const missingItems = items && items.length > 0 
+          ? items.filter(item => item.status === 'missing')
+          : []
+        
+        console.log('[MissingParts] 누락 부품 필터링 후:', missingItems.length, { missingItems })
 
         // 세션별 세트 매핑
         const sessionSetMap = new Map(sessions.map(s => [s.id, s.set_id]))
 
-        // 부품 정보 가져오기
-        const partIds = [...new Set(items.map(i => i.part_id).filter(Boolean))]
-        const colorIds = [...new Set(items.map(i => i.color_id).filter(Boolean))]
+        // 누락 부품이 없으면 조기 종료 (검색 시 성능 개선)
+        if (!items || items.length === 0 || missingItems.length === 0) {
+          console.log('[MissingParts] 누락 부품 없음, 조기 종료')
+          missingParts.value = []
+          loading.value = false
+          return
+        }
 
-        const { data: partsInfo, error: partsError } = await supabase
-          .from('lego_parts')
-          .select('part_num, name, part_img_url')
-          .in('part_num', partIds)
+        // 병렬 처리: 세트 정보, 테마 정보, 세트 메타데이터 동시 조회
+        const [setsResult, metadataMap] = await Promise.all([
+          // 세트 정보 조회
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .in('id', setIds),
+          // 세트 메타데이터 가져오기
+          fetchSetMetadata(supabase, setIds)
+        ])
 
+        const { data: setsData, error: setsError } = setsResult
+        if (setsError) throw setsError
+
+        // 테마 정보 조회 (세트 정보 조회 후 병렬 처리)
+        const themeIds = [...new Set((setsData || []).map(s => s.theme_id).filter(Boolean))]
+        let themeMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (!themesError && themesData) {
+            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
+
+        // 세트별 누락 정보 계산 (missingItems가 있을 때만)
+        const setMissingInfoMap = new Map()
+        if (missingItems && missingItems.length > 0) {
+          missingItems.forEach(item => {
+            const setId = sessionSetMap.get(item.session_id)
+            if (!setId) return
+
+            const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
+            if (missingCount <= 0) return
+
+            if (!setMissingInfoMap.has(setId)) {
+              setMissingInfoMap.set(setId, {
+                partTypes: new Set(),
+                totalCount: 0
+              })
+            }
+
+            const info = setMissingInfoMap.get(setId)
+            info.partTypes.add(`${item.part_id}_${item.color_id}`)
+            info.totalCount += missingCount
+          })
+        }
+
+        // 검수 중인 세트 목록 구성
+        inspectionSets.value = (setsData || []).map(set => {
+          const missingInfo = setMissingInfoMap.get(set.id)
+          let imageUrl = null
+
+          if (set.webp_image_url) {
+            imageUrl = set.webp_image_url
+          } else if (set.set_img_url) {
+            // Rebrickable CDN URL인 경우 프록시 사용
+            if (set.set_img_url.includes('cdn.rebrickable.com')) {
+              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(set.set_img_url)}`
+            } else {
+              imageUrl = set.set_img_url
+            }
+          }
+
+          return {
+            id: set.id,
+            set_num: set.set_num,
+            name: set.name,
+            theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
+            image_url: imageUrl,
+            num_parts: set.num_parts || 0,
+            part_count: set.num_parts || 0,
+            missingInfo: missingInfo ? {
+              partTypes: missingInfo.partTypes.size,
+              totalCount: missingInfo.totalCount
+            } : null
+          }
+        }).sort((a, b) => {
+          // 세트 번호로 정렬
+          return a.set_num.localeCompare(b.set_num, 'ko')
+        })
+
+        // 부품 정보와 색상 정보 병렬 조회 (성능 개선)
+        const partIds = [...new Set(missingItems.map(i => i.part_id).filter(Boolean))]
+        // color_id가 0인 경우도 포함하도록 수정 (filter(Boolean)은 0을 제외함)
+        const colorIds = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+
+        const [partsResult, colorsResult] = await Promise.all([
+          partIds.length > 0
+            ? supabase
+                .from('lego_parts')
+                .select('part_num, name, part_img_url')
+                .in('part_num', partIds)
+            : Promise.resolve({ data: [], error: null }),
+          colorIds.length > 0
+            ? supabase
+                .from('lego_colors')
+                .select('color_id, name, rgb')
+                .in('color_id', colorIds)
+            : Promise.resolve({ data: [], error: null })
+        ])
+
+        const { data: partsInfo, error: partsError } = partsResult
         if (partsError) throw partsError
 
-        const { data: colorsInfo, error: colorsError } = await supabase
-          .from('lego_colors')
-          .select('color_id, name, rgb')
-          .in('color_id', colorIds)
-
+        const { data: colorsInfo, error: colorsError } = colorsResult
         if (colorsError) throw colorsError
 
         const partsMap = new Map((partsInfo || []).map(p => [p.part_num, p]))
+        // color_id가 0인 경우도 포함하도록 수정
         const colorsMap = new Map((colorsInfo || []).map(c => [c.color_id, c]))
 
         // element_id 목록 수집 (이미지 조회용)
         const elementIds = [...new Set(missingItems.map(i => i.element_id).filter(Boolean))].map(id => String(id))
+        console.log('[MissingParts] element_id 목록:', elementIds.length, elementIds.slice(0, 5))
         
         // element_id 기반 이미지 조회 (part_images 우선)
         const elementImageMap = new Map()
-        if (elementIds && elementIds.length > 0) {
+        if (elementIds.length > 0) {
           const { data: elementImages, error: elementImagesError } = await supabase
             .from('part_images')
             .select('element_id, uploaded_url')
             .in('element_id', elementIds)
             .not('uploaded_url', 'is', null)
+
+          console.log('[MissingParts] part_images 조회 결과:', elementImages?.length || 0, '개')
+          if (elementImages && elementImages.length > 0) {
+            console.log('[MissingParts] part_images 샘플:', elementImages.slice(0, 3))
+          }
 
           if (!elementImagesError && elementImages) {
             elementImages.forEach(img => {
@@ -637,20 +1319,31 @@ export default {
                 // JPG는 무시, WebP만 사용
                 if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
                   elementImageMap.set(String(img.element_id), img.uploaded_url)
+                  console.log('[MissingParts] element_id 이미지 추가:', img.element_id, '→', img.uploaded_url.substring(0, 80))
+                } else {
+                  console.log('[MissingParts] JPG 무시:', img.element_id, img.uploaded_url)
                 }
               }
             })
           }
+          console.log('[MissingParts] elementImageMap 크기:', elementImageMap.size)
         }
 
         // element_id 기반 image_metadata fallback 조회 (part_images에 없는 경우만)
-        const missingElementIds = (elementIds || []).filter(id => id && !elementImageMap.has(id))
-        if (missingElementIds && missingElementIds.length > 0) {
+        const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+        console.log('[MissingParts] image_metadata 조회 필요:', missingElementIds.length, '개')
+        
+        if (missingElementIds.length > 0) {
           const { data: metadataImages, error: metadataError } = await supabase
             .from('image_metadata')
             .select('element_id, supabase_url')
             .in('element_id', missingElementIds)
             .not('supabase_url', 'is', null)
+
+          console.log('[MissingParts] image_metadata 조회 결과:', metadataImages?.length || 0, '개')
+          if (metadataImages && metadataImages.length > 0) {
+            console.log('[MissingParts] image_metadata 샘플:', metadataImages.slice(0, 3))
+          }
 
           if (!metadataError && metadataImages) {
             metadataImages.forEach(img => {
@@ -658,36 +1351,49 @@ export default {
                 // JPG는 무시, WebP만 사용
                 if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
                   elementImageMap.set(String(img.element_id), img.supabase_url)
+                  console.log('[MissingParts] metadata 이미지 추가:', img.element_id, '→', img.supabase_url.substring(0, 80))
                 }
               }
             })
           }
+          console.log('[MissingParts] elementImageMap 최종 크기:', elementImageMap.size)
         }
 
-        // part_id + color_id 기반 이미지 조회 (element_id가 없는 경우용)
+        // part_id + color_id 기반 이미지 조회 (element_id 이미지가 없는 경우 fallback용)
         const partColorImageMap = new Map()
-        const itemsWithoutElementId = missingItems.filter(i => !i.element_id)
-        if (itemsWithoutElementId && itemsWithoutElementId.length > 0) {
-          const partIdsForImages = [...new Set(itemsWithoutElementId.map(i => i.part_id).filter(id => id !== null && id !== undefined && id !== ''))]
-          const colorIdsForImages = [...new Set(itemsWithoutElementId.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+        // 모든 누락 아이템의 part_id와 color_id 조회 (element_id가 있어도 fallback으로 사용)
+        const allPartIdsForImages = [...new Set(missingItems.map(i => i.part_id).filter(id => id !== null && id !== undefined && id !== ''))]
+        const allColorIdsForImages = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+        console.log('[MissingParts] part_id + color_id 조회:', allPartIdsForImages.length, 'part_ids,', allColorIdsForImages.length, 'color_ids')
 
-          if (partIdsForImages && partIdsForImages.length > 0 && colorIdsForImages && colorIdsForImages.length > 0) {
-            const { data: partImages, error: partImagesError } = await supabase
-              .from('part_images')
-              .select('part_id, color_id, uploaded_url')
-              .in('part_id', partIdsForImages)
-              .in('color_id', colorIdsForImages)
-              .not('uploaded_url', 'is', null)
+        if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
+          const { data: partImages, error: partImagesError } = await supabase
+            .from('part_images')
+            .select('part_id, color_id, uploaded_url')
+            .in('part_id', allPartIdsForImages)
+            .in('color_id', allColorIdsForImages)
+            .not('uploaded_url', 'is', null)
 
-            if (!partImagesError && partImages) {
-              partImages.forEach(img => {
-                if (img.part_id && img.color_id && img.uploaded_url) {
-                  const key = `${img.part_id}_${img.color_id}`
-                  partColorImageMap.set(key, img.uploaded_url)
-                }
-              })
-            }
+          console.log('[MissingParts] part_images (part_id+color_id) 조회 결과:', partImages?.length || 0, '개')
+          if (partImages && partImages.length > 0) {
+            console.log('[MissingParts] part_images (part_id+color_id) 샘플:', partImages.slice(0, 3))
           }
+
+          if (!partImagesError && partImages) {
+            partImages.forEach(img => {
+              if (img.part_id && img.color_id && img.uploaded_url) {
+                const key = `${img.part_id}_${img.color_id}`
+                // JPG는 무시, WebP만 사용 (모달과 동일한 로직)
+                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  partColorImageMap.set(key, img.uploaded_url)
+                  console.log('[MissingParts] part+color 이미지 추가:', key, '→', img.uploaded_url.substring(0, 80))
+                } else {
+                  console.log('[MissingParts] JPG 무시 (part+color):', key, img.uploaded_url)
+                }
+              }
+            })
+          }
+          console.log('[MissingParts] partColorImageMap 크기:', partColorImageMap.size)
         }
 
         // 누락 부품 데이터 구성 (비동기 처리)
@@ -700,39 +1406,74 @@ export default {
           // ManualInspection.vue와 동일한 로직: total_count - checked_count가 누락 개수
           const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
 
-          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 없으면 표시 보류
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
           let imageUrl = null
+          let imageSource = 'none'
+          
+          // 1. element_id 기반 이미지 우선 확인
           if (item.element_id && elementImageMap.has(String(item.element_id))) {
             imageUrl = elementImageMap.get(String(item.element_id))
-          } else if (!item.element_id) {
+            imageSource = 'element_id'
+          }
+          
+          // 2. element_id 이미지가 없으면 part_id + color_id 기반 이미지 확인
+          if (!imageUrl) {
             const key = `${item.part_id}_${item.color_id}`
             if (partColorImageMap.has(key)) {
               imageUrl = partColorImageMap.get(key)
+              imageSource = 'part_id+color_id'
             }
           }
 
-          // 외부 API/Storage 직접 확인 제거: DB에 없으면 표시 보류 // 🔧 수정됨
+          // 3. 마지막 fallback: part_img_url (Rebrickable CDN)
+          if (!imageUrl && partInfo?.part_img_url) {
+            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+            imageSource = 'fallback_cdn'
+          }
+          
+          console.log(`[MissingParts] 이미지 결정 - element_id: ${item.element_id}, part_id: ${item.part_id}, color_id: ${item.color_id}, source: ${imageSource}, url: ${imageUrl?.substring(0, 80) || 'null'}`)
 
-          return {
+          const partData = {
             set_id: setId,
             set_display_name: formatSetDisplay(meta.set_num, meta.theme_name, meta.set_name || '세트명 없음'),
             part_id: item.part_id,
             color_id: item.color_id,
             element_id: item.element_id,
             part_name: partInfo?.name || item.part_id,
-            color_name: colorInfo?.name || `Color ${item.color_id}`,
-            color_rgb: colorInfo?.rgb || null,
-            supabase_image_url: imageUrl || null, // 🔧 수정됨
+            color_name: colorInfo ? (colorInfo.name || null) : null,
+            color_rgb: colorInfo ? (colorInfo.rgb || null) : null,
+            supabase_image_url: imageUrl || null,
             missing_count: missingCount
           }
+          
+          console.log('[MissingParts] 부품 데이터 생성:', {
+            element_id: partData.element_id,
+            part_id: partData.part_id,
+            color_id: partData.color_id,
+            supabase_image_url: partData.supabase_image_url?.substring(0, 80) || 'null',
+            hasSupabaseImageUrl: !!partData.supabase_image_url
+          })
+          
+          return partData
         }))
 
+        console.log('[MissingParts] 최종 부품 데이터:', partsDataWithImages.length, '개')
+        if (partsDataWithImages.length > 0) {
+          console.log('[MissingParts] 첫 번째 부품 샘플:', {
+            element_id: partsDataWithImages[0].element_id,
+            part_id: partsDataWithImages[0].part_id,
+            supabase_image_url: partsDataWithImages[0].supabase_image_url?.substring(0, 80) || 'null',
+            hasSupabaseImageUrl: !!partsDataWithImages[0].supabase_image_url
+          })
+        }
         missingParts.value = partsDataWithImages
+        console.log('[MissingParts] missingParts 설정 완료:', missingParts.value.length, 'missingPartsBySet:', missingPartsBySet.value.length)
       } catch (err) {
-        console.error('누락 부품 로드 실패:', err)
+        console.error('[MissingParts] 누락 부품 로드 실패:', err)
         error.value = '누락 부품을 불러오는데 실패했습니다'
       } finally {
         loading.value = false
+        console.log('[MissingParts] loadMissingParts 완료, loading:', loading.value)
       }
     }
 
@@ -753,6 +1494,18 @@ export default {
         wrapper.appendChild(placeholder)
       }
       event.target.style.display = 'none'
+    }
+
+    const handleSetImageError = (event) => {
+      const img = event.target
+      const container = img.closest('.set-image')
+      if (container) {
+        const noImage = container.querySelector('.no-image')
+        if (noImage) {
+          noImage.style.display = 'flex'
+        }
+        img.style.display = 'none'
+      }
     }
 
     const formatDate = (dateString) => {
@@ -790,6 +1543,38 @@ export default {
       return labels[status] || status
     }
 
+    const getColorTextColor = (rgb) => {
+      if (!rgb) return '#ffffff'
+      let rgbStr = String(rgb).trim()
+      if (!rgbStr || rgbStr === 'null' || rgbStr === 'undefined' || rgbStr === 'None') {
+        return '#ffffff'
+      }
+      if (!rgbStr.startsWith('#')) {
+        rgbStr = `#${rgbStr}`
+      }
+      
+      // 화이트 색상 판단 (#FFFFFF, #ffffff, FFFFFF 등)
+      const normalized = rgbStr.toUpperCase()
+      if (normalized === '#FFFFFF' || normalized === '#FFF' || normalized === 'FFFFFF' || normalized === 'FFF') {
+        return '#6b7280' // 그레이
+      }
+      
+      // RGB 값으로 화이트 판단 (255, 255, 255에 가까운 경우)
+      if (normalized.length === 7 && normalized.startsWith('#')) {
+        const r = parseInt(normalized.substring(1, 3), 16)
+        const g = parseInt(normalized.substring(3, 5), 16)
+        const b = parseInt(normalized.substring(5, 7), 16)
+        
+        // 밝기가 240 이상이면 화이트로 간주
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000
+        if (brightness >= 240) {
+          return '#6b7280' // 그레이
+        }
+      }
+      
+      return '#ffffff' // 기본값 (흰색 텍스트)
+    }
+
     const getColorRgb = (rgb) => {
       if (!rgb) return null
       let rgbStr = String(rgb).trim()
@@ -797,6 +1582,39 @@ export default {
         rgbStr = `#${rgbStr}`
       }
       return rgbStr || null
+    }
+
+    const formatColorLabel = (colorName, colorId) => {
+      // colorName이 있으면 우선 사용 (colorId가 0이어도 colorName이 있으면 표시)
+      if (colorName) {
+        const normalized = String(colorName).trim()
+        if (!normalized) {
+          // 빈 문자열인 경우에만 colorId 체크
+          if (colorId === 0 || colorId === '0') {
+            return 'Any Color'
+          }
+          return colorId !== null && colorId !== undefined ? `Color ${colorId}` : 'Any Color'
+        }
+        
+        const lower = normalized.toLowerCase()
+        // "No Color", "Any Color" 등 특수 케이스만 "Any Color"로 변환
+        if (
+          lower === 'no color' ||
+          lower === 'any color' ||
+          (lower.includes('no color') && lower.includes('any color')) ||
+          (normalized.includes('No Color') && normalized.includes('Any Color'))
+        ) {
+          return 'Any Color'
+        }
+        // 정상적인 색상명이면 그대로 반환
+        return normalized
+      }
+      
+      // colorName이 없을 때만 colorId 체크
+      if (colorId === 0 || colorId === '0') {
+        return 'Any Color'
+      }
+      return colorId !== null && colorId !== undefined ? `Color ${colorId}` : 'Any Color'
     }
 
     const getContrastColor = (rgb) => {
@@ -831,6 +1649,264 @@ export default {
       return 0
     }
 
+    const resetPage = () => {
+      setSearchQuery.value = ''
+      selectedSetId.value = ''
+      selectedSet.value = null
+      searchResults.value = []
+      searchResultsKey.value++
+      showSetDropdown.value = false
+      missingParts.value = []
+      error.value = null
+      loadInspectionSets()
+    }
+
+    const openMissingPartsModal = async (set) => {
+      console.log('[MissingParts Modal] openMissingPartsModal 호출:', { 
+        setNum: set?.set_num, 
+        setId: set?.id,
+        numParts: set?.num_parts,
+        partCount: set?.part_count
+      })
+      selectedModalSet.value = set
+      showMissingPartsModal.value = true
+      missingPartsModalData.value = []
+      missingPartsModalError.value = null
+      missingPartsModalLoading.value = true
+      
+      console.log('[MissingParts Modal] 모달 열림, 데이터 로딩 시작')
+      
+      // 돋보기 클릭 시 모달만 열리고 페이지 상태는 변경하지 않음
+      // selectedSet, selectedSetId, setSearchQuery 모두 변경하지 않음
+
+      try {
+        console.log('[MissingParts Modal] 세션 조회 시작, set.id:', set.id)
+        // 해당 세트의 검수 세션 조회
+        const { data: sessions, error: sessionsError } = await supabase
+          .from('inspection_sessions')
+          .select('id')
+          .eq('set_id', set.id)
+          .in('status', ['in_progress', 'paused', 'completed'])
+          .order('created_at', { ascending: false })
+          .limit(1)
+
+        if (sessionsError) throw sessionsError
+        console.log('[MissingParts Modal] 세션 조회 결과:', sessions?.length || 0, '개')
+
+        if (!sessions || sessions.length === 0) {
+          console.log('[MissingParts Modal] 세션 없음, 종료')
+          missingPartsModalData.value = []
+          missingPartsModalLoading.value = false
+          return
+        }
+
+        const sessionId = sessions[0].id
+        console.log('[MissingParts Modal] 세션 ID:', sessionId)
+
+        // 누락부품 조회
+        const { data: missingItems, error: itemsError } = await supabase
+          .from('inspection_items')
+          .select('part_id, color_id, element_id, total_count, checked_count, status')
+          .eq('session_id', sessionId)
+          .eq('status', 'missing')
+
+        if (itemsError) throw itemsError
+        console.log('[MissingParts Modal] 누락부품 조회 결과:', missingItems?.length || 0, '개')
+
+        if (!missingItems || missingItems.length === 0) {
+          console.log('[MissingParts Modal] 누락부품 없음, 종료')
+          missingPartsModalData.value = []
+          missingPartsModalLoading.value = false
+          return
+        }
+
+        // 부품 정보 조회
+        const partIds = [...new Set(missingItems.map(i => i.part_id).filter(Boolean))]
+        const { data: partsInfo, error: partsInfoError } = await supabase
+          .from('lego_parts')
+          .select('part_num, name, part_img_url')
+          .in('part_num', partIds)
+
+        if (partsInfoError) throw partsInfoError
+
+        // 색상 정보 조회
+        const colorIds = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+        const { data: colorsInfo, error: colorsError } = await supabase
+          .from('lego_colors')
+          .select('color_id, name, rgb')
+          .in('color_id', colorIds)
+
+        if (colorsError) throw colorsError
+
+        // 부품 이미지 URL 조회
+        const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
+        const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
+
+        // element_id 목록 수집
+        const elementIds = [...new Set(missingItems.map(i => i.element_id).filter(Boolean))].map(id => String(id))
+        console.log('[MissingParts Modal] element_id 목록:', elementIds.length, elementIds.slice(0, 5))
+        
+        // element_id 기반 이미지 배치 조회
+        const elementImageMap = new Map()
+        if (elementIds.length > 0) {
+          const { data: elementImages, error: elementImagesError } = await supabase
+            .from('part_images')
+            .select('element_id, uploaded_url')
+            .in('element_id', elementIds)
+            .not('uploaded_url', 'is', null)
+
+          console.log('[MissingParts Modal] part_images 조회 결과:', elementImages?.length || 0, '개')
+
+          if (!elementImagesError && elementImages) {
+            elementImages.forEach(img => {
+              if (img.element_id && img.uploaded_url) {
+                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(String(img.element_id), img.uploaded_url)
+                  console.log('[MissingParts Modal] element_id 이미지 추가:', img.element_id, '→', img.uploaded_url.substring(0, 80))
+                }
+              }
+            })
+          }
+
+          const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+          console.log('[MissingParts Modal] image_metadata 조회 필요:', missingElementIds.length, '개')
+          
+          if (missingElementIds.length > 0) {
+            const { data: metadataImages, error: metadataError } = await supabase
+              .from('image_metadata')
+              .select('element_id, supabase_url')
+              .in('element_id', missingElementIds)
+              .not('supabase_url', 'is', null)
+
+            console.log('[MissingParts Modal] image_metadata 조회 결과:', metadataImages?.length || 0, '개')
+
+            if (!metadataError && metadataImages) {
+              metadataImages.forEach(img => {
+                if (img.element_id && img.supabase_url) {
+                  if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(String(img.element_id), img.supabase_url)
+                    console.log('[MissingParts Modal] metadata 이미지 추가:', img.element_id, '→', img.supabase_url.substring(0, 80))
+                  }
+                }
+              })
+            }
+          }
+          console.log('[MissingParts Modal] elementImageMap 최종 크기:', elementImageMap.size)
+        }
+
+        // part_id + color_id 기반 이미지 조회 (element_id 이미지가 없는 경우 fallback용)
+        const partColorImageMap = new Map()
+        // 모든 누락 아이템의 part_id와 color_id 조회 (element_id가 있어도 fallback으로 사용)
+        const allPartIdsForImages = [...new Set(missingItems.map(i => i.part_id).filter(Boolean))]
+        const allColorIdsForImages = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+
+        if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
+          const { data: partImages, error: partImagesError } = await supabase
+            .from('part_images')
+            .select('part_id, color_id, uploaded_url')
+            .in('part_id', allPartIdsForImages)
+            .in('color_id', allColorIdsForImages)
+            .not('uploaded_url', 'is', null)
+
+          if (!partImagesError && partImages) {
+            partImages.forEach(img => {
+              if (img.part_id && img.color_id && img.uploaded_url) {
+                const key = `${img.part_id}_${img.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  // JPG는 무시, WebP만 사용
+                  if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                    partColorImageMap.set(key, img.uploaded_url)
+                  }
+                }
+              }
+            })
+          }
+        }
+
+        // 누락부품 데이터 구성
+        const partsWithImages = missingItems.map((item) => {
+          const partInfo = partsInfoMap.get(item.part_id)
+          const colorInfo = colorsInfoMap.get(item.color_id)
+          const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
+
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+          let imageUrl = null
+          let imageSource = 'none'
+          
+          // 1. element_id 기반 이미지 우선 확인
+          if (item.element_id && elementImageMap.has(String(item.element_id))) {
+            imageUrl = elementImageMap.get(String(item.element_id))
+            imageSource = 'element_id'
+          }
+          
+          // 2. element_id 이미지가 없으면 part_id + color_id 기반 이미지 확인
+          if (!imageUrl) {
+            const key = `${item.part_id}_${item.color_id}`
+            if (partColorImageMap.has(key)) {
+              imageUrl = partColorImageMap.get(key)
+              imageSource = 'part_id+color_id'
+            }
+          }
+
+          // 3. 마지막 fallback: part_img_url (Rebrickable CDN)
+          if (!imageUrl && partInfo?.part_img_url) {
+            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+            imageSource = 'fallback_cdn'
+          }
+          
+          console.log(`[MissingParts Modal] 이미지 결정 - element_id: ${item.element_id}, part_id: ${item.part_id}, color_id: ${item.color_id}, source: ${imageSource}, url: ${imageUrl?.substring(0, 80) || 'null'}`)
+
+          const partData = {
+            part_id: item.part_id,
+            color_id: item.color_id,
+            element_id: item.element_id,
+            part_name: partInfo?.name || item.part_id,
+            color_name: colorInfo?.name || null,
+            color_rgb: colorInfo?.rgb || null,
+            image_url: imageUrl || null,
+            missing_count: missingCount
+          }
+          
+          console.log('[MissingParts Modal] 부품 데이터 생성:', {
+            element_id: partData.element_id,
+            part_id: partData.part_id,
+            color_id: partData.color_id,
+            image_url: partData.image_url?.substring(0, 80) || 'null',
+            hasImageUrl: !!partData.image_url
+          })
+          
+          return partData
+        })
+
+        console.log('[MissingParts Modal] 최종 부품 데이터:', partsWithImages.length, '개')
+        if (partsWithImages.length > 0) {
+          console.log('[MissingParts Modal] 첫 번째 부품 샘플:', {
+            element_id: partsWithImages[0].element_id,
+            part_id: partsWithImages[0].part_id,
+            image_url: partsWithImages[0].image_url?.substring(0, 80) || 'null',
+            hasImageUrl: !!partsWithImages[0].image_url
+          })
+        }
+        missingPartsModalData.value = partsWithImages
+      } catch (err) {
+        missingPartsModalError.value = err.message || '누락부품 목록을 불러오는 중 오류가 발생했습니다.'
+        console.error('누락부품 목록 조회 실패:', err)
+      } finally {
+        missingPartsModalLoading.value = false
+      }
+    }
+
+    const closeMissingPartsModal = () => {
+      showMissingPartsModal.value = false
+      selectedModalSet.value = null
+      missingPartsModalData.value = []
+      missingPartsModalError.value = null
+    }
+
+    const handlePartImageError = (event) => {
+      event.target.style.display = 'none'
+    }
+
     // URL 쿼리 파라미터 변경 감지
     watch(() => route.query.session, async () => {
       await loadMissingParts()
@@ -838,24 +1914,38 @@ export default {
 
     watch(user, async (newUser) => {
       if (newUser) {
+        console.log('[MissingParts] watch user - 사용자 로드됨', { userId: newUser.id, email: newUser.email })
         await loadStoreInventory()
+        // 사용자가 로드된 후 검수 중인 세트 목록 로드
+        console.log('[MissingParts] watch user - loadInspectionSets 호출')
+        await loadInspectionSets()
+        console.log('[MissingParts] watch user - loadInspectionSets 완료, inspectionSets:', inspectionSets.value?.length || 0)
       } else {
         storeInfo.value = null
         storeInventory.value = []
+        inspectionSets.value = []
       }
     }, { immediate: true })
 
     onMounted(async () => {
+      console.log('[MissingParts] onMounted 시작', { hasUser: !!user.value, user: user.value })
       if (user.value) {
         await loadStoreInventory()
+        // 검수 중인 세트 목록 먼저 로드
+        console.log('[MissingParts] onMounted - loadInspectionSets 호출')
+        await loadInspectionSets()
+        console.log('[MissingParts] onMounted - loadInspectionSets 완료, inspectionSets:', inspectionSets.value?.length || 0)
       }
+      console.log('[MissingParts] onMounted - loadMissingParts 호출')
       await loadMissingParts()
+      console.log('[MissingParts] onMounted - loadMissingParts 완료, inspectionSets:', inspectionSets.value?.length || 0)
     })
 
     return {
       loading,
       error,
       selectedSetId,
+      missingParts,
       missingPartsBySet,
       loadMissingParts,
       handleImageError,
@@ -864,6 +1954,20 @@ export default {
       searchResults,
       searchResultsKey,
       selectedSet,
+      inspectionSets,
+      formatSetNumber,
+      handleSetImageError,
+      openMissingPartsModal,
+      closeMissingPartsModal,
+      showMissingPartsModal,
+      selectedModalSet,
+      missingPartsModalData,
+      missingPartsModalLoading,
+      missingPartsModalError,
+      handlePartImageError,
+      getColorRgb,
+      getColorTextColor,
+      formatColorLabel,
       showSetDropdown,
       setDropdownRef,
       handleSearchEnter,
@@ -875,8 +1979,12 @@ export default {
       formatTime,
       statusLabel,
       getColorRgb,
+      getColorTextColor,
       getContrastColor,
-      resolvePartCount
+      resolvePartCount,
+      inspectionSets,
+      handleSetImageError,
+      resetPage
     }
   }
 }
@@ -1053,6 +2161,42 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: relative;
+}
+
+.close-result-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 22px; /* // 🔧 수정됨 */
+  height: 22px; /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+  border: 1px solid #e5e7eb; /* // 🔧 수정됨 */
+  border-radius: 9999px; /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #4b5563; /* // 🔧 수정됨 */
+  transition: all 0.2s ease;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); /* // 🔧 수정됨 */
+}
+
+.close-result-button:hover {
+  background: #f9fafb; /* // 🔧 수정됨 */
+  color: #374151; /* // 🔧 수정됨 */
+  border-color: #d1d5db; /* // 🔧 수정됨 */
+}
+
+.close-result-button svg { /* // 🔧 수정됨 */
+  width: 12px;
+  height: 12px;
+}
+
+.close-result-button:active {
+  transform: scale(0.95);
 }
 
 .selected-set-display {
@@ -1064,7 +2208,7 @@ export default {
 .selected-set-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.25rem; /* // 🔧 수정됨 */
 }
 
 .selected-set-thumb-wrapper {
@@ -1168,9 +2312,54 @@ export default {
   border: none;
   cursor: pointer;
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1.25rem; /* // 🔧 수정됨 */
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.option-set-image-wrapper {
+  width: 60px;
+  height: 60px;
+  min-width: 60px;
+  min-height: 60px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.option-set-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  padding: 0.25rem;
+}
+
+.option-set-no-image {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.625rem;
+  text-align: center;
+  padding: 0.25rem;
+  background: #f9fafb;
+}
+
+.option-set-content {
+  display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  flex: 1;
+  min-width: 0;
 }
 
 .custom-select-option:hover {
@@ -1223,6 +2412,301 @@ export default {
   width: 100%;
   max-width: 800px;
   margin: 0 auto;
+}
+
+.inspection-sets-section {
+  margin-bottom: 3rem;
+  width: 100%;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.result-header {
+  margin-bottom: 1.5rem;
+}
+
+.result-header h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.sets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .sets-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .sets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+.set-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.set-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.set-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.set-image img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.no-image {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.set-parts-icon-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+  padding: 0;
+}
+
+.set-parts-icon-button:hover {
+  transform: scale(1.1);
+}
+
+.set-parts-icon-button:active {
+  transform: scale(0.95);
+}
+
+.search-icon-svg {
+  color: #2563eb;
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.set-parts-icon-button:hover .search-icon-svg {
+  color: #1d4ed8;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.3));
+}
+
+.set-info {
+  padding: 1rem;
+}
+
+.set-name-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.set-number-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 20px;
+  width: fit-content;
+  line-height: 1.2;
+}
+
+.set-name-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.set-theme-name {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.set-name-divider {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.set-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.set-quantity {
+  font-size: 0.875rem;
+  color: #3b82f6;
+  font-weight: 500;
+  margin: 0;
+}
+
+.set-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.status-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.status-badge.in-progress {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+.status-badge.paused {
+  background-color: #f97316;
+  color: #ffffff;
+}
+
+.status-badge.completed {
+  background-color: #22c55e;
+  color: #ffffff;
+}
+
+.progress-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #3b82f6;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.time-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #1f2937;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.missing-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #ef4444;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.progress-bar-container {
+  flex: 1;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: #3b82f6;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #3b82f6;
+  min-width: 40px;
+  text-align: right;
 }
 
 .missing-parts-list {
@@ -1332,7 +2816,7 @@ export default {
 
 @media (max-width: 1200px) and (min-width: 900px) {
   .parts-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
   }
 }
 
@@ -1403,7 +2887,7 @@ export default {
 }
 
 .part-card .part-name {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 500;
   color: #111827;
   margin: 0;
@@ -1417,14 +2901,15 @@ export default {
 
 .part-card .color-badge {
   display: inline-block;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
   border: none;
   width: fit-content;
+  line-height: 1.1;
 }
 
 .part-card .card-body {
@@ -1438,7 +2923,7 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 1rem 0;
+  padding: 0rem 0;
   min-height: 120px;
   background: transparent;
   border-radius: 8px;
@@ -1487,6 +2972,120 @@ export default {
 }
 
 @media (max-width: 600px) {
+  .parts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 모달 부품 그리드 (4열 유지) */
+.modal-parts-grid {
+  grid-template-columns: repeat(4, 1fr) !important;
+}
+
+@media (min-width: 1400px) {
+  .modal-parts-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .modal-parts-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+/* 모달 스타일 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.modal-container {
+  background: white;
+  border-radius: 8px;
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 1000px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.modal-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #1f2937;
+  margin: 0;
+}
+
+.modal-close-button {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.modal-close-button:hover {
+  color: #1f2937;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.loading-message,
+.error-message,
+.empty-message {
+  text-align: center;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.error-message {
+  color: #dc2626;
+}
+
+.set-parts-list {
+  max-height: calc(90vh - 120px);
+}
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 1rem;
+  }
+
+  .modal-container {
+    max-width: 100%;
+    max-height: 100%;
+  }
+
   .parts-grid {
     grid-template-columns: 1fr;
   }
@@ -1610,4 +3209,6 @@ export default {
   }
 }
 </style>
+
+
 

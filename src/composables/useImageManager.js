@@ -834,7 +834,24 @@ export function useImageManager() {
       }
     } catch (err) {
       error.value = err.message
-      throw err
+      console.error(`[ImageManager] processRebrickableImage 완전 실패:`, {
+        partNum,
+        colorId,
+        elementId,
+        imageUrl,
+        error: err.message,
+        stack: err.stack
+      })
+      
+      // 프로덕션 모드에서 실패 시 원본 URL 반환 (나중에 재시도 가능하도록)
+      return {
+        originalUrl: imageUrl,
+        uploadedUrl: null,
+        filename: elementId ? `${String(elementId)}.webp` : `${partNum}_${colorId || 'unknown'}.webp`,
+        path: 'images',
+        error: err.message,
+        failed: true
+      }
     }
   }
 

@@ -72,6 +72,12 @@
                   </div>
                 </transition>
                 <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                  <button class="close-result-button" @click="resetPage" title="초기화">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                   <div class="selected-set-row">
                     <div class="selected-set-thumb-wrapper">
                       <img
@@ -96,6 +102,88 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div
+        v-if="showStoreSetsSection"
+        class="store-sets-section"
+      >
+        <div class="result-header">
+          <h3>레고 리스트</h3>
+        </div>
+        <div class="sets-grid">
+          <div
+            v-for="set in paginatedStoreSets"
+            :key="set.id || set.set_num"
+            class="set-card"
+          >
+            <div class="set-image">
+              <img
+                v-if="set.image_url"
+                :src="set.image_url"
+                :alt="set.name || set.set_num"
+              />
+              <div v-else class="no-image">이미지 없음</div>
+            </div>
+            <div class="set-info">
+              <div class="set-name-container">
+                <span class="set-number-badge">{{ formatSetNumber(set.set_num) }}</span>
+                <div class="set-name-wrapper">
+                  <span v-if="set.theme_name" class="set-theme-name">{{ set.theme_name }}</span>
+                  <span v-if="set.theme_name && set.name" class="set-name-divider">|</span>
+                  <span v-if="set.name" class="set-name-text">{{ set.name }}</span>
+                </div>
+              </div>
+              <div class="set-stats">
+                <span class="set-quantity">부품수 : {{ resolvePartCount(set) }}개</span>
+                <span v-if="set.quantity" class="inventory-badge">재고: {{ set.quantity }}개</span>
+              </div>
+              <div class="set-actions">
+                <button
+                  type="button"
+                  class="instruction-card-button"
+                  @click.stop="viewInstructionsFromStore(set)"
+                >
+                  설명서 보기
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-if="totalPages > 1" class="pagination">
+          <button
+            class="pagination-button"
+            :class="{ disabled: currentPage === 1 }"
+            @click="goToPage(currentPage - 1)"
+            :disabled="currentPage === 1"
+          >
+            이전
+          </button>
+          <div class="pagination-numbers">
+            <span
+              v-for="page in visiblePages"
+              :key="page"
+            >
+              <button
+                v-if="page !== '...'"
+                class="pagination-number"
+                :class="{ active: page === currentPage }"
+                @click="goToPage(page)"
+              >
+                {{ page }}
+              </button>
+              <span v-else class="pagination-ellipsis">...</span>
+            </span>
+          </div>
+          <button
+            class="pagination-button"
+            :class="{ disabled: currentPage === totalPages }"
+            @click="goToPage(currentPage + 1)"
+            :disabled="currentPage === totalPages"
+          >
+            다음
+          </button>
         </div>
       </div>
 
@@ -155,14 +243,16 @@
 </template>
 
 <script>
-import { ref } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
+import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 import { formatSetNumber } from '../utils/setDisplay'
 
 export default {
   name: 'SetInstructions',
   setup() {
-    const { supabase } = useSupabase()
+    const { supabase, user } = useSupabase()
+    const { getStoreInfoByEmail, getStoreInventory } = useSupabasePleyon()
 
     const loading = ref(false)
     const instructionLoading = ref(false)
@@ -175,6 +265,12 @@ export default {
     const selectedSetId = ref('')
     const showSetDropdown = ref(false)
     const setDropdownRef = ref(null)
+
+    const storeInventory = ref([])
+    const storeInfo = ref(null)
+    const storeSets = ref([])
+    const currentPage = ref(1)
+    const itemsPerPage = 40
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
 
@@ -347,6 +443,233 @@ export default {
         }
       }
       return 0
+    }
+
+    const resetPage = () => {
+      setSearchQuery.value = ''
+      selectedSetId.value = ''
+      selectedSet.value = null
+      searchResults.value = []
+      searchResultsKey.value++
+      showSetDropdown.value = false
+      instructions.value = []
+      instructionError.value = null
+    }
+
+    const loadStoreInventory = async () => {
+      if (!user.value) {
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+        return
+      }
+
+      try {
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        if (storeData && storeData.store) {
+          storeInfo.value = storeData
+          const inventoryData = await getStoreInventory(storeData.store.id)
+          storeInventory.value = inventoryData || []
+          await loadStoreSets()
+        } else {
+          storeInfo.value = null
+          storeInventory.value = []
+          storeSets.value = []
+        }
+      } catch (err) {
+        console.error('[SetInstructions] 매장 인벤토리 로드 실패:', err)
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+      }
+    }
+
+    const loadStoreSets = async () => {
+      if (!storeInventory.value.length) {
+        storeSets.value = []
+        return
+      }
+
+      try {
+        const inventorySetNumbers = storeInventory.value
+          .map(item => {
+            const legoSet = item.lego_sets
+            if (!legoSet) return null
+            if (Array.isArray(legoSet) && legoSet.length > 0) {
+              return legoSet[0].number
+            }
+            if (!Array.isArray(legoSet)) {
+              return legoSet.number
+            }
+            return null
+          })
+          .filter(Boolean)
+
+        if (!inventorySetNumbers.length) {
+          storeSets.value = []
+          return
+        }
+
+        const uniqueSetNumbers = [...new Set(inventorySetNumbers)]
+        const setNumVariations = new Set()
+        uniqueSetNumbers.forEach(setNum => {
+          const baseNum = setNum.split('-')[0]
+          setNumVariations.add(setNum)
+          setNumVariations.add(baseNum)
+          for (let i = 1; i <= 3; i++) {
+            setNumVariations.add(`${baseNum}-${i}`)
+          }
+        })
+
+        const allSetNums = Array.from(setNumVariations)
+        const batchSize = 100
+        const batchPromises = []
+        for (let i = 0; i < allSetNums.length; i += batchSize) {
+          batchPromises.push(
+            supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+              .in('set_num', allSetNums.slice(i, i + batchSize))
+          )
+        }
+
+        const batchResults = await Promise.all(batchPromises)
+        let allSetsData = []
+        for (const result of batchResults) {
+          if (result.error) {
+            throw result.error
+          }
+          if (result.data?.length) {
+            allSetsData.push(...result.data)
+          }
+        }
+
+        const finalSetsData = allSetsData.filter(set => {
+          const baseSetNum = set.set_num.split('-')[0]
+          return uniqueSetNumbers.includes(set.set_num) || uniqueSetNumbers.includes(baseSetNum)
+        })
+
+        if (!finalSetsData.length) {
+          storeSets.value = []
+          return
+        }
+
+        const themeIds = [...new Set(finalSetsData.map(s => s.theme_id).filter(Boolean))]
+        let themeMap = new Map()
+        if (themeIds.length) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (!themesError && themesData) {
+            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+          }
+        }
+
+        const quantityMap = new Map()
+        storeInventory.value.forEach(item => {
+          const legoSet = item.lego_sets
+          let setNum = null
+          if (legoSet) {
+            if (Array.isArray(legoSet) && legoSet.length > 0) {
+              setNum = legoSet[0].number
+            } else if (!Array.isArray(legoSet)) {
+              setNum = legoSet.number
+            }
+          }
+          if (setNum) {
+            quantityMap.set(setNum, (quantityMap.get(setNum) || 0) + (item.quantity || 0))
+          }
+        })
+
+        storeSets.value = finalSetsData
+          .map(set => {
+            const normalizedImage =
+              set.webp_image_url ||
+              set.set_img_url ||
+              null
+            return {
+              id: set.id,
+              set_num: set.set_num,
+              name: set.name,
+              theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
+              image_url: normalizedImage,
+              webp_image_url: set.webp_image_url || null,
+              set_img_url: set.set_img_url || null,
+              num_parts: set.num_parts || null,
+              part_count: resolvePartCount(set),
+              quantity: quantityMap.get(set.set_num) || 0
+            }
+          })
+          .sort((a, b) => a.set_num.localeCompare(b.set_num, 'ko'))
+
+        currentPage.value = 1
+      } catch (err) {
+        console.error('[SetInstructions] 매장 세트 로드 실패:', err)
+        storeSets.value = []
+      }
+    }
+
+    const totalPages = computed(() => Math.ceil(storeSets.value.length / itemsPerPage) || 0)
+
+    const paginatedStoreSets = computed(() => {
+      const start = (currentPage.value - 1) * itemsPerPage
+      return storeSets.value.slice(start, start + itemsPerPage)
+    })
+
+    const visiblePages = computed(() => {
+      const pages = []
+      const total = totalPages.value
+      const current = currentPage.value
+
+      if (total <= 7) {
+        for (let i = 1; i <= total; i++) {
+          pages.push(i)
+        }
+      } else if (current <= 3) {
+        for (let i = 1; i <= 5; i++) pages.push(i)
+        pages.push('...')
+        pages.push(total)
+      } else if (current >= total - 2) {
+        pages.push(1)
+        pages.push('...')
+        for (let i = total - 4; i <= total; i++) pages.push(i)
+      } else {
+        pages.push(1)
+        pages.push('...')
+        for (let i = current - 1; i <= current + 1; i++) pages.push(i)
+        pages.push('...')
+        pages.push(total)
+      }
+
+      return pages
+    })
+
+    const goToPage = (page) => {
+      if (typeof page !== 'number') return
+      if (page < 1 || page > totalPages.value || page === currentPage.value) return
+      currentPage.value = page
+    }
+
+    const showStoreSetsSection = computed(() => {
+      return (
+        !loading.value &&
+        !instructionLoading.value &&
+        !setSearchQuery.value.trim() &&
+        !selectedSetId.value &&
+        storeSets.value.length > 0
+      )
+    })
+
+    const viewInstructionsFromStore = (set) => {
+      if (!set) return
+      const normalizedSet = {
+        ...set,
+        webp_image_url: set.webp_image_url || set.image_url || null,
+        set_img_url: set.set_img_url || set.image_url || null
+      }
+      handleSelectSet(normalizedSet)
     }
 
     const getSetNumberForApi = (setNum) => { // 🔧 수정됨
@@ -614,6 +937,16 @@ export default {
       event.target.style.display = 'none'
     }
 
+    watch(user, async (newUser) => {
+      if (newUser) {
+        await loadStoreInventory()
+      } else {
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+      }
+    }, { immediate: true })
+
     return {
       loading,
       instructionLoading,
@@ -633,7 +966,16 @@ export default {
       handleSelectSet,
       handleSetImageError,
       handleSelectedSetImageError,
-      handleThumbnailError
+      handleThumbnailError,
+      resetPage,
+      storeSets,
+      paginatedStoreSets,
+      visiblePages,
+      totalPages,
+      currentPage,
+      goToPage,
+      showStoreSetsSection,
+      viewInstructionsFromStore
     }
   }
 }
@@ -837,7 +1179,7 @@ export default {
 .option-content {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 1.5rem; /* // 🔧 수정됨 */
   width: 100%;
 }
 
@@ -915,12 +1257,48 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: relative;
+}
+
+.close-result-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 22px; /* // 🔧 수정됨 */
+  height: 22px; /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+  border: 1px solid #e5e7eb; /* // 🔧 수정됨 */
+  border-radius: 9999px; /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #4b5563; /* // 🔧 수정됨 */
+  transition: all 0.2s ease;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); /* // 🔧 수정됨 */
+}
+
+.close-result-button:hover {
+  background: #f9fafb; /* // 🔧 수정됨 */
+  color: #374151; /* // 🔧 수정됨 */
+  border-color: #d1d5db; /* // 🔧 수정됨 */
+}
+
+.close-result-button svg { /* // 🔧 수정됨 */
+  width: 12px;
+  height: 12px;
+}
+
+.close-result-button:active {
+  transform: scale(0.95);
 }
 
 .selected-set-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.25rem; /* // 🔧 수정됨 */
 }
 
 .selected-set-thumb-wrapper {
@@ -963,6 +1341,264 @@ export default {
   gap: 0.25rem;
   flex: 1;
   min-width: 0;
+}
+
+.store-sets-section { /* // 🔧 수정됨 */
+  margin-bottom: 3rem;
+  width: 100%;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.result-header { /* // 🔧 수정됨 */
+  margin-bottom: 1.5rem;
+}
+
+.result-header h3 { /* // 🔧 수정됨 */
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.sets-grid { /* // 🔧 수정됨 */
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .sets-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .sets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+.set-card { /* // 🔧 수정됨 */
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.set-card:hover { /* // 🔧 수정됨 */
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.set-image { /* // 🔧 수정됨 */
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.set-image img { /* // 🔧 수정됨 */
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.no-image { /* // 🔧 수정됨 */
+  color: #9ca3af;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.set-info { /* // 🔧 수정됨 */
+  padding: 1rem;
+}
+
+.set-name-container { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.set-number-badge { /* // 🔧 수정됨 */
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 20px;
+  width: fit-content;
+  line-height: 1.2;
+}
+
+.set-name-wrapper { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.set-theme-name { /* // 🔧 수정됨 */
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.set-name-divider { /* // 🔧 수정됨 */
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.set-name-text { /* // 🔧 수정됨 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.set-stats { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-quantity { /* // 🔧 수정됨 */
+  font-size: 0.875rem;
+  color: #3b82f6;
+  font-weight: 500;
+  margin: 0;
+}
+
+.inventory-badge { /* // 🔧 수정됨 */
+  font-size: 0.8125rem;
+  color: #1f2937;
+  background: #f3f4f6;
+  border-radius: 9999px;
+  padding: 0.25rem 0.75rem;
+  width: fit-content;
+}
+
+.set-actions { /* // 🔧 수정됨 */
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.instruction-card-button { /* // 🔧 수정됨 */
+  padding: 0.5rem 1rem;
+  background: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.instruction-card-button:hover { /* // 🔧 수정됨 */
+  background: #f9fafb;
+  border-color: #9ca3af;
+  color: #111827;
+}
+
+.instruction-card-button:active { /* // 🔧 수정됨 */
+  transform: scale(0.96);
+}
+
+.pagination { /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.pagination-button { /* // 🔧 수정됨 */
+  padding: 0.5rem 1rem;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-button.disabled,
+.pagination-button:disabled { /* // 🔧 수정됨 */
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-numbers { /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pagination-number { /* // 🔧 수정됨 */
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-number.active { /* // 🔧 수정됨 */
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.pagination-ellipsis { /* // 🔧 수정됨 */
+  color: #9ca3af;
+  font-size: 0.875rem;
 }
 
 .selected-set-number {

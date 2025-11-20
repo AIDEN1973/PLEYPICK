@@ -87,6 +87,12 @@
                       </div>
                     </transition>
                     <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                      <button class="close-result-button" @click="resetPage" title="초기화">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>
                       <div class="selected-set-row">
                         <div class="selected-set-thumb-wrapper">
                           <img
@@ -307,7 +313,8 @@
                             <span 
                               class="color-badge"
                               :style="{ 
-                                backgroundColor: getColorRgbSync(displayedItems[0].color_id, displayedItems[0]) || '#ccc'
+                                backgroundColor: getColorRgbSync(displayedItems[0].color_id, displayedItems[0]) || '#ccc',
+                                color: getColorTextColor(displayedItems[0].color_rgb || getColorRgbSync(displayedItems[0].color_id, displayedItems[0]))
                               }"
                             >
                               {{ displayedItems[0].color_name || displayedItems[0].color_id }}
@@ -446,7 +453,8 @@
                           <span 
                             class="color-badge"
                             :style="{ 
-                              backgroundColor: getColorRgbSync(item.color_id, item) || '#ccc'
+                              backgroundColor: getColorRgbSync(item.color_id, item) || '#ccc',
+                              color: getColorTextColor(item.color_rgb || getColorRgbSync(item.color_id, item))
                             }"
                           >
                             {{ item.color_name || item.color_id }}
@@ -574,7 +582,7 @@
                 <strong>{{ selectedPart.element_id }}</strong>
               </div>
               <h4>{{ selectedPart.part_name }}</h4>
-              <p class="part-color-info">{{ selectedPart.color_name }}</p>
+              <p class="part-color-info">{{ formatColorLabel(selectedPart.color_name, selectedPart.color_id) }}</p> <!-- // 🔧 수정됨 -->
             </div>
 
             <!-- 1. 부품으로 세트 찾기 -->
@@ -587,9 +595,13 @@
                   v-for="set in partSets"
                   :key="set.id"
                   class="set-item"
+                  role="button"
+                  tabindex="0"
+                  @click="handleSetRowClick(set)"
+                  @keydown.enter.prevent="handleSetRowClick(set)"
                 >
-                  <span class="set-name">{{ set.name }}</span>
-                  <span class="set-num">{{ set.set_num.split('-')[0] }}</span>
+                  <span class="set-name">{{ set.name || '이름 없음' }}</span> <!-- // 🔧 수정됨 -->
+                  <span class="set-num">{{ displaySetNumber(set.set_num) }}</span> <!-- // 🔧 수정됨 -->
                 </div>
               </div>
             </div>
@@ -604,31 +616,30 @@
                   v-for="alt in alternativeParts.slice(0, 10)"
                   :key="alt.part_id"
                   class="alternative-item"
+                  role="button"
+                  tabindex="0"
+                  @click="handleAlternativePartClick(alt)"
+                  @keydown.enter.prevent="handleAlternativePartClick(alt)"
                 >
-                  <div class="alt-part-info">
-                    <div class="alt-part-left">
-                      <span v-if="alt.colors && alt.colors.length > 0 && alt.colors[0].element_id" class="alt-element-id">
-                        {{ alt.colors[0].element_id }}
-                      </span>
-                  <span class="alt-part-name">{{ alt.part_name }}</span>
-                    </div>
-                    <div v-if="alt.colors && alt.colors.length > 0" class="alt-color-names">
-                    <span
-                      v-for="color in alt.colors.slice(0, 5)"
-                      :key="color.color_id"
-                        class="color-name-badge"
-                        :style="{ 
-                          backgroundColor: getColorRgbFromAlternative(color.rgb) || '#e5e7eb'
-                        }"
-                      >
-                        {{ color.name || `Color ${color.color_id}` }}
-                      </span>
-                      <span v-if="alt.colors.length > 5" class="color-more-text">+{{ alt.colors.length - 5 }}개</span>
+                  <div class="alt-part-info"> <!-- // 🔧 수정됨 -->
+                    <span class="alt-part-name">{{ alt.part_name }}</span> <!-- // 🔧 수정됨 -->
+                    <span class="alt-part-id">부품 번호: {{ alt.part_id }}</span> <!-- // 🔧 수정됨 -->
                   </div>
-                    <div v-else class="alt-color-names">
-                      <span class="color-name-badge" style="background-color: #e5e7eb;">
-                        색상 정보 없음
-                      </span>
+                  <div v-if="alt.colors && alt.colors.length > 0" class="alt-colors"> <!-- // 🔧 수정됨 -->
+                    <div
+                      v-for="color in alt.colors"
+                      :key="`${alt.part_id}-${color.color_id}`"
+                      class="alt-color-row"
+                    >
+                      <span
+                        class="color-chip"
+                        :style="{ backgroundColor: color.rgb ? (String(color.rgb).startsWith('#') ? color.rgb : `#${color.rgb}`) : '#ccc' }"
+                      ></span>
+                      <span class="alt-color-name">{{ formatColorLabel(color.name, color.color_id) }}</span>
+                      <span v-if="color.element_id" class="alt-element-id">Element ID: {{ color.element_id }}</span>
+                    </div>
+                  </div>
+                  <div v-else class="empty-text">색상 정보가 없습니다</div> <!-- // 🔧 수정됨 -->
                 </div>
               </div>
             </div>
@@ -636,9 +647,6 @@
         </div>
       </div>
     </div>
-      </div>
-    </div>
-    
     <!-- 부품 정보 동기화 모달 -->
     <SetPartsSyncModal
       :show="showSyncModal"
@@ -895,6 +903,38 @@ export default {
     
     // 색상 RGB 동기 조회 (이미 로드된 items에서)
     // 대체부품의 RGB 값 처리 (색상 정보 표시용)
+    const getColorTextColor = (rgb) => {
+      if (!rgb) return '#ffffff'
+      let rgbStr = String(rgb).trim()
+      if (!rgbStr || rgbStr === 'null' || rgbStr === 'undefined' || rgbStr === 'None') {
+        return '#ffffff'
+      }
+      if (!rgbStr.startsWith('#')) {
+        rgbStr = `#${rgbStr}`
+      }
+      
+      // 화이트 색상 판단 (#FFFFFF, #ffffff, FFFFFF 등)
+      const normalized = rgbStr.toUpperCase()
+      if (normalized === '#FFFFFF' || normalized === '#FFF' || normalized === 'FFFFFF' || normalized === 'FFF') {
+        return '#6b7280' // 그레이
+      }
+      
+      // RGB 값으로 화이트 판단 (255, 255, 255에 가까운 경우)
+      if (normalized.length === 7 && normalized.startsWith('#')) {
+        const r = parseInt(normalized.substring(1, 3), 16)
+        const g = parseInt(normalized.substring(3, 5), 16)
+        const b = parseInt(normalized.substring(5, 7), 16)
+        
+        // 밝기가 240 이상이면 화이트로 간주
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000
+        if (brightness >= 240) {
+          return '#6b7280' // 그레이
+        }
+      }
+      
+      return '#ffffff' // 기본값 (흰색 텍스트)
+    }
+
     const getColorRgbFromAlternative = (rgb) => {
       if (!rgb || rgb === null || rgb === 'null' || rgb === 'undefined') {
         return null
@@ -963,6 +1003,37 @@ export default {
       return null
     }
     
+    const normalizeSetNumber = (setNum) => { // 🔧 수정됨
+      if (!setNum) return '' // 🔧 수정됨
+      const str = String(setNum).trim() // 🔧 수정됨
+      return str.replace(/-1$/, '') // 🔧 수정됨
+    } // 🔧 수정됨
+
+    const displaySetNumber = (setNum) => { // 🔧 수정됨
+      const normalized = normalizeSetNumber(setNum) // 🔧 수정됨
+      return formatSetNumber(normalized) // 🔧 수정됨
+    } // 🔧 수정됨
+
+    const formatColorLabel = (colorName, colorId) => { // 🔧 수정됨
+      if (colorName) { // 🔧 수정됨
+        const normalized = String(colorName).trim() // 🔧 수정됨
+        const lower = normalized.toLowerCase() // 🔧 수정됨
+        if ( // 🔧 수정됨
+          lower === 'no color' || // 🔧 수정됨
+          lower === 'any color' || // 🔧 수정됨
+          (lower.includes('no color') && lower.includes('any color')) || // 🔧 수정됨
+          (normalized.includes('No Color') && normalized.includes('Any Color')) // 🔧 수정됨
+        ) { // 🔧 수정됨
+          return 'Any Color' // 🔧 수정됨
+        } // 🔧 수정됨
+        return normalized // 🔧 수정됨
+      } // 🔧 수정됨
+      if (colorId || colorId === 0) { // 🔧 수정됨
+        return `Color ${colorId}` // 🔧 수정됨
+      } // 🔧 수정됨
+      return '색상 정보 없음' // 🔧 수정됨
+    } // 🔧 수정됨
+
     // 스와이프 관련 상태
     const swipeState = reactive({
       startX: 0,
@@ -2434,6 +2505,50 @@ export default {
       alternativePartsLoading.value = false
     }
 
+    const handleSetRowClick = async (set) => { // 🔧 수정됨
+      if (!set || !set.set_num) return // 🔧 수정됨
+      try { // 🔧 수정됨
+        const targetSetNum = normalizeSetNumber(set.set_num) // 🔧 수정됨
+        setSearchQuery.value = targetSetNum // 🔧 수정됨
+        await searchSets() // 🔧 수정됨
+        let target = searchResults.value.find(result => normalizeSetNumber(result.set_num) === targetSetNum) // 🔧 수정됨
+        if (!target) { // 🔧 수정됨
+          target = { // 🔧 수정됨
+            id: set.id, // 🔧 수정됨
+            set_num: targetSetNum, // 🔧 수정됨
+            name: set.name, // 🔧 수정됨
+            theme_id: set.theme_id || null, // 🔧 수정됨
+            theme_name: set.theme_name || null, // 🔧 수정됨
+            webp_image_url: set.image_url || null, // 🔧 수정됨
+            set_img_url: set.image_url || null, // 🔧 수정됨
+            num_parts: set.quantity || null // 🔧 수정됨
+          } // 🔧 수정됨
+        } // 🔧 수정됨
+        await handleSelectSet(target) // 🔧 수정됨
+        closePartInfoModal() // 🔧 수정됨
+      } catch (err) { // 🔧 수정됨
+        console.error('[ManualInspection] 세트 항목 클릭 실패:', err) // 🔧 수정됨
+      } // 🔧 수정됨
+    } // 🔧 수정됨
+
+    const handleAlternativePartClick = (part) => { // 🔧 수정됨
+      if (!part) return // 🔧 수정됨
+      const query = {} // 🔧 수정됨
+      if (part.element_id) { // 🔧 수정됨
+        query.element = String(part.element_id) // 🔧 수정됨
+      } else if (part.part_id) { // 🔧 수정됨
+        query.part = part.part_id // 🔧 수정됨
+        if (part.color_id !== null && part.color_id !== undefined) { // 🔧 수정됨
+          query.color = part.color_id // 🔧 수정됨
+        } // 🔧 수정됨
+      } // 🔧 수정됨
+      if (Object.keys(query).length === 0) return // 🔧 수정됨
+      router.push({ // 🔧 수정됨
+        path: '/part-to-set-search', // 🔧 수정됨
+        query // 🔧 수정됨
+      }) // 🔧 수정됨
+    } // 🔧 수정됨
+
     const closePartInfoModal = () => {
       showPartInfoModal.value = false
       selectedPart.value = null
@@ -2760,6 +2875,15 @@ export default {
       return 0
     }
 
+    const resetPage = () => {
+      setSearchQuery.value = ''
+      selectedSetId.value = ''
+      selectedSet.value = null
+      searchResults.value = []
+      searchResultsKey.value++
+      showSetDropdown.value = false
+    }
+
     return {
       loading,
       error,
@@ -2839,6 +2963,8 @@ export default {
       formatSetNumber,
       formatThemeName,
       formatSetDisplay,
+      displaySetNumber, // 🔧 수정됨
+      normalizeSetNumber, // 🔧 수정됨
       handleSelectedSetImageError,
       sessionDisplayName,
       lastSessionDisplayName,
@@ -2858,10 +2984,14 @@ export default {
       partSetsLoading,
       alternativeParts,
       alternativePartsLoading,
+      handleSetRowClick, // 🔧 수정됨
+      handleAlternativePartClick, // 🔧 수정됨
       closePartInfoModal,
       rareParts,
       getColorRgbSync,
       getColorRgbFromAlternative,
+      getColorTextColor,
+      formatColorLabel, // 🔧 수정됨
       resolvePartCount
     }
   }
@@ -3111,7 +3241,7 @@ export default {
 .card-header {
   padding: 1.5rem;
   border-bottom: 1px solid #e5e7eb;
-  background: #f9fafb;
+  background: #ffffff; /* // 🔧 수정됨 */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -3259,6 +3389,42 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: relative;
+}
+
+.close-result-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 22px; /* // 🔧 수정됨 */
+  height: 22px; /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+  border: 1px solid #e5e7eb; /* // 🔧 수정됨 */
+  border-radius: 9999px; /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #4b5563; /* // 🔧 수정됨 */
+  transition: all 0.2s ease;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); /* // 🔧 수정됨 */
+}
+
+.close-result-button:hover {
+  background: #f9fafb; /* // 🔧 수정됨 */
+  color: #374151; /* // 🔧 수정됨 */
+  border-color: #d1d5db; /* // 🔧 수정됨 */
+}
+
+.close-result-button svg { /* // 🔧 수정됨 */
+  width: 12px;
+  height: 12px;
+}
+
+.close-result-button:active {
+  transform: scale(0.95);
 }
 
 .selected-set-display {
@@ -3270,7 +3436,7 @@ export default {
 .selected-set-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.25rem; /* // 🔧 수정됨 */
 }
 
 .selected-set-thumb-wrapper {
@@ -5199,11 +5365,13 @@ export default {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   transition: all 0.2s ease;
+  cursor: pointer; /* // 🔧 수정됨 */
 }
 
 .set-item:hover {
   background: #f3f4f6;
   border-color: #d1d5db;
+  transform: translateY(-1px); /* // 🔧 수정됨 */
 }
 
 .set-name {
@@ -5259,19 +5427,13 @@ export default {
   border-color: #9ca3af;
 }
 
-.set-num {
+.set-num { /* // 🔧 수정됨 */
   font-size: 0.75rem;
-  color: #ffffff;
-  background: #2563eb;
+  color: #6b7280;
+  background: #ffffff;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-weight: 500;
-}
-
-.alternatives-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .element-id-display {
@@ -5284,101 +5446,76 @@ export default {
   color: #1f2937;
 }
 
-.alternative-item {
+.alternatives-list { /* // 🔧 수정됨 */
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.5rem;
+}
+
+.alternative-item { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.75rem;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-}
-
-.alt-part-info {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-}
-
-.alt-part-left {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1;
-}
-
-.alt-element-id {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #111827;
-}
-
-.alt-part-name {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #111827;
-}
-
-.alt-color-names {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.color-name-badge {
-  font-size: 0.75rem;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid #d1d5db;
-  font-weight: 500;
-  white-space: nowrap;
-  color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 4px rgba(0, 0, 0, 0.3);
-}
-
-.color-more-text {
-  font-size: 0.75rem;
-  color: #6b7280;
-  margin-left: 0.25rem;
-}
-
-.alt-colors {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.color-chip {
-  min-width: 20px;
-  height: 20px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid #d1d5db;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  color: #333;
+  transition: all 0.2s ease;
   cursor: pointer;
-  position: relative;
 }
 
-.color-chip .color-name-text {
-  font-size: 0.65rem;
-  color: #1f2937;
+.alternative-item:hover { /* // 🔧 수정됨 */
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+.alt-part-info { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.alt-part-name { /* // 🔧 수정됨 */
+  font-size: 0.875rem;
   font-weight: 500;
-  white-space: nowrap;
-  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+  color: #111827;
 }
 
-.color-more {
+.alt-part-id { /* // 🔧 수정됨 */
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.alt-colors { /* // 🔧 수정됨 */
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.alt-color-row { /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.color-chip { /* // 🔧 수정됨 */
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  display: inline-block;
+}
+
+.alt-color-name { /* // 🔧 수정됨 */
+  font-size: 0.8125rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.alt-element-id { /* // 🔧 수정됨 */
   font-size: 0.75rem;
   color: #6b7280;
-  margin-left: 0.25rem;
 }
 </style>
 

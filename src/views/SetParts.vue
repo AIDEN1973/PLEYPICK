@@ -81,6 +81,12 @@
                   </div>
                 </transition>
                 <div v-if="selectedSetId && selectedSet" class="selected-set-info">
+                  <button class="close-result-button" @click="resetPage" title="초기화">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                   <div class="selected-set-row">
                     <div class="selected-set-thumb-wrapper">
                       <img
@@ -98,16 +104,103 @@
                         <span v-if="selectedSet.theme_name" class="selected-set-theme">{{ selectedSet.theme_name }}</span>
                         <span v-if="selectedSet.name" class="selected-set-name">{{ selectedSet.name }}</span>
                       </div>
-                      <span class="selected-set-parts">부품수 : {{ resolvePartCount(selectedSet) }}개</span>
-                      <span v-if="uniquePartsCount > 0" class="selected-set-registered">
-                        부품수 {{ uniquePartsCount }}종, 실제 등록 부품수 {{ registeredPartsCount }}종
-                      </span>
+                      <div class="selected-set-parts-info">
+                        <span class="selected-set-parts">부품수 : {{ resolvePartCount(selectedSet) }}개</span>
+                        <span v-if="uniquePartsCount > 0" class="selected-set-parts-divider">|</span>
+                        <span v-if="uniquePartsCount > 0" class="selected-set-registered">
+                          부품수 {{ uniquePartsCount }}종, 실제 등록 부품수 {{ registeredPartsCount }}종
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- 매장 레고 리스트 -->
+      <div v-if="!loading && !error && !setSearchQuery.trim() && !selectedSetId && storeSets.length > 0" class="store-sets-section">
+        <div class="result-header">
+          <h3>레고 리스트</h3>
+        </div>
+        <div class="sets-grid">
+          <div
+            v-for="set in paginatedStoreSets"
+            :key="set.id"
+            class="set-card"
+            @click="handleSelectSet(set)"
+          >
+            <div class="set-image">
+              <img
+                v-if="set.image_url"
+                :src="set.image_url"
+                :alt="set.name"
+                @error="handleSetImageError"
+              />
+              <div v-else class="no-image">이미지 없음</div>
+              <button
+                class="set-parts-icon-button"
+                @click.stop="openSetPartsModal(set)"
+                :title="'부품 정보 보기'"
+              >
+                <svg class="search-icon-svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+              </button>
+            </div>
+            <div class="set-info">
+              <div class="set-name-container">
+                <span class="set-number-badge">{{ formatSetNumber(set.set_num) }}</span>
+                <div class="set-name-wrapper">
+                  <span v-if="set.theme_name" class="set-theme-name">{{ set.theme_name }}</span>
+                  <span v-if="set.theme_name && set.name" class="set-name-divider">|</span>
+                  <span v-if="set.name" class="set-name-text">{{ set.name }}</span>
+                </div>
+              </div>
+              <div class="set-stats">
+                <span class="set-quantity">부품수 : {{ resolvePartCount(set) }}개</span>
+                <span v-if="set.quantity" class="inventory-badge">재고: {{ set.quantity }}개</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 페이지네이션 -->
+        <div v-if="totalPages > 1" class="pagination">
+          <button
+            class="pagination-button"
+            :class="{ disabled: currentPage === 1 }"
+            @click="goToPage(currentPage - 1)"
+            :disabled="currentPage === 1"
+          >
+            이전
+          </button>
+          <div class="pagination-numbers">
+            <span
+              v-for="page in visiblePages"
+              :key="page"
+            >
+              <button
+                v-if="page !== '...'"
+                class="pagination-number"
+                :class="{ active: page === currentPage }"
+                @click="goToPage(page)"
+              >
+                {{ page }}
+              </button>
+              <span v-else class="pagination-ellipsis">...</span>
+            </span>
+          </div>
+          <button
+            class="pagination-button"
+            :class="{ disabled: currentPage === totalPages }"
+            @click="goToPage(currentPage + 1)"
+            :disabled="currentPage === totalPages"
+          >
+            다음
+          </button>
         </div>
       </div>
 
@@ -135,7 +228,8 @@
                 <span 
                   class="color-badge"
                   :style="{ 
-                    backgroundColor: getColorRgb(part.color_rgb) || '#ccc'
+                    backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                    color: getColorTextColor(part.color_rgb)
                   }"
                 >
                   {{ formatColorLabel(part.color_name, part.color_id) }}
@@ -263,18 +357,76 @@
       @close="handleSyncClose"
       @retry="handleSyncRetry"
     />
+
+    <!-- 부품 정보 모달 -->
+    <div v-if="showSetPartsModal" class="modal-overlay" @click.self="closeSetPartsModal">
+      <div class="modal-container">
+        <div class="modal-header">
+          <h3>{{ selectedModalSet ? formatSetDisplay(selectedModalSet.set_num, selectedModalSet.theme_name, selectedModalSet.name) : '' }}</h3>
+          <button class="modal-close-button" @click="closeSetPartsModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="setPartsModalLoading" class="loading-message">로딩 중...</div>
+          <div v-else-if="setPartsModalError" class="error-message">{{ setPartsModalError }}</div>
+          <div v-else-if="setPartsModalData && setPartsModalData.length > 0" class="set-parts-list">
+            <div class="parts-grid modal-parts-grid">
+              <div
+                v-for="(part, index) in setPartsModalData"
+                :key="`${part.part_id}-${part.color_id}-${index}`"
+                class="part-card"
+              >
+                <div class="card-header">
+                  <div class="part-info">
+                    <div v-if="part.element_id" class="element-id">
+                      {{ part.element_id }}
+                    </div>
+                    <h4 class="part-name">{{ part.part_name }}</h4>
+                    <span 
+                      class="color-badge"
+                      :style="{ 
+                        backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                        color: getColorTextColor(part.color_rgb)
+                      }"
+                    >
+                      {{ formatColorLabel(part.color_name, part.color_id) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="card-body">
+                  <div class="part-image-section">
+                    <img
+                      v-if="part.image_url"
+                      :src="part.image_url"
+                      :alt="part.part_name"
+                      class="part-image"
+                      @error="handlePartImageError"
+                    />
+                    <div v-else class="no-part-image">이미지 없음</div>
+                  </div>
+                  <div class="quantity-section">
+                    <div class="quantity-badge">{{ part.quantity }}개</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-message">부품이 없습니다.</div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSupabase } from '../composables/useSupabase'
+import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 import { usePartSearch } from '../composables/usePartSearch'
 import { usePleyonInventorySync } from '../composables/usePleyonInventorySync'
 import { useRebrickable } from '../composables/useRebrickable'
 import SetPartsSyncModal from '../components/SetPartsSyncModal.vue'
-import { formatSetDisplay, formatSetNumber } from '../utils/setDisplay'
+import { formatSetDisplay, formatSetNumber, fetchSetMetadata } from '../utils/setDisplay'
 
 const normalizeNumber = (value) => {
   if (value === null || value === undefined) return null
@@ -289,7 +441,8 @@ export default {
   },
   setup() {
     const router = useRouter()
-    const { supabase } = useSupabase()
+    const { supabase, user } = useSupabase()
+    const { getStoreInfoByEmail, getStoreInventory } = useSupabasePleyon()
     const { checkSetPartsExist, syncSetParts, syncing, syncProgress, syncStatus, error: syncError } = usePleyonInventorySync()
 
     const loading = ref(false)
@@ -313,6 +466,20 @@ export default {
     const syncCompleted = ref(false)
     const syncPartsCount = ref(0)
     
+    // 매장 레고 리스트 관련
+    const storeInventory = ref([])
+    const storeInfo = ref(null)
+    const storeSets = ref([])
+    const currentPage = ref(1)
+    const itemsPerPage = 40
+    
+    // 부품 정보 모달 관련
+    const showSetPartsModal = ref(false)
+    const selectedModalSet = ref(null)
+    const setPartsModalData = ref([])
+    const setPartsModalLoading = ref(false)
+    const setPartsModalError = ref(null)
+    
     // 테스트용: 모달 강제 표시 함수 (개발 환경에서만)
     const testShowModal = () => {
       if (import.meta.env.DEV) {
@@ -335,6 +502,19 @@ export default {
     watch(syncSetNum, (newVal) => {
       console.log('[SetParts] syncSetNum 변경:', newVal)
     })
+
+    watch(user, async (newUser) => {
+      console.log('[SetParts] watch user 호출:', { hasUser: !!newUser, email: newUser?.email })
+      if (newUser) {
+        console.log('[SetParts] 사용자 있음, 매장 인벤토리 로드 시작')
+        await loadStoreInventory()
+      } else {
+        console.log('[SetParts] 사용자 없음, 매장 데이터 초기화')
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+      }
+    }, { immediate: true })
 
     const { findSetsByPart, findAlternativeParts } = usePartSearch()
 
@@ -541,7 +721,15 @@ export default {
 
     const handleSelectSet = async (set) => {
       console.log('[SetParts] handleSelectSet 호출됨:', set)
-      selectedSet.value = set
+      
+      // 매장 레고 리스트의 세트 객체는 image_url만 있으므로 매핑 필요
+      const mappedSet = {
+        ...set,
+        webp_image_url: set.webp_image_url || set.image_url || null,
+        set_img_url: set.set_img_url || set.image_url || null
+      }
+      
+      selectedSet.value = mappedSet
       selectedSetId.value = set.id
       setSearchQuery.value = ''
       searchResults.value = []
@@ -1025,6 +1213,38 @@ export default {
       return rgbStr.length === 7 ? rgbStr.toUpperCase() : null // 🔧 수정됨
     }
 
+    const getColorTextColor = (rgb) => {
+      if (!rgb) return '#ffffff'
+      let rgbStr = String(rgb).trim()
+      if (!rgbStr || rgbStr === 'null' || rgbStr === 'undefined' || rgbStr === 'None') {
+        return '#ffffff'
+      }
+      if (!rgbStr.startsWith('#')) {
+        rgbStr = `#${rgbStr}`
+      }
+      
+      // 화이트 색상 판단 (#FFFFFF, #ffffff, FFFFFF 등)
+      const normalized = rgbStr.toUpperCase()
+      if (normalized === '#FFFFFF' || normalized === '#FFF' || normalized === 'FFFFFF' || normalized === 'FFF') {
+        return '#6b7280' // 그레이
+      }
+      
+      // RGB 값으로 화이트 판단 (255, 255, 255에 가까운 경우)
+      if (normalized.length === 7 && normalized.startsWith('#')) {
+        const r = parseInt(normalized.substring(1, 3), 16)
+        const g = parseInt(normalized.substring(3, 5), 16)
+        const b = parseInt(normalized.substring(5, 7), 16)
+        
+        // 밝기가 240 이상이면 화이트로 간주
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000
+        if (brightness >= 240) {
+          return '#6b7280' // 그레이
+        }
+      }
+      
+      return '#ffffff' // 기본값 (흰색 텍스트)
+    }
+
     const formatColorLabel = (colorName, colorId) => {
       if (colorName) {
         const normalized = String(colorName).trim()
@@ -1052,6 +1272,267 @@ export default {
         }
       }
       return 0
+    }
+
+    const resetPage = () => {
+      setSearchQuery.value = ''
+      selectedSetId.value = ''
+      selectedSet.value = null
+      searchResults.value = []
+      searchResultsKey.value++
+      showSetDropdown.value = false
+      parts.value = []
+      error.value = null
+      uniquePartsCount.value = 0
+      registeredPartsCount.value = 0
+    }
+
+    // 매장 인벤토리 로드
+    const loadStoreInventory = async () => {
+      console.log('[SetParts] loadStoreInventory 시작:', { hasUser: !!user.value, email: user.value?.email })
+      if (!user.value) {
+        console.log('[SetParts] 사용자 없음, 매장 데이터 초기화')
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+        return
+      }
+
+      try {
+        console.log('[SetParts] 매장 정보 조회 시작:', user.value.email)
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        console.log('[SetParts] 매장 정보 조회 결과:', { hasStoreData: !!storeData, hasStore: !!(storeData?.store) })
+        if (storeData && storeData.store) {
+          storeInfo.value = storeData
+          console.log('[SetParts] 매장 인벤토리 조회 시작, storeId:', storeData.store.id)
+          const inventoryData = await getStoreInventory(storeData.store.id)
+          storeInventory.value = inventoryData || []
+          console.log('[SetParts] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
+          
+          // 인벤토리에서 세트 정보 추출
+          await loadStoreSets()
+        } else {
+          console.log('[SetParts] 매장 정보 없음, 데이터 초기화')
+          storeInfo.value = null
+          storeInventory.value = []
+          storeSets.value = []
+        }
+      } catch (err) {
+        console.error('[SetParts] 매장 인벤토리 로드 실패:', err)
+        storeInfo.value = null
+        storeInventory.value = []
+        storeSets.value = []
+      }
+    }
+
+    // 매장 세트 정보 로드
+    const loadStoreSets = async () => {
+      if (!storeInventory.value || storeInventory.value.length === 0) {
+        storeSets.value = []
+        return
+      }
+
+      try {
+        // 인벤토리에서 세트 번호 추출 (MissingParts.vue와 동일한 방식)
+        const inventorySetNumbers = storeInventory.value
+          .map(item => {
+            const legoSet = item.lego_sets
+            if (!legoSet) return null
+            if (Array.isArray(legoSet) && legoSet.length > 0) {
+              return legoSet[0].number
+            }
+            if (!Array.isArray(legoSet)) {
+              return legoSet.number
+            }
+            return null
+          })
+          .filter(Boolean)
+        
+        if (inventorySetNumbers.length === 0) {
+          storeSets.value = []
+          return
+        }
+
+        // 중복 제거
+        const uniqueSetNumbers = [...new Set(inventorySetNumbers)]
+
+        // 세트 번호 변형 생성 (접미사 처리: '10358' -> ['10358', '10358-1', '10358-2'])
+        const setNumVariations = new Set()
+        uniqueSetNumbers.forEach(setNum => {
+          setNumVariations.add(setNum)
+          const baseNum = setNum.split('-')[0]
+          if (baseNum !== setNum) {
+            setNumVariations.add(baseNum)
+          }
+          // 접미사 있는 버전도 추가 (최대 3개만)
+          for (let i = 1; i <= 3; i++) {
+            setNumVariations.add(`${baseNum}-${i}`)
+          }
+        })
+        
+        const allSetNums = Array.from(setNumVariations)
+
+        // 병렬 배치 조회로 속도 개선
+        const batchSize = 100
+        const batches = []
+        for (let i = 0; i < allSetNums.length; i += batchSize) {
+          batches.push(allSetNums.slice(i, i + batchSize))
+        }
+        
+        // 모든 배치를 병렬로 조회
+        const batchPromises = batches.map(batch =>
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .in('set_num', batch)
+        )
+        
+        const batchResults = await Promise.all(batchPromises)
+        
+        // 결과 합치기
+        let allSetsData = []
+        for (const result of batchResults) {
+          if (result.error) {
+            console.error('[SetParts] lego_sets 배치 조회 오류:', result.error)
+            throw result.error
+          }
+          if (result.data && result.data.length > 0) {
+            allSetsData.push(...result.data)
+          }
+        }
+        
+        // 원본 세트 번호와 매칭되는 세트만 필터링 (접미사 무시)
+        const finalSetsData = allSetsData.filter(set => {
+          const baseSetNum = set.set_num.split('-')[0]
+          return uniqueSetNumbers.includes(set.set_num) || uniqueSetNumbers.includes(baseSetNum)
+        })
+        
+        if (finalSetsData.length === 0) {
+          storeSets.value = []
+          return
+        }
+
+        // 테마 정보 조회
+        const themeIds = [...new Set((finalSetsData || []).map(s => s.theme_id).filter(Boolean))]
+        console.log('[SetParts] 테마 ID 수:', themeIds.length)
+        let themeMap = new Map()
+        if (themeIds.length > 0) {
+          const { data: themesData, error: themesError } = await supabase
+            .from('lego_themes')
+            .select('theme_id, name')
+            .in('theme_id', themeIds)
+
+          if (!themesError && themesData) {
+            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+            console.log('[SetParts] 테마 맵 생성 완료:', themeMap.size, '개')
+          }
+        }
+
+        // 인벤토리에서 수량 정보 매핑 (set_num 기준)
+        const quantityMap = new Map()
+        storeInventory.value.forEach(item => {
+          const legoSet = item.lego_sets
+          let setNum = null
+          if (legoSet) {
+            if (Array.isArray(legoSet) && legoSet.length > 0) {
+              setNum = legoSet[0].number
+            } else if (!Array.isArray(legoSet)) {
+              setNum = legoSet.number
+            }
+          }
+          
+          if (setNum) {
+            const currentQty = quantityMap.get(setNum) || 0
+            quantityMap.set(setNum, currentQty + (item.quantity || 0))
+          }
+        })
+        console.log('[SetParts] 수량 맵 생성 완료:', quantityMap.size, '개')
+
+        // 세트 데이터 구성
+        const setsWithQuantity = (finalSetsData || []).map(set => {
+          let imageUrl = null
+          if (set.webp_image_url) {
+            imageUrl = set.webp_image_url
+          } else if (set.set_img_url) {
+            if (set.set_img_url.includes('cdn.rebrickable.com')) {
+              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(set.set_img_url)}`
+            } else {
+              imageUrl = set.set_img_url
+            }
+          }
+
+          return {
+            id: set.id,
+            set_num: set.set_num,
+            name: set.name,
+            theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
+            image_url: imageUrl,
+            num_parts: set.num_parts || 0,
+            part_count: set.num_parts || 0,
+            quantity: quantityMap.get(set.set_num) || 0
+          }
+        }).sort((a, b) => {
+          return a.set_num.localeCompare(b.set_num, 'ko')
+        })
+
+        storeSets.value = setsWithQuantity
+      } catch (err) {
+        console.error('[SetParts] 매장 세트 정보 로드 실패:', err)
+        storeSets.value = []
+      }
+    }
+
+    // 페이지네이션
+    const totalPages = computed(() => {
+      return Math.ceil(storeSets.value.length / itemsPerPage)
+    })
+
+    const paginatedStoreSets = computed(() => {
+      const start = (currentPage.value - 1) * itemsPerPage
+      const end = start + itemsPerPage
+      return storeSets.value.slice(start, end)
+    })
+
+    const visiblePages = computed(() => {
+      const pages = []
+      const total = totalPages.value
+      const current = currentPage.value
+      
+      if (total <= 7) {
+        for (let i = 1; i <= total; i++) {
+          pages.push(i)
+        }
+      } else {
+        if (current <= 3) {
+          for (let i = 1; i <= 5; i++) {
+            pages.push(i)
+          }
+          pages.push('...')
+          pages.push(total)
+        } else if (current >= total - 2) {
+          pages.push(1)
+          pages.push('...')
+          for (let i = total - 4; i <= total; i++) {
+            pages.push(i)
+          }
+        } else {
+          pages.push(1)
+          pages.push('...')
+          for (let i = current - 1; i <= current + 1; i++) {
+            pages.push(i)
+          }
+          pages.push('...')
+          pages.push(total)
+        }
+      }
+      
+      return pages
+    })
+
+    const goToPage = (page) => {
+      if (page < 1 || page > totalPages.value || page === currentPage.value) return
+      currentPage.value = page
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     const handleSetRowClick = async (set) => {
@@ -1099,6 +1580,203 @@ export default {
       closePartInfoModal()
     }
 
+    // 부품 정보 모달 열기
+    const openSetPartsModal = async (set) => {
+      selectedModalSet.value = set
+      showSetPartsModal.value = true
+      setPartsModalData.value = []
+      setPartsModalError.value = null
+      setPartsModalLoading.value = true
+
+      try {
+        // 세트 부품 정보 조회
+        const { data: partsData, error: partsError } = await supabase
+          .from('set_parts')
+          .select('part_id, color_id, quantity, element_id, is_spare')
+          .eq('set_id', set.id)
+
+        if (partsError) throw partsError
+
+        if (!partsData || partsData.length === 0) {
+          setPartsModalData.value = []
+          setPartsModalLoading.value = false
+          return
+        }
+
+        // 예비부품 제외
+        const nonSpareParts = partsData.filter(p => !p.is_spare)
+
+        // 부품 정보 조회
+        const partIds = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
+        const { data: partsInfo, error: partsInfoError } = await supabase
+          .from('lego_parts')
+          .select('part_num, name, part_img_url')
+          .in('part_num', partIds)
+
+        if (partsInfoError) throw partsInfoError
+
+        // 색상 정보 조회
+        const colorIds = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
+        const { data: colorsInfo, error: colorsError } = await supabase
+          .from('lego_colors')
+          .select('color_id, name, rgb')
+          .in('color_id', colorIds)
+
+        if (colorsError) throw colorsError
+
+        // 부품 이미지 URL 조회
+        const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
+        const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
+
+        // element_id 목록 수집
+        const elementIds = [...new Set(nonSpareParts.map(p => p.element_id).filter(Boolean))].map(id => String(id))
+
+        // element_id 기반 이미지 배치 조회
+        let elementImageMap = new Map()
+        if (elementIds.length > 0) {
+          const { data: elementImages, error: elementImagesError } = await supabase
+            .from('part_images')
+            .select('element_id, uploaded_url')
+            .in('element_id', elementIds)
+            .not('uploaded_url', 'is', null)
+
+          if (!elementImagesError && elementImages) {
+            elementImages.forEach(img => {
+              if (img.element_id && img.uploaded_url && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                elementImageMap.set(String(img.element_id), img.uploaded_url)
+              }
+            })
+          }
+
+          // image_metadata에서도 조회
+          const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+          if (missingElementIds.length > 0) {
+            const { data: metadataImages, error: metadataError } = await supabase
+              .from('image_metadata')
+              .select('element_id, supabase_url')
+              .in('element_id', missingElementIds)
+              .not('supabase_url', 'is', null)
+
+            if (!metadataError && metadataImages) {
+              metadataImages.forEach(img => {
+                if (img.element_id && img.supabase_url && !elementImageMap.has(String(img.element_id))) {
+                  elementImageMap.set(String(img.element_id), img.supabase_url)
+                }
+              })
+            }
+          }
+        }
+
+        // part_id + color_id 기반 이미지 조회 (fallback)
+        const partColorImageMap = new Map()
+        const partIdsForImages = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
+        const colorIdsForImages = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
+
+        if (partIdsForImages.length > 0 && colorIdsForImages.length > 0) {
+          const { data: partImages, error: partImagesError } = await supabase
+            .from('part_images')
+            .select('part_id, color_id, uploaded_url')
+            .in('part_id', partIdsForImages)
+            .in('color_id', colorIdsForImages)
+            .not('uploaded_url', 'is', null)
+
+          if (!partImagesError && partImages) {
+            partImages.forEach(img => {
+              if (img.part_id && img.color_id !== null && img.color_id !== undefined && img.uploaded_url && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                const key = `${img.part_id}_${img.color_id}`
+                partColorImageMap.set(key, img.uploaded_url)
+              }
+            })
+          }
+
+          // image_metadata에서도 조회
+          const { data: metadataImages, error: metadataError } = await supabase
+            .from('image_metadata')
+            .select('part_num, color_id, supabase_url')
+            .in('part_num', partIdsForImages)
+            .in('color_id', colorIdsForImages)
+            .not('supabase_url', 'is', null)
+
+          if (!metadataError && metadataImages) {
+            metadataImages.forEach(img => {
+              if (img.part_num && img.color_id !== null && img.color_id !== undefined && img.supabase_url) {
+                const key = `${img.part_num}_${img.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  partColorImageMap.set(key, img.supabase_url)
+                }
+              }
+            })
+          }
+        }
+
+        // 부품 데이터 구성
+        const partsWithImages = nonSpareParts.map(part => {
+          const partInfo = partsInfoMap.get(part.part_id)
+          const colorInfo = colorsInfoMap.get(part.color_id)
+          
+          let imageUrl = null
+          // 1. element_id 기반 이미지 우선
+          if (part.element_id) {
+            imageUrl = elementImageMap.get(String(part.element_id))
+          }
+          
+          // 2. part_id + color_id 기반 이미지 (fallback)
+          if (!imageUrl && part.part_id && part.color_id !== null && part.color_id !== undefined) {
+            const key = `${part.part_id}_${part.color_id}`
+            imageUrl = partColorImageMap.get(key)
+          }
+          
+          // 3. part_img_url fallback (프록시 변환)
+          if (!imageUrl && partInfo?.part_img_url) {
+            if (partInfo.part_img_url.includes('cdn.rebrickable.com')) {
+              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+            } else {
+              imageUrl = partInfo.part_img_url
+            }
+          }
+
+          return {
+            part_id: part.part_id,
+            color_id: part.color_id,
+            element_id: part.element_id,
+            part_name: partInfo?.name || part.part_id,
+            color_name: colorInfo ? (colorInfo.name || null) : null,
+            color_rgb: colorInfo?.rgb || null,
+            image_url: imageUrl,
+            quantity: part.quantity
+          }
+        })
+
+        setPartsModalData.value = partsWithImages
+      } catch (err) {
+        setPartsModalError.value = err.message || '부품 목록을 불러오는 중 오류가 발생했습니다.'
+        console.error('부품 목록 조회 실패:', err)
+      } finally {
+        setPartsModalLoading.value = false
+      }
+    }
+
+    // 부품 정보 모달 닫기
+    const closeSetPartsModal = () => {
+      showSetPartsModal.value = false
+      selectedModalSet.value = null
+      setPartsModalData.value = []
+      setPartsModalError.value = null
+    }
+
+    // 부품 이미지 에러 처리
+    const handlePartImageError = (event) => {
+      const img = event.target
+      img.style.display = 'none'
+      const parent = img.parentElement
+      if (parent && !parent.querySelector('.no-part-image')) {
+        const placeholder = document.createElement('div')
+        placeholder.className = 'no-part-image'
+        placeholder.textContent = '이미지 없음'
+        parent.appendChild(placeholder)
+      }
+    }
+
     return {
       loading,
       error,
@@ -1134,16 +1812,34 @@ export default {
       formatSetDisplay,
       formatSetNumber,
       getColorRgb,
+      getColorTextColor,
       formatColorLabel,
       resolvePartCount, // 🔧 수정됨
       displaySetNumber,
       handleSetRowClick,
       handleAlternativePartClick,
+      resetPage,
+      storeInventory,
+      storeInfo,
+      storeSets,
+      paginatedStoreSets,
+      currentPage,
+      totalPages,
+      visiblePages,
+      goToPage,
       showPartInfo,
       closePartInfoModal,
       showPartInfoModal,
       selectedPart,
       partSets,
+      openSetPartsModal,
+      closeSetPartsModal,
+      showSetPartsModal,
+      setPartsModalData,
+      setPartsModalLoading,
+      setPartsModalError,
+      selectedModalSet,
+      handlePartImageError,
       partSetsLoading,
       alternativeParts,
       alternativePartsLoading
@@ -1323,6 +2019,569 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem; /* 🔧 수정됨 */
+  position: relative;
+}
+
+.close-result-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 22px; /* // 🔧 수정됨 */
+  height: 22px; /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+  border: 1px solid #e5e7eb; /* // 🔧 수정됨 */
+  border-radius: 9999px; /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #4b5563; /* // 🔧 수정됨 */
+  transition: all 0.2s ease;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); /* // 🔧 수정됨 */
+}
+
+.close-result-button:hover {
+  background: #f9fafb; /* // 🔧 수정됨 */
+  color: #374151; /* // 🔧 수정됨 */
+  border-color: #d1d5db; /* // 🔧 수정됨 */
+}
+
+.close-result-button svg { /* // 🔧 수정됨 */
+  width: 12px;
+  height: 12px;
+}
+
+.close-result-button:active {
+  transform: scale(0.95);
+}
+
+.store-sets-section {
+  margin-bottom: 3rem;
+  width: 100%;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.result-header {
+  margin-bottom: 1.5rem;
+}
+
+.result-header h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.sets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .sets-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .sets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+.set-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.set-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.set-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.set-parts-icon-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+  padding: 0;
+}
+
+.set-parts-icon-button:hover {
+  transform: scale(1.1);
+}
+
+.set-parts-icon-button:active {
+  transform: scale(0.95);
+}
+
+.search-icon-svg {
+  color: #2563eb;
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.set-parts-icon-button:hover .search-icon-svg {
+  color: #1d4ed8;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.3));
+}
+
+.set-image img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.no-image {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.set-info {
+  padding: 1rem;
+}
+
+.set-name-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.set-number-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 20px;
+  width: fit-content;
+  line-height: 1.2;
+}
+
+.set-name-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.set-theme-name {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.set-name-divider {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.set-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.set-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-quantity {
+  font-size: 0.875rem;
+  color: #3b82f6;
+  font-weight: 500;
+  margin: 0;
+}
+
+.inventory-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #10b981;
+  color: #ffffff;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  padding: 1rem 0;
+}
+
+.pagination-button {
+  padding: 0.5rem 1rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-button:hover:not(.disabled) {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.pagination-button.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-numbers {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pagination-number {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 0.5rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination-number:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.pagination-number.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.pagination-number:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.pagination-ellipsis {
+  min-width: 36px;
+  height: 36px;
+  padding: 0 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+/* 부품 정보 모달 스타일 */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.modal-container {
+  background: white;
+  border-radius: 8px;
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 1000px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.modal-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #1f2937;
+  margin: 0;
+}
+
+.modal-close-button {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.modal-close-button:hover {
+  color: #1f2937;
+}
+
+.modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.loading-message,
+.error-message,
+.empty-message {
+  text-align: center;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.error-message {
+  color: #dc2626;
+}
+
+.set-parts-list {
+  max-height: calc(90vh - 120px);
+}
+
+/* 모달 부품 그리드 (4열 유지) */
+.modal-parts-grid {
+  grid-template-columns: repeat(4, 1fr) !important;
+}
+
+@media (min-width: 1400px) {
+  .modal-parts-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .modal-parts-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+/* 부품 카드 스타일 (모달용) */
+.part-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.25rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.2s ease-out;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.part-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.part-card .card-header {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.part-card .part-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  width: 0;
+}
+
+.part-card .element-id {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.part-card .part-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.part-card .color-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.part-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+}
+
+.part-card .part-image-section {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #f9fafb;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.part-card .part-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+}
+
+.part-card .no-part-image {
+  color: #9ca3af;
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+.part-card .quantity-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.part-card .quantity-badge {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: #ffffff;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 1rem;
+  }
+
+  .modal-container {
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .modal-parts-grid {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 .selected-set-display {
@@ -1334,7 +2593,7 @@ export default {
 .selected-set-row { /* 🔧 수정됨 */
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.25rem; /* // 🔧 수정됨 */
 }
 
 .selected-set-text {
@@ -1372,19 +2631,28 @@ export default {
   word-break: break-word;
 }
 
-.selected-set-parts { /* 🔧 수정됨 */
-  display: block;
-  font-size: 0.8125rem;
-  color: #6b7280;
+.selected-set-parts-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   margin-top: 0rem;
 }
 
+.selected-set-parts {
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.selected-set-parts-divider {
+  font-size: 0.8125rem;
+  color: #d1d5db;
+}
+
 .selected-set-registered {
-  display: block;
   font-size: 0.8125rem;
   color: #3b82f6;
   font-weight: 500;
-  margin-top: 0.25rem;
 }
 
 .selected-set-thumb-wrapper { /* 🔧 수정됨 */
@@ -1451,7 +2719,7 @@ export default {
 .set-parts-page .option-content {
   display: flex !important;
   align-items: center !important;
-  gap: 1rem !important;
+  gap: 1.5rem !important; /* // 🔧 수정됨 */
   width: 100% !important;
   overflow: visible !important;
 }
@@ -1705,7 +2973,7 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
-  padding: 1rem 0;
+  padding: 0rem 0;
   min-height: 120px;
   background: transparent;
   border-radius: 8px;
@@ -1877,7 +3145,7 @@ export default {
 
   .part-card .part-image-section {
     min-height: 100px;
-    padding: 0.75rem 0;
+    padding: 0rem 0;
   }
 
   .part-card .part-image {

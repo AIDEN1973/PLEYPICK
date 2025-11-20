@@ -117,7 +117,8 @@
                   v-if="part.color_name || part.color_id"
                   class="color-badge"
                   :style="{ 
-                    backgroundColor: getColorRgb(part.color_rgb) || '#ccc'
+                    backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                    color: getColorTextColor(part.color_rgb)
                   }"
                 >
                   {{ formatColorName(part.color_name) || `Color ${part.color_id}` }}
@@ -1689,6 +1690,38 @@ const getColorRgb = (rgb) => {
     rgbStr = `#${rgbStr}`
   }
   return rgbStr.length === 7 ? rgbStr.toUpperCase() : null
+}
+
+const getColorTextColor = (rgb) => {
+  if (!rgb) return '#ffffff'
+  let rgbStr = String(rgb).trim()
+  if (!rgbStr || rgbStr === 'null' || rgbStr === 'undefined' || rgbStr === 'None') {
+    return '#ffffff'
+  }
+  if (!rgbStr.startsWith('#')) {
+    rgbStr = `#${rgbStr}`
+  }
+  
+  // 화이트 색상 판단 (#FFFFFF, #ffffff, FFFFFF 등)
+  const normalized = rgbStr.toUpperCase()
+  if (normalized === '#FFFFFF' || normalized === '#FFF' || normalized === 'FFFFFF' || normalized === 'FFF') {
+    return '#6b7280' // 그레이
+  }
+  
+  // RGB 값으로 화이트 판단 (255, 255, 255에 가까운 경우)
+  if (normalized.length === 7 && normalized.startsWith('#')) {
+    const r = parseInt(normalized.substring(1, 3), 16)
+    const g = parseInt(normalized.substring(3, 5), 16)
+    const b = parseInt(normalized.substring(5, 7), 16)
+    
+    // 밝기가 240 이상이면 화이트로 간주
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000
+    if (brightness >= 240) {
+      return '#6b7280' // 그레이
+    }
+  }
+  
+  return '#ffffff' // 기본값 (흰색 텍스트)
 }
 
 // 이미지 오류 처리 (무한 반복 방지)

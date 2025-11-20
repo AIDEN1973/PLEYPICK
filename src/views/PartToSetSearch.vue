@@ -38,6 +38,12 @@
                   </button>
                 </div>
                 <div v-if="searchResult" class="result-part-card">
+                  <button class="close-result-button" @click="resetPage" title="초기화">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                   <div class="part-image-container">
                     <img
                       v-if="searchResult.part_image_url"
@@ -53,6 +59,16 @@
                       {{ searchResult.element_id }}
                     </div>
                     <div class="part-name-text">{{ searchResult.part_name }}</div>
+                    <span 
+                      v-if="searchResult.color_name || searchResult.color_id"
+                      class="result-color-badge"
+                      :style="{ 
+                        backgroundColor: getColorRgb(searchResult.color_rgb) || '#ccc',
+                        color: getColorTextColor(searchResult.color_rgb)
+                      }"
+                    >
+                      {{ formatColorLabel(searchResult.color_name, searchResult.color_id) }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -66,13 +82,14 @@
       </div>
 
       <div v-if="searchResult" class="result-section">
-        <div class="result-header"><h3>검색결과</h3></div><!-- // 🔧 수정됨 -->
+        <div class="result-header">
+          <h3>검색결과</h3>
+        </div>
         <div v-if="searchResult.sets && searchResult.sets.length > 0" class="sets-grid">
           <div
             v-for="set in searchResult.sets"
             :key="set.id"
             class="set-card"
-            @click="openSetPartsModal(set)"
           >
             <div class="set-image">
               <img
@@ -82,10 +99,27 @@
                 @error="handleImageError"
               />
               <div v-else class="no-image">이미지 없음</div>
+              <button
+                class="set-parts-icon-button"
+                @click.stop="openSetPartsModal(set)"
+                :title="'부품 정보 보기'"
+              >
+                <svg class="search-icon-svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+              </button>
             </div>
             <div class="set-info">
-              <h4 class="set-name">{{ formatSetDisplay(set.set_num, set.theme_name, set.name) }}</h4>
-              <p class="set-quantity">수량: {{ set.quantity }}개</p>
+              <div class="set-name-container">
+                <span class="set-number-badge">{{ formatSetNumber(set.set_num) }}</span>
+                <div class="set-name-wrapper">
+                  <span v-if="set.theme_name" class="set-theme-name">{{ set.theme_name }}</span>
+                  <span v-if="set.theme_name && set.name" class="set-name-divider">|</span>
+                  <span v-if="set.name" class="set-name-text">{{ set.name }}</span>
+                </div>
+              </div>
+              <p class="set-quantity">수량 : {{ set.quantity }}개</p>
             </div>
           </div>
         </div>
@@ -112,7 +146,8 @@
                     <span 
                       class="color-badge"
                       :style="{ 
-                        backgroundColor: getColorRgb(color.rgb) || '#ccc'
+                        backgroundColor: getColorRgb(color.rgb) || '#ccc',
+                        color: getColorTextColor(color.rgb)
                       }"
                     >
                       {{ color.name || color.color_id }}
@@ -150,35 +185,43 @@
           <div v-if="setPartsLoading" class="loading-message">로딩 중...</div>
           <div v-else-if="setPartsError" class="error-message">{{ setPartsError }}</div>
           <div v-else-if="setParts && setParts.length > 0" class="set-parts-list">
-            <div class="parts-grid">
+            <div class="parts-grid modal-parts-grid">
               <div
                 v-for="(part, index) in setParts"
                 :key="`${part.part_id}-${part.color_id}-${index}`"
-                class="part-item"
+                class="part-card"
               >
-                <div class="part-image-wrapper">
-                  <img
-                    v-if="part.image_url"
-                    :src="part.image_url"
-                    :alt="part.part_name"
-                    @error="handlePartImageError"
-                    class="part-thumbnail"
-                  />
-                  <div v-else class="no-part-image-small">이미지 없음</div>
-                </div>
-                <div class="part-details">
-                  <div class="part-name">{{ part.part_name }}</div>
-                  <div class="part-info-row">
-                    <span class="part-id">Part: {{ part.part_id }}</span>
-                    <span v-if="part.element_id" class="element-id">Element: {{ part.element_id }}</span>
-                  </div>
-                  <div class="part-info-row">
-                    <span class="color-name" :style="{ color: getColorRgb(part.color_rgb) || '#1f2937' }">
-                      {{ part.color_name }}
+                <div class="card-header">
+                  <div class="part-info">
+                    <div v-if="part.element_id" class="element-id">
+                      {{ part.element_id }}
+                    </div>
+                    <h4 class="part-name">{{ part.part_name }}</h4>
+                    <span 
+                      class="color-badge"
+                      :style="{ 
+                        backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                        color: getColorTextColor(part.color_rgb)
+                      }"
+                    >
+                      {{ formatColorLabel(part.color_name, part.color_id) }}
                     </span>
-                    <span class="color-id">Color ID: {{ part.color_id }}</span>
                   </div>
-                  <div class="quantity-badge">수량: {{ part.quantity }}개</div>
+                </div>
+                <div class="card-body">
+                  <div class="part-image-section">
+                    <img
+                      v-if="part.image_url"
+                      :src="part.image_url"
+                      :alt="part.part_name"
+                      class="part-image"
+                      @error="handlePartImageError"
+                    />
+                    <div v-else class="no-part-image">이미지 없음</div>
+                  </div>
+                  <div class="quantity-section">
+                    <div class="quantity-badge">{{ part.quantity }}개</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -215,7 +258,7 @@ import { usePleyonInventorySync } from '../composables/usePleyonInventorySync'
 import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 import { useRebrickable } from '../composables/useRebrickable'
 import SetPartsSyncModal from '../components/SetPartsSyncModal.vue'
-import { formatSetDisplay } from '../utils/setDisplay'
+import { formatSetDisplay, formatSetNumber } from '../utils/setDisplay'
 
 export default {
   name: 'PartToSetSearch',
@@ -443,103 +486,7 @@ export default {
           console.log('[PartToSetSearch] 매장 인벤토리가 없어 전체 세트 표시')
         }
         
-        // 유사부품 찾기
-        const alternatives = await findAlternativeParts(setPart.part_id, setPart.color_id)
-
-        // 유사부품의 각 색상별 이미지 URL 및 엘리먼트 ID 로드
-        if (alternatives && alternatives.length > 0 && alternatives[0].colors) {
-          for (const color of alternatives[0].colors) {
-            try {
-              // 엘리먼트 ID 먼저 조회
-              const { data: setPartData, error: setPartError } = await supabase
-                .from('set_parts')
-                .select('element_id')
-                .eq('part_id', alternatives[0].part_id)
-                .eq('color_id', color.color_id)
-                .limit(1)
-                .maybeSingle()
-
-              if (!setPartError && setPartData?.element_id) {
-                color.element_id = setPartData.element_id
-              }
-
-              // 이미지 URL 조회: element_id 우선, 없으면 part_id + color_id
-              let imageUrl = null
-              
-              if (color.element_id) {
-                // element_id로 먼저 조회
-                const { data: partImageByElement, error: elementError } = await supabase
-                  .from('part_images')
-                  .select('uploaded_url')
-                  .eq('element_id', String(color.element_id))
-                  .maybeSingle()
-
-                if (!elementError && partImageByElement?.uploaded_url) {
-                  imageUrl = partImageByElement.uploaded_url
-                }
-              }
-
-              // element_id로 찾지 못했으면 part_id + color_id로 조회
-              if (!imageUrl) {
-                const { data: partImage, error } = await supabase
-                  .from('part_images')
-                  .select('uploaded_url')
-                  .eq('part_id', alternatives[0].part_id)
-                  .eq('color_id', color.color_id)
-                  .maybeSingle()
-
-                if (!error && partImage?.uploaded_url) {
-                  imageUrl = partImage.uploaded_url
-                }
-              }
-
-              // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
-              if (!imageUrl && color.element_id) {
-                try {
-                  const { getElement } = useRebrickable()
-                  const elementData = await getElement(color.element_id)
-                  if (elementData?.element_img_url) {
-                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
-                  } else if (elementData?.part_img_url) {
-                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
-                  }
-                } catch (elementErr) {
-                  console.warn(`⚠️ element_id ${color.element_id} 이미지 조회 실패:`, elementErr)
-                }
-              }
-
-              // part_images에서 찾지 못했으면 part_img_url 사용 (fallback)
-              if (imageUrl) {
-                color.image_url = imageUrl
-              } else if (alternatives[0].part_img_url) {
-                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
-              }
-            } catch (err) {
-              // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
-              if (color.element_id) {
-                try {
-                  const { getElement } = useRebrickable()
-                  const elementData = await getElement(color.element_id)
-                  if (elementData?.element_img_url) {
-                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
-                  } else if (elementData?.part_img_url) {
-                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
-                  } else if (alternatives[0].part_img_url) {
-                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
-                  }
-                } catch (elementErr) {
-                  console.warn(`⚠️ element_id ${color.element_id} 이미지 조회 실패:`, elementErr)
-                  if (alternatives[0].part_img_url) {
-                    color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
-                  }
-                }
-              } else if (alternatives[0].part_img_url) {
-                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
-              }
-            }
-          }
-        }
-
+        // 기본 검색 결과 먼저 표시 (세트 목록)
         searchResult.value = {
           element_id: elementIdInput.value.trim(),
           part_id: setPart.part_id,
@@ -549,7 +496,89 @@ export default {
           color_rgb: colorInfo?.rgb || null,
           part_image_url: partImageUrl,
           sets: sets,
-          alternatives: alternatives
+          alternatives: null // 나중에 업데이트
+        }
+        
+        // 유사부품 찾기 (백그라운드에서 실행, element_id 포함)
+        const alternatives = await findAlternativeParts(setPart.part_id, setPart.color_id)
+
+        // 유사부품의 각 색상별 이미지 URL 로드 (배치 처리로 최적화)
+        if (alternatives && alternatives.length > 0 && alternatives[0].colors) {
+          const colors = alternatives[0].colors
+          const partId = alternatives[0].part_id
+          
+          // 1. element_id 목록 수집 (findAlternativeParts에서 이미 조회됨)
+          const elementIds = colors
+            .map(c => c.element_id)
+            .filter(Boolean)
+            .map(id => String(id))
+
+          // 2. element_id로 이미지 배치 조회
+          const elementImageMap = new Map()
+          if (elementIds.length > 0) {
+            const { data: elementImages, error: elementImagesError } = await supabase
+              .from('part_images')
+              .select('element_id, uploaded_url')
+              .in('element_id', elementIds)
+              .not('uploaded_url', 'is', null)
+
+            if (!elementImagesError && elementImages) {
+              elementImages.forEach(img => {
+                if (img.element_id && img.uploaded_url) {
+                  elementImageMap.set(String(img.element_id), img.uploaded_url)
+                }
+              })
+            }
+          }
+
+          // 3. element_id로 찾지 못한 색상들을 part_id + color_id로 배치 조회
+          const colorsWithoutImage = colors.filter(c => !c.element_id || !elementImageMap.has(String(c.element_id)))
+          if (colorsWithoutImage.length > 0) {
+            const missingColorIds = colorsWithoutImage.map(c => c.color_id).filter(Boolean)
+            if (missingColorIds.length > 0) {
+              const { data: partImages, error: partImagesError } = await supabase
+                .from('part_images')
+                .select('part_id, color_id, uploaded_url')
+                .eq('part_id', partId)
+                .in('color_id', missingColorIds)
+                .not('uploaded_url', 'is', null)
+
+              if (!partImagesError && partImages) {
+                const partColorImageMap = new Map()
+                partImages.forEach(img => {
+                  const key = `${img.part_id}_${img.color_id}`
+                  if (!partColorImageMap.has(key)) {
+                    partColorImageMap.set(key, img.uploaded_url)
+                  }
+                })
+
+                // 이미지 URL 할당
+                colorsWithoutImage.forEach(color => {
+                  const key = `${partId}_${color.color_id}`
+                  if (partColorImageMap.has(key)) {
+                    color.image_url = partColorImageMap.get(key)
+                  }
+                })
+              }
+            }
+          }
+
+          // 4. 이미지 URL 할당 (element_id 우선, fallback은 part_img_url)
+          colors.forEach(color => {
+            if (!color.image_url) {
+              if (color.element_id && elementImageMap.has(String(color.element_id))) {
+                color.image_url = elementImageMap.get(String(color.element_id))
+              } else if (alternatives[0].part_img_url) {
+                // 이미지가 없으면 part_img_url 사용 (fallback, Rebrickable API 호출 없이)
+                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+              }
+            }
+          })
+        }
+
+        // 유사부품 정보 업데이트
+        if (searchResult.value) {
+          searchResult.value.alternatives = alternatives
         }
       } catch (err) {
         error.value = err.message || '검색 중 오류가 발생했습니다.'
@@ -606,8 +635,8 @@ export default {
 
         if (partsInfoError) throw partsInfoError
 
-        // 색상 정보 조회
-        const colorIds = [...new Set(partsData.map(p => p.color_id).filter(Boolean))]
+        // 색상 정보 조회 (color_id가 0인 경우도 포함)
+        const colorIds = [...new Set(partsData.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
         const { data: colorsInfo, error: colorsError } = await supabase
           .from('lego_colors')
           .select('color_id, name, rgb')
@@ -619,73 +648,123 @@ export default {
         const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
         const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
 
-        // 각 부품별 이미지 URL 조회
-        const partsWithImages = await Promise.all(
-          partsData.map(async (part) => {
-            const partInfo = partsInfoMap.get(part.part_id)
-            const colorInfo = colorsInfoMap.get(part.color_id)
+        // element_id 목록 수집
+        const elementIds = [...new Set(partsData.map(p => p.element_id).filter(Boolean))].map(id => String(id))
+        
+        // element_id 기반 이미지 배치 조회 (part_images + image_metadata)
+        const elementImageMap = new Map()
+        if (elementIds.length > 0) {
+          // 1. part_images에서 배치 조회
+          const { data: elementImages, error: elementImagesError } = await supabase
+            .from('part_images')
+            .select('element_id, uploaded_url')
+            .in('element_id', elementIds)
+            .not('uploaded_url', 'is', null)
 
-            let imageUrl = null
-            if (part.element_id) {
-              // element_id로 이미지 조회
-              const { data: partImage, error: imgError } = await supabase
-                .from('part_images')
-                .select('uploaded_url')
-                .eq('element_id', String(part.element_id))
-                .maybeSingle()
-
-              if (!imgError && partImage?.uploaded_url) {
-                imageUrl = partImage.uploaded_url
-              }
-
-              // part_images에 없으면 Storage에서 직접 확인
-              if (!imageUrl) {
-                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
-                const fileName = `${String(part.element_id)}.webp`
-                const directUrl = `${supabaseUrl}/storage/v1/object/public/lego_parts_images/images/${fileName}`
-                try {
-                  const response = await fetch(directUrl, { method: 'HEAD' })
-                  if (response.ok) {
-                    imageUrl = directUrl
-                  }
-                } catch (fetchError) {
-                  // 파일이 없으면 무시
+          if (!elementImagesError && elementImages) {
+            elementImages.forEach(img => {
+              if (img.element_id && img.uploaded_url) {
+                // JPG는 무시, WebP만 사용
+                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(String(img.element_id), img.uploaded_url)
                 }
               }
-              
-              // Storage에도 없으면 Rebrickable API에서 element_img_url 가져오기
-              if (!imageUrl) {
-                try {
-                  const { getElement } = useRebrickable()
-                  const elementData = await getElement(part.element_id)
-                  if (elementData?.element_img_url) {
-                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
-                  } else if (elementData?.part_img_url) {
-                    imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+            })
+          }
+
+          // 2. image_metadata 테이블에서도 배치 조회 (part_images에 없는 경우만)
+          const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+          if (missingElementIds.length > 0) {
+            const { data: metadataImages, error: metadataError } = await supabase
+              .from('image_metadata')
+              .select('element_id, supabase_url')
+              .in('element_id', missingElementIds)
+              .not('supabase_url', 'is', null)
+
+            if (!metadataError && metadataImages) {
+              metadataImages.forEach(img => {
+                if (img.element_id && img.supabase_url) {
+                  // JPG는 무시, WebP만 사용
+                  if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(String(img.element_id), img.supabase_url)
                   }
-                } catch (elementErr) {
-                  console.warn(`⚠️ element_id ${part.element_id} 이미지 조회 실패:`, elementErr)
                 }
-              }
+              })
             }
+          }
+        }
 
-            // element_id 실패 시 part_img_url 사용 (fallback)
-            if (!imageUrl && partInfo?.part_img_url) {
-              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
-            }
-
-            return {
-              part_id: part.part_id,
-              color_id: part.color_id,
-              quantity: part.quantity,
-              element_id: part.element_id,
-              part_name: partInfo?.name || part.part_id,
-              color_name: colorInfo?.name || `Color ${part.color_id}`,
-              color_rgb: colorInfo?.rgb || null,
-              image_url: imageUrl
-            }
+        // part_id + color_id 기반 이미지 배치 조회 (element_id가 없는 부품용)
+        const partColorImageMap = new Map()
+        const itemsWithoutElementId = partsData.filter(p => !p.element_id)
+        if (itemsWithoutElementId.length > 0) {
+          const partColorKeys = itemsWithoutElementId.map(p => `${p.part_id}_${p.color_id}`)
+          const uniquePartColorPairs = [...new Set(partColorKeys)]
+          
+          // part_id와 color_id 목록 추출
+          const partColorPairs = uniquePartColorPairs.map(key => {
+            const [partId, colorId] = key.split('_')
+            return { part_id: partId, color_id: parseInt(colorId) }
           })
-        )
+
+          if (partColorPairs.length > 0) {
+            // part_images에서 part_id + color_id로 배치 조회
+            const partIds = [...new Set(partColorPairs.map(p => p.part_id))]
+            const colorIds = [...new Set(partColorPairs.map(p => p.color_id))]
+            
+            const { data: partColorImages, error: partColorError } = await supabase
+              .from('part_images')
+              .select('part_id, color_id, uploaded_url')
+              .in('part_id', partIds)
+              .in('color_id', colorIds)
+              .not('uploaded_url', 'is', null)
+
+            if (!partColorError && partColorImages) {
+              partColorImages.forEach(img => {
+                const key = `${img.part_id}_${img.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  // JPG는 무시, WebP만 사용
+                  if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                    partColorImageMap.set(key, img.uploaded_url)
+                  }
+                }
+              })
+            }
+          }
+        }
+
+        // 부품 데이터와 이미지 URL 매핑
+        const partsWithImages = partsData.map((part) => {
+          const partInfo = partsInfoMap.get(part.part_id)
+          const colorInfo = colorsInfoMap.get(part.color_id)
+
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+          let imageUrl = null
+          if (part.element_id && elementImageMap.has(String(part.element_id))) {
+            imageUrl = elementImageMap.get(String(part.element_id))
+          } else if (!part.element_id) {
+            const key = `${part.part_id}_${part.color_id}`
+            if (partColorImageMap.has(key)) {
+              imageUrl = partColorImageMap.get(key)
+            }
+          }
+
+          // element_id 실패 시 part_img_url 사용 (fallback)
+          if (!imageUrl && partInfo?.part_img_url) {
+            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+          }
+
+          return {
+            part_id: part.part_id,
+            color_id: part.color_id,
+            quantity: part.quantity,
+            element_id: part.element_id,
+            part_name: partInfo?.name || part.part_id,
+            color_name: colorInfo?.name || null,
+            color_rgb: colorInfo?.rgb || null,
+            image_url: imageUrl
+          }
+        })
 
         setParts.value = partsWithImages
       } catch (err) {
@@ -701,6 +780,15 @@ export default {
       selectedSet.value = null
       setParts.value = []
       setPartsError.value = null
+    }
+
+    const resetPage = () => {
+      elementIdInput.value = ''
+      searchResult.value = null
+      error.value = null
+      showSetPartsModal.value = false
+      selectedSet.value = null
+      setParts.value = []
     }
 
     const searchByAlternativeElementId = async (elementId) => {
@@ -752,6 +840,68 @@ export default {
         rgbStr = `#${rgbStr}`
       }
       return rgbStr || null
+    }
+
+    const getColorTextColor = (rgb) => {
+      if (!rgb) return '#ffffff'
+      let rgbStr = String(rgb).trim()
+      if (rgbStr && !rgbStr.startsWith('#')) {
+        rgbStr = `#${rgbStr}`
+      }
+      
+      // 화이트 색상 판단 (#FFFFFF, #ffffff, FFFFFF 등)
+      const normalized = rgbStr.toUpperCase()
+      if (normalized === '#FFFFFF' || normalized === '#FFF' || normalized === 'FFFFFF' || normalized === 'FFF') {
+        return '#6b7280' // 그레이
+      }
+      
+      // RGB 값으로 화이트 판단 (255, 255, 255에 가까운 경우)
+      if (normalized.length === 7 && normalized.startsWith('#')) {
+        const r = parseInt(normalized.substring(1, 3), 16)
+        const g = parseInt(normalized.substring(3, 5), 16)
+        const b = parseInt(normalized.substring(5, 7), 16)
+        
+        // 밝기가 240 이상이면 화이트로 간주
+        const brightness = (r * 299 + g * 587 + b * 114) / 1000
+        if (brightness >= 240) {
+          return '#6b7280' // 그레이
+        }
+      }
+      
+      return '#ffffff' // 기본값 (흰색 텍스트)
+    }
+
+    const formatColorLabel = (colorName, colorId) => {
+      // colorName이 있으면 우선 사용 (colorId가 0이어도 colorName이 있으면 표시)
+      if (colorName) {
+        const normalized = String(colorName).trim()
+        if (!normalized) {
+          // 빈 문자열인 경우에만 colorId 체크
+          if (colorId === 0 || colorId === '0') {
+            return 'Any Color'
+          }
+          return colorId !== null && colorId !== undefined ? `Color ${colorId}` : 'Any Color'
+        }
+        
+        const lower = normalized.toLowerCase()
+        // "No Color", "Any Color" 등 특수 케이스만 "Any Color"로 변환
+        if (
+          lower === 'no color' ||
+          lower === 'any color' ||
+          (lower.includes('no color') && lower.includes('any color')) ||
+          (normalized.includes('No Color') && normalized.includes('Any Color'))
+        ) {
+          return 'Any Color'
+        }
+        // 정상적인 색상명이면 그대로 반환
+        return normalized
+      }
+      
+      // colorName이 없을 때만 colorId 체크
+      if (colorId === 0 || colorId === '0') {
+        return 'Any Color'
+      }
+      return colorId !== null && colorId !== undefined ? `Color ${colorId}` : 'Any Color'
     }
 
     const getContrastColor = (rgb) => {
@@ -853,6 +1003,7 @@ export default {
     return {
       elementIdInput,
       searchResult,
+      resetPage,
       error,
       loading,
       searchByElementId,
@@ -873,14 +1024,17 @@ export default {
       searchByAlternativeElementId,
       handleImageError,
       getColorRgb,
+      getColorTextColor,
       getContrastColor,
+      formatColorLabel,
       handlePartImageError,
       showSetPartsModal,
       selectedSet,
       setParts,
       setPartsLoading,
       setPartsError,
-      formatSetDisplay
+      formatSetDisplay,
+      formatSetNumber
     }
   }
 }
@@ -1084,6 +1238,56 @@ export default {
   max-width: 100%;
 }
 
+.result-header {
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+}
+
+.result-header h3 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.close-result-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 22px; /* // 🔧 수정됨 */
+  height: 22px; /* // 🔧 수정됨 */
+  background: #ffffff; /* // 🔧 수정됨 */
+  border: 1px solid #e5e7eb; /* // 🔧 수정됨 */
+  border-radius: 9999px; /* // 🔧 수정됨 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #4b5563; /* // 🔧 수정됨 */
+  transition: all 0.2s ease;
+  padding: 0;
+  z-index: 10;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); /* // 🔧 수정됨 */
+}
+
+.close-result-button:hover {
+  background: #f9fafb; /* // 🔧 수정됨 */
+  color: #374151; /* // 🔧 수정됨 */
+  border-color: #d1d5db; /* // 🔧 수정됨 */
+}
+
+.close-result-button svg { /* // 🔧 수정됨 */
+  width: 12px;
+  height: 12px;
+}
+
+.close-result-button:active {
+  transform: scale(0.95);
+}
+
 
 .set-search-wrapper {
   position: relative;
@@ -1102,7 +1306,8 @@ export default {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.25rem; /* // 🔧 수정됨 */
+  position: relative;
 }
 
 .part-image-container {
@@ -1149,17 +1354,6 @@ export default {
   min-width: 0;
 }
 
-.result-header {
-  margin-bottom: 1rem;
-}
-
-.result-header h3 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #1f2937;
-}
-/* // 🔧 수정됨 */
 
 .element-id-badge {
   display: block;
@@ -1174,6 +1368,20 @@ export default {
   color: #374151;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.result-color-badge {
+  display: inline-block;
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  border: none;
+  width: fit-content;
+  line-height: 1.1;
+  margin-top: 0.25rem;
 }
 
 .part-color {
@@ -1241,6 +1449,7 @@ export default {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  position: relative;
 }
 
 .set-image img {
@@ -1254,8 +1463,110 @@ export default {
   font-size: 0.875rem;
 }
 
+.set-parts-icon-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 10;
+  padding: 0;
+}
+
+.set-parts-icon-button:hover {
+  transform: scale(1.1);
+}
+
+.set-parts-icon-button:active {
+  transform: scale(0.95);
+}
+
+.search-icon-svg {
+  color: #2563eb;
+  width: 24px;
+  height: 24px;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.set-parts-icon-button:hover .search-icon-svg {
+  color: #1d4ed8;
+  filter: drop-shadow(0 2px 4px rgba(37, 99, 235, 0.3));
+}
+
 .set-info {
   padding: 1rem;
+}
+
+.set-name-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.set-number-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 20px;
+  width: fit-content;
+  line-height: 1.2;
+}
+
+.set-name-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.set-theme-name {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.set-name-divider {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.set-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.set-theme-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.set-name-divider {
+  font-size: 0.875rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.set-name-text {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
 }
 
 .set-name {
@@ -1286,8 +1597,8 @@ export default {
 
 .alternatives-section {
   margin-top: 2rem;
-  padding-top: 2rem;
-  border-top: 1px solid #e5e7eb;
+  padding-top: 0; /* // 🔧 수정됨 */
+  border-top: none; /* // 🔧 수정됨 */
 }
 
 .alternative-group {
@@ -1295,10 +1606,10 @@ export default {
 }
 
 .alternative-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: #1f2937;
-  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0 0 1.5rem 0;
 }
 
 .alternative-parts-grid {
@@ -1390,16 +1701,17 @@ export default {
   min-width: 0;
 }
 
-.alternative-part-card .color-badge {
+.alternative-part-card .color-badge { /* // 🔧 수정됨 */
   display: inline-block;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
   border: none;
   width: fit-content;
+  line-height: 1.1;
 }
 
 .alternative-part-card .card-body {
@@ -1616,7 +1928,7 @@ export default {
   }
 
   .result-header h3 {
-    font-size: 1rem !important;
+    font-size: 1.25rem !important;
   }
 
 
@@ -1748,86 +2060,177 @@ export default {
 
 .parts-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1.5rem;
+  max-width: 100%;
 }
 
-.part-item {
-  background: white;
+/* 모달 부품 그리드 (4열 유지) */
+.modal-parts-grid {
+  grid-template-columns: repeat(4, 1fr) !important;
+}
+
+@media (min-width: 1400px) {
+  .parts-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  
+  .modal-parts-grid {
+    grid-template-columns: repeat(4, 1fr) !important;
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .parts-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .parts-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .parts-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 600px) {
+  .parts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.part-card {
+  background: #ffffff;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 1rem;
+  border-radius: 12px;
+  padding: 1.25rem;
+  position: relative;
   display: flex;
-  gap: 1rem;
-}
-
-.part-image-wrapper {
-  width: 80px;
-  height: 80px;
-  flex-shrink: 0;
-  background: #f3f4f6;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  transition: transform 0.2s ease-out;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow: hidden;
 }
 
-.part-thumbnail {
+.part-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.part-card .card-header {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
   width: 100%;
-  height: 100%;
-  object-fit: contain;
-  padding: 0.5rem;
+  overflow: hidden;
 }
 
-.no-part-image-small {
-  color: #9ca3af;
-  font-size: 0.75rem;
-  text-align: center;
-  padding: 0.5rem;
-}
-
-.part-details {
-  flex: 1;
+.part-card .part-info {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  width: 0;
 }
 
-.part-name {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1f2937;
-  line-height: 1.4;
+.part-card .element-id {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
 }
 
-.part-info-row {
-  display: flex;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  font-size: 0.75rem;
-  color: #6b7280;
-}
-
-.part-id,
-.element-id {
+.part-card .part-name {
+  font-size: 0.95rem;
   font-weight: 500;
+  color: #111827;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
-.color-name {
-  font-weight: 600;
-}
-
-.quantity-badge {
+.part-card .color-badge {
   display: inline-block;
-  padding: 0.25rem 0.5rem;
-  background: #3b82f6;
-  color: white;
+  padding: 0.25rem 0.55rem;
   border-radius: 4px;
   font-size: 0.75rem;
-  font-weight: 500;
-  margin-top: 0.25rem;
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  border: none;
   width: fit-content;
+  line-height: 1.1;
+}
+
+.part-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.part-card .part-image-section {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0rem 0;
+  min-height: 120px;
+  background: transparent;
+  border-radius: 8px;
+}
+
+.part-card .part-image {
+  max-width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+.part-card .no-part-image {
+  width: 100%;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.875rem;
+  background: #f9fafb;
+  border-radius: 4px;
+}
+
+.part-card .quantity-section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.part-card .quantity-badge {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  background: #3b82f6;
+  color: white;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

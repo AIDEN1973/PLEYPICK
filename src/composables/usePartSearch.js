@@ -160,26 +160,30 @@ export function usePartSearch() {
         // 색상 정보 매핑
         const colorMap = new Map((legoColors || []).map(c => [c.color_id, c]))
 
-        // 각 색상별 element_id 조회 (현재 세트 제외)
+        // 모든 색상의 element_id를 한 번에 배치 조회 (현재 세트 제외)
         const elementIdMap = new Map()
-        for (const colorId of uniqueColorIds) {
-          let elementQuery = supabase
+        if (uniqueColorIds.length > 0) {
+          let batchQuery = supabase
             .from('set_parts')
-            .select('element_id')
+            .select('color_id, element_id')
             .eq('part_id', partId)
-            .eq('color_id', colorId)
+            .in('color_id', uniqueColorIds)
+            .not('element_id', 'is', null)
           
           // 현재 세트를 제외
           if (excludeSetId) {
-            elementQuery = elementQuery.neq('set_id', excludeSetId)
+            batchQuery = batchQuery.neq('set_id', excludeSetId)
           }
           
-          const { data: setPartData, error: setPartError } = await elementQuery
-            .limit(1)
-            .maybeSingle()
+          const { data: allSetParts, error: setPartsError } = await batchQuery.limit(100)
 
-          if (!setPartError && setPartData?.element_id) {
-            elementIdMap.set(colorId, setPartData.element_id)
+          if (!setPartsError && allSetParts) {
+            // 각 color_id별 첫 번째 element_id만 사용 (중복 제거)
+            allSetParts.forEach(sp => {
+              if (sp.element_id && !elementIdMap.has(sp.color_id)) {
+                elementIdMap.set(sp.color_id, sp.element_id)
+              }
+            })
           }
         }
 

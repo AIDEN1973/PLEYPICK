@@ -855,16 +855,7 @@ export default {
         return part.supabase_image_url
       }
       
-      // 2. Rebrickable CDN URL 직접 사용 (프록시 불필요)
-      if (part.lego_parts?.part_img_url) {
-        return part.lego_parts.part_img_url
-      }
-      
-      // 3. 부품 번호가 있으면 기본 이미지 URL 반환 (이미지 로드 실패 시 fallback)
-      if (part.lego_parts?.part_num) {
-        return null // 이미지가 없으면 null 반환 (handleImageError에서 처리)
-      }
-      
+      // 2. WebP가 없으면 CDN으로 폴백하지 않고 비워둔다 (이미지 누락 상태 노출)
       return null
     }
 

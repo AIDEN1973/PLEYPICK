@@ -1954,9 +1954,38 @@ export default {
                       } else if (imageResult.isDuplicate) {
                         console.log(`⏭️ 이미지 중복으로 건너뜀: ${partData.part.part_num} (element_id: ${validElementId || '없음'})`)
                         // 중복 이미지는 이미 버킷에 저장되어 있으므로 추가 작업 불필요
+                      } else if (imageResult.failed) {
+                        // 이미지 업로드 실패 (에러 포함)
+                        console.error(`[NewLego] 이미지 업로드 실패: ${partData.part.part_num} (element_id: ${validElementId || '없음'})`)
+                        console.error(`[NewLego] 실패 원인:`, imageResult.error)
+                        console.error(`[NewLego] 이미지 업로드 실패 상세:`, {
+                          partNum: partData.part.part_num,
+                          colorId: effectiveColorId,
+                          elementId: validElementId,
+                          imageUrl: imageUrl,
+                          result: imageResult
+                        })
+                        
+                        // 실패한 이미지 정보를 DB에 기록 (나중에 재시도 가능하도록)
+                        try {
+                          await saveImageMetadata({
+                            original_url: imageUrl,
+                            supabase_url: null,
+                            file_path: null,
+                            file_name: imageResult.filename,
+                            part_num: partData.part.part_num,
+                            color_id: effectiveColorId,
+                            element_id: validElementId,
+                            set_num: selectedSet.value?.set_num,
+                            upload_status: 'failed',
+                            error_message: imageResult.error
+                          })
+                          console.log(`📝 실패한 이미지 정보 저장 완료: ${partData.part.part_num}`)
+                        } catch (metadataErr) {
+                          console.warn(`⚠️ 실패한 이미지 정보 저장 실패:`, metadataErr)
+                        }
                       } else {
                         console.warn(`⚠️ 이미지 업로드 실패 (uploadedUrl 없음): ${partData.part.part_num} (element_id: ${validElementId || '없음'})`)
-                        // 프로덕션 모드에서 실패한 이미지 추적을 위한 상세 로그
                         console.error(`[NewLego] 이미지 업로드 실패 상세:`, {
                           partNum: partData.part.part_num,
                           colorId: effectiveColorId,
@@ -1975,6 +2004,25 @@ export default {
                         error: imageError.message,
                         stack: imageError.stack
                       })
+                      
+                      // 실패한 이미지 정보를 DB에 기록
+                      try {
+                        await saveImageMetadata({
+                          original_url: imageUrl,
+                          supabase_url: null,
+                          file_path: null,
+                          file_name: validElementId ? `${String(validElementId)}.webp` : `${partData.part.part_num}_${effectiveColorId}.webp`,
+                          part_num: partData.part.part_num,
+                          color_id: effectiveColorId,
+                          element_id: validElementId,
+                          set_num: selectedSet.value?.set_num,
+                          upload_status: 'failed',
+                          error_message: imageError.message
+                        })
+                        console.log(`📝 실패한 이미지 정보 저장 완료: ${partData.part.part_num}`)
+                      } catch (metadataErr) {
+                        console.warn(`⚠️ 실패한 이미지 정보 저장 실패:`, metadataErr)
+                      }
                       // 이미지 업로드 실패해도 부품 저장은 계속 진행
                     }
                   } catch (imageUploadErr) {
@@ -2457,6 +2505,9 @@ export default {
           batchRegisterProgress.value.currentSetName = ''
           batchRegisterProgress.value.currentSetParts = 0
           batchRegisterProgress.value.currentSetSavedParts = 0
+          
+          let missingOnly = false
+          let shouldReplace = false
 
           try {
             // API 호출 간 딜레이 (Rate Limit 방지: 분당 60회 제한)
@@ -2502,9 +2553,6 @@ export default {
                 results.skipped.push({ setNum, reason: '사용자 취소' })
                 continue
               }
-              
-              let shouldReplace = false
-              let missingOnly = false
               
               if (userChoice === 'replace') {
                 shouldReplace = true
