@@ -877,12 +877,9 @@ export function useImageManager() {
         
         for (let attempt = 1; attempt <= maxDownloadRetries; attempt++) {
           try {
-            console.log(`📥 이미지 다운로드 시도 ${attempt}/${maxDownloadRetries}: ${imageUrl}`)
-            
             // 1. Vite 프록시를 통한 다운로드 (CORS 문제 해결)
             if (imageUrl.includes('cdn.rebrickable.com')) {
               try {
-                // Vite 프록시를 통해 Rebrickable CDN 접근
                 const proxyUrl = imageUrl.replace('https://cdn.rebrickable.com', '/api/proxy')
                 response = await fetch(proxyUrl, {
                   method: 'GET',
@@ -894,13 +891,15 @@ export function useImageManager() {
                 
                 if (response.ok) {
                   downloadMethod = 'vite_proxy'
-                  console.log(`✅ Vite 프록시 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
                   break
-                } else {
-                  console.warn(`⚠️ Vite 프록시 다운로드 실패: ${response.status}`)
+                } else if (response.status === 404) {
+                  // 404는 즉시 실패 처리 (재시도 불필요)
+                  throw new Error(`이미지 없음 (404): ${imageUrl}`)
                 }
               } catch (proxyError) {
-                console.warn(`⚠️ Vite 프록시 서버 오류: ${proxyError.message}`)
+                if (proxyError.message.includes('404')) {
+                  throw proxyError
+                }
               }
             }
             
@@ -918,42 +917,53 @@ export function useImageManager() {
                 
                 if (response.ok) {
                   downloadMethod = 'api_proxy'
-                  console.log(`✅ API 프록시 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
                   break
-                } else {
-                  console.warn(`⚠️ API 프록시 다운로드 실패: ${response.status}`)
+                } else if (response.status === 404) {
+                  // 404는 즉시 실패 처리
+                  throw new Error(`이미지 없음 (404): ${imageUrl}`)
                 }
               } catch (proxyError) {
-                console.warn(`⚠️ API 프록시 서버 오류: ${proxyError.message}`)
+                if (proxyError.message.includes('404')) {
+                  throw proxyError
+                }
               }
             }
             
-            // 3. 직접 다운로드 시도 (최종 fallback)
+            // 3. 직접 다운로드 시도 (최종 fallback, CORS 문제로 실패 가능)
             if (!response || !response.ok) {
-              console.log(`🔄 직접 다운로드 시도: ${imageUrl}`)
-              response = await fetch(imageUrl, {
-                method: 'GET',
-                mode: 'cors',
-                headers: {
-                  'Accept': 'image/*',
-                  'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+              try {
+                response = await fetch(imageUrl, {
+                  method: 'GET',
+                  mode: 'cors',
+                  headers: {
+                    'Accept': 'image/*',
+                    'User-Agent': 'Mozilla/5.0 (compatible; BrickBox/1.0)'
+                  }
+                })
+                if (response.ok) {
+                  downloadMethod = 'direct'
+                  break
+                } else if (response.status === 404) {
+                  throw new Error(`이미지 없음 (404): ${imageUrl}`)
                 }
-              })
-              if (response.ok) {
-                downloadMethod = 'direct'
-                console.log(`✅ 직접 다운로드 성공 (시도 ${attempt}/${maxDownloadRetries})`)
-                break
-              } else {
-                throw new Error(`모든 다운로드 방법 실패: ${response.status}`)
+              } catch (directErr) {
+                // CORS 에러는 재시도 불필요
+                if (directErr.message.includes('CORS') || directErr.message.includes('404')) {
+                  throw directErr
+                }
               }
             }
           } catch (downloadErr) {
             lastDownloadError = downloadErr
-            console.warn(`⚠️ 다운로드 시도 ${attempt} 실패: ${downloadErr.message}`)
             
+            // 404 에러는 즉시 실패 (재시도 불필요)
+            if (downloadErr.message.includes('404') || downloadErr.message.includes('이미지 없음')) {
+              throw downloadErr
+            }
+            
+            // 네트워크 오류만 재시도 (대기 시간 단축)
             if (attempt < maxDownloadRetries) {
-              const waitTime = attempt * 1000
-              console.log(`⏳ ${waitTime}ms 후 재시도...`)
+              const waitTime = attempt * 100 // 100ms, 200ms, 300ms
               await new Promise(resolve => setTimeout(resolve, waitTime))
               continue
             } else {

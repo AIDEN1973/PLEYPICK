@@ -209,23 +209,33 @@
                       color: getColorTextColor(part.color_rgb)
                     }"
                   >
-                    {{ formatColorLabel(part.color_name, part.color_id) }}
+                    {{ formatColorLabel(part.color_name, part.color_id, part.part_id) }}
                   </span>
                 </div>
               </div>
               <div class="card-body">
-                <div class="part-image-section">
+                <div class="part-image-section" style="position: relative;">
                   <img
                     v-if="part.supabase_image_url"
                     :src="part.supabase_image_url"
                     :alt="part.part_name"
                     class="part-image"
+                    :data-element-id="part.element_id || ''"
+                    :data-part-id="part.part_id || ''"
+                    :data-color-id="part.color_id || ''"
                     @error="handleImageError($event)"
+                    @load="(e) => { if (e.target) part._currentSrc = e.target.src }"
                   />
                   <div v-else class="no-part-image">
                     <span>이미지 없음</span>
                     <small v-if="part.element_id" style="display:block;font-size:0.7rem;margin-top:4px;">ID: {{ part.element_id }}</small>
                   </div>
+                  <span 
+                    v-if="part.supabase_image_url && (isCdnUrl(part.supabase_image_url) || (part._currentSrc && isCdnUrl(part._currentSrc)))"
+                    class="cdn-badge"
+                  >
+                    CDN
+                  </span>
                 </div>
                 <div class="quantity-section">
                   <div class="quantity-badge">{{ part.missing_count }}개</div>
@@ -248,7 +258,7 @@
           <div v-if="missingPartsModalLoading" class="loading-message">로딩 중...</div>
           <div v-else-if="missingPartsModalError" class="error-message">{{ missingPartsModalError }}</div>
           <div v-else-if="missingPartsModalData && missingPartsModalData.length > 0" class="set-parts-list">
-            <div class="parts-grid modal-parts-grid">
+            <div class="parts-grid modal-parts-grid" style="padding-bottom: 2rem;">
               <div
                 v-for="(part, index) in missingPartsModalData"
                 :key="`${part.part_id}-${part.color_id}-${index}`"
@@ -267,20 +277,30 @@
                         color: getColorTextColor(part.color_rgb)
                       }"
                     >
-                      {{ formatColorLabel(part.color_name, part.color_id) }}
+                      {{ formatColorLabel(part.color_name, part.color_id, part.part_id) }}
                     </span>
                   </div>
                 </div>
                 <div class="card-body">
-                  <div class="part-image-section">
+                  <div class="part-image-section" style="position: relative;">
                     <img
                       v-if="part.image_url"
                       :src="part.image_url"
                       :alt="part.part_name"
                       class="part-image"
+                      :data-element-id="part.element_id || ''"
+                      :data-part-id="part.part_id || ''"
+                      :data-color-id="part.color_id || ''"
                       @error="handlePartImageError"
+                      @load="(e) => { if (e.target) part._currentSrc = e.target.src }"
                     />
                     <div v-else class="no-part-image">이미지 없음</div>
+                    <span 
+                      v-if="part.image_url && (isCdnUrl(part.image_url) || (part._currentSrc && isCdnUrl(part._currentSrc)))"
+                      class="cdn-badge"
+                    >
+                      CDN
+                    </span>
                   </div>
                   <div class="quantity-section">
                     <div class="quantity-badge">누락 {{ part.missing_count }}개</div>
@@ -335,6 +355,56 @@ export default {
     const missingPartsModalLoading = ref(false)
     const missingPartsModalError = ref(null)
 
+    // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
+    const isSticker = (item) => {
+      const partName = (item.part_name || '').toLowerCase()
+      const partId = (item.part_id || '').toLowerCase()
+      return partName.includes('sticker') || 
+             partName.includes('스티커') ||
+             partId.includes('sticker') ||
+             partId.includes('stk-')
+    }
+
+    const isMinifigure = (item) => {
+      const partId = item.part_id || ''
+      return String(partId).toLowerCase().startsWith('fig-')
+    }
+
+    const sortParts = (partsList) => {
+      return [...partsList].sort((a, b) => {
+        // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+        const aIsSticker = isSticker(a)
+        const bIsSticker = isSticker(b)
+        const aIsMinifigure = isMinifigure(a)
+        const bIsMinifigure = isMinifigure(b)
+        
+        const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+        const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+        
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority
+        }
+        // 1차: 색상명
+        const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+        if (colorCompare !== 0) {
+          return colorCompare
+        }
+        // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+        const aElementId = a.element_id
+        const bElementId = b.element_id
+        if (aElementId !== bElementId) {
+          const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+          const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+          if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+            return aNum - bNum
+          }
+          return String(aElementId || '').localeCompare(String(bElementId || ''))
+        }
+        // 3차: 부품명 (같은 element_id 내에서)
+        return (a.part_name || '').localeCompare(b.part_name || '')
+      })
+    }
+
     const missingPartsBySet = computed(() => {
       const grouped = new Map()
 
@@ -373,6 +443,7 @@ export default {
         const totalMissingCount = group.missing_parts.reduce((sum, part) => sum + part.missing_count, 0)
         return {
           ...group,
+          missing_parts: sortParts(group.missing_parts),
           total_missing_count: totalMissingCount
         }
       }).sort((a, b) => 
@@ -913,22 +984,31 @@ export default {
           return
         }
 
-        // 세트 정보 조회
-        console.log('[MissingParts] 세트 정보 조회 시작...', { setIds })
-        const { data: setsData, error: setsError } = await supabase
-          .from('lego_sets')
-          .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-          .in('id', setIds)
+        // 세트 정보 조회와 inspection_items 조회를 병렬로 처리
+        const sessionIds = latestSessions.map(s => s.id)
+        
+        const [setsResult, itemsResult] = await Promise.all([
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .in('id', setIds),
+          supabase
+            .from('inspection_items')
+            .select('session_id, part_id, color_id, total_count, checked_count, status')
+            .in('session_id', sessionIds)
+        ])
 
+        const { data: setsData, error: setsError } = setsResult
         if (setsError) {
           console.error('[MissingParts] 세트 정보 조회 오류:', setsError)
           throw setsError
         }
-        console.log('[MissingParts] 조회된 세트 수:', setsData?.length || 0, { setsData })
 
-        // 테마 정보 조회
+        const { data: allItems } = itemsResult
+
+        // 테마 정보 조회 (세트 정보 조회 후 즉시 병렬 처리)
         const themeIds = [...new Set((setsData || []).map(s => s.theme_id).filter(Boolean))]
-        let themeMap = new Map()
+        const themeMap = new Map()
         if (themeIds.length > 0) {
           const { data: themesData, error: themesError } = await supabase
             .from('lego_themes')
@@ -936,45 +1016,16 @@ export default {
             .in('theme_id', themeIds)
 
           if (!themesError && themesData) {
-            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+            themesData.forEach(t => themeMap.set(t.theme_id, t.name))
           }
         }
 
-        // 모든 세션의 아이템 조회하여 누락 정보 계산
-        const sessionIds = latestSessions.map(s => s.id)
-        const { data: allItems } = await supabase
-          .from('inspection_items')
-          .select('session_id, part_id, color_id, total_count, checked_count, status')
-          .in('session_id', sessionIds)
-
-        const allMissingItems = (allItems || []).filter(item => item.status === 'missing')
-        const sessionSetMap = new Map(latestSessions.map(s => [s.id, s.set_id]))
-        const sessionProgressMap = new Map(latestSessions.map(s => [s.set_id, s.progress || 0]))
-        const setMissingInfoMap = new Map()
-
-        allMissingItems.forEach(item => {
-          const setId = sessionSetMap.get(item.session_id)
-          if (!setId) return
-
-          const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
-          if (missingCount <= 0) return
-
-          if (!setMissingInfoMap.has(setId)) {
-            setMissingInfoMap.set(setId, {
-              partTypes: new Set(),
-              totalCount: 0
-            })
-          }
-
-          const info = setMissingInfoMap.get(setId)
-          info.partTypes.add(`${item.part_id}_${item.color_id}`)
-          info.totalCount += missingCount
-        })
-
-        // 세션 정보를 세트별로 매핑
+        // 세션 정보를 세트별로 매핑 (한 번만 순회)
+        const sessionSetMap = new Map()
         const sessionInfoBySetId = new Map()
         latestSessions.forEach(session => {
           if (session.set_id) {
+            sessionSetMap.set(session.id, session.set_id)
             sessionInfoBySetId.set(session.set_id, {
               status: session.status,
               progress: session.progress || 0,
@@ -985,28 +1036,43 @@ export default {
           }
         })
 
-        // 검수 중인 세트 목록 구성
+        // 누락 부품 계산 (한 번의 순회로 처리)
+        const setMissingInfoMap = new Map()
+        if (allItems && allItems.length > 0) {
+          for (const item of allItems) {
+            if (item.status !== 'missing') continue
+            
+            const setId = sessionSetMap.get(item.session_id)
+            if (!setId) continue
+
+            const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
+            if (missingCount <= 0) continue
+
+            let info = setMissingInfoMap.get(setId)
+            if (!info) {
+              info = {
+                partTypes: new Set(),
+                totalCount: 0
+              }
+              setMissingInfoMap.set(setId, info)
+            }
+
+            info.partTypes.add(`${item.part_id}_${item.color_id}`)
+            info.totalCount += missingCount
+          }
+        }
+
+        // 검수 중인 세트 목록 구성 (최적화된 처리)
         const inspectionSetsData = (setsData || []).map(set => {
           const missingInfo = setMissingInfoMap.get(set.id)
           const sessionInfo = sessionInfoBySetId.get(set.id)
-          let imageUrl = null
-
-          if (set.webp_image_url) {
-            imageUrl = set.webp_image_url
-          } else if (set.set_img_url) {
-            if (set.set_img_url.includes('cdn.rebrickable.com')) {
-              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(set.set_img_url)}`
-            } else {
-              imageUrl = set.set_img_url
-            }
-          }
-
+          
           return {
             id: set.id,
             set_num: set.set_num,
             name: set.name,
             theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
-            image_url: imageUrl,
+            image_url: set.webp_image_url || set.set_img_url || null,
             missingInfo: missingInfo ? {
               partTypes: missingInfo.partTypes.size,
               totalCount: missingInfo.totalCount
@@ -1017,7 +1083,7 @@ export default {
             completed_at: sessionInfo?.completed_at || null
           }
         }).sort((a, b) => {
-          return a.set_num.localeCompare(b.set_num, 'ko')
+          return a.set_num.localeCompare(b.set_num)
         })
 
         console.log('[MissingParts] 검수 중인 세트 목록 구성 완료:', inspectionSetsData.length, { inspectionSetsData })
@@ -1050,67 +1116,70 @@ export default {
 
         // 일반 사용자는 자신의 세션만 조회
         // 관리자는 모든 세션 조회 가능하도록 구현
-        const { data: adminData } = await supabase
-          .from('admin_users')
-          .select('id, role, is_active')
-          .eq('email', user.value.email)
-          .eq('is_active', true)
-          .maybeSingle()
-        
-        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
-
         // URL 쿼리 파라미터에서 세션 ID 확인
         const sessionIdFromQuery = route.query.session
+
+        // 관리자 여부 확인과 세션 조회를 병렬로 처리
+        const [adminResult, sessionResult] = await Promise.all([
+          supabase
+            .from('admin_users')
+            .select('id, role, is_active')
+            .eq('email', user.value.email)
+            .eq('is_active', true)
+            .maybeSingle(),
+          sessionIdFromQuery && typeof sessionIdFromQuery === 'string'
+            ? supabase
+                .from('inspection_sessions')
+                .select('id, set_id, status, completed_at, last_saved_at, started_at, progress, user_id')
+                .eq('id', sessionIdFromQuery)
+                .maybeSingle()
+            : (() => {
+                let sessionsQuery = supabase
+                  .from('inspection_sessions')
+                  .select('id, set_id, status, completed_at, last_saved_at, started_at, progress, user_id')
+                  .in('status', ['in_progress', 'paused', 'completed'])
+
+                if (selectedSetId.value) {
+                  sessionsQuery = sessionsQuery.eq('set_id', selectedSetId.value)
+                }
+
+                return sessionsQuery
+              })()
+        ])
+
+        const { data: adminData } = adminResult
+        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
 
         let sessions = []
 
         if (sessionIdFromQuery && typeof sessionIdFromQuery === 'string') {
-          // 특정 세션만 조회 (manual-inspection과 동일한 세션 사용)
-          const { data: sessionData, error: sessionError } = await supabase
-            .from('inspection_sessions')
-            .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
-            .eq('id', sessionIdFromQuery)
-            .maybeSingle()
-
+          const { data: sessionData, error: sessionError } = sessionResult
           if (sessionError) throw sessionError
 
           if (!sessionData) {
             missingParts.value = []
-            // 검수 중인 세트 목록은 아래에서 설정
+            loading.value = false
+            return
           } else if (!isAdmin && sessionData.user_id !== user.value.id) {
             missingParts.value = []
-            // 검수 중인 세트 목록은 아래에서 설정
+            loading.value = false
+            return
           } else {
             sessions = [sessionData]
           }
         } else {
-          // 누락 부품 조회용: selectedSetId가 있으면 필터링
-          let sessionsQuery = supabase
-            .from('inspection_sessions')
-            .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
-            .in('status', ['in_progress', 'paused', 'completed'])
-
-          if (!isAdmin) {
-            sessionsQuery = sessionsQuery.eq('user_id', user.value.id)
-          }
-
-          if (selectedSetId.value) {
-            console.log('[MissingParts] selectedSetId로 세션 필터링:', selectedSetId.value)
-            sessionsQuery = sessionsQuery.eq('set_id', selectedSetId.value)
-          }
-
-          const { data: filteredSessions, error: sessionsError } = await sessionsQuery
+          const { data: filteredSessions, error: sessionsError } = sessionResult
           if (sessionsError) throw sessionsError
 
-          console.log('[MissingParts] 필터링된 세션 수:', filteredSessions?.length || 0, { filteredSessions })
-
-          // 누락 부품 조회용 세션 (selectedSetId 필터 적용)
           if (!filteredSessions || filteredSessions.length === 0) {
-            console.log('[MissingParts] 세션 없음, sessions 빈 배열로 설정')
             sessions = []
           } else {
-            sessions = getLatestSessionsBySet(filteredSessions)
-            console.log('[MissingParts] 최신 세션으로 필터링 후 세션 수:', sessions.length)
+            // 관리자가 아니면 사용자 필터링
+            const userFilteredSessions = !isAdmin 
+              ? filteredSessions.filter(s => s.user_id === user.value.id)
+              : filteredSessions
+            
+            sessions = getLatestSessionsBySet(userFilteredSessions)
           }
         }
 
@@ -1180,7 +1249,7 @@ export default {
           return
         }
 
-        // 병렬 처리: 세트 정보, 테마 정보, 세트 메타데이터 동시 조회
+        // 병렬 처리: 세트 정보, 세트 메타데이터 동시 조회
         const [setsResult, metadataMap] = await Promise.all([
           // 세트 정보 조회
           supabase
@@ -1194,9 +1263,9 @@ export default {
         const { data: setsData, error: setsError } = setsResult
         if (setsError) throw setsError
 
-        // 테마 정보 조회 (세트 정보 조회 후 병렬 처리)
+        // 테마 정보 조회 (세트 정보 조회 후 즉시 병렬 처리)
         const themeIds = [...new Set((setsData || []).map(s => s.theme_id).filter(Boolean))]
-        let themeMap = new Map()
+        const themeMap = new Map()
         if (themeIds.length > 0) {
           const { data: themesData, error: themesError } = await supabase
             .from('lego_themes')
@@ -1204,7 +1273,7 @@ export default {
             .in('theme_id', themeIds)
 
           if (!themesError && themesData) {
-            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
+            themesData.forEach(t => themeMap.set(t.theme_id, t.name))
           }
         }
 
@@ -1239,12 +1308,7 @@ export default {
           if (set.webp_image_url) {
             imageUrl = set.webp_image_url
           } else if (set.set_img_url) {
-            // Rebrickable CDN URL인 경우 프록시 사용
-            if (set.set_img_url.includes('cdn.rebrickable.com')) {
-              imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(set.set_img_url)}`
-            } else {
-              imageUrl = set.set_img_url
-            }
+            imageUrl = set.set_img_url
           }
 
           return {
@@ -1262,15 +1326,30 @@ export default {
           }
         }).sort((a, b) => {
           // 세트 번호로 정렬
-          return a.set_num.localeCompare(b.set_num, 'ko')
+          return a.set_num.localeCompare(b.set_num)
         })
 
-        // 부품 정보와 색상 정보 병렬 조회 (성능 개선)
+        // 부품 정보, 색상 정보, 이미지 정보를 모두 병렬로 조회 (성능 최적화)
         const partIds = [...new Set(missingItems.map(i => i.part_id).filter(Boolean))]
-        // color_id가 0인 경우도 포함하도록 수정 (filter(Boolean)은 0을 제외함)
         const colorIds = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
+        const elementIds = [...new Set(missingItems.map(i => i.element_id).filter(Boolean))].map(id => String(id))
+        const allPartIdsForImages = [...new Set(missingItems.map(i => i.part_id).filter(id => id !== null && id !== undefined && id !== ''))]
+        const allColorIdsForImages = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
 
-        const [partsResult, colorsResult] = await Promise.all([
+        // Rebrickable CDN URL 생성 헬퍼 함수 (jpg 사용)
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+
+        // 모든 데이터 조회를 병렬로 처리
+        const allQueries = [
           partIds.length > 0
             ? supabase
                 .from('lego_parts')
@@ -1283,7 +1362,56 @@ export default {
                 .select('color_id, name, rgb')
                 .in('color_id', colorIds)
             : Promise.resolve({ data: [], error: null })
-        ])
+        ]
+
+        // 이미지 조회 쿼리 추가
+        if (elementIds.length > 0) {
+          allQueries.push(
+            supabase
+              .from('part_images')
+              .select('element_id, uploaded_url')
+              .in('element_id', elementIds)
+              .not('uploaded_url', 'is', null),
+            supabase
+              .from('image_metadata')
+              .select('element_id, supabase_url')
+              .in('element_id', elementIds)
+              .not('supabase_url', 'is', null)
+          )
+        }
+        
+        if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
+          allQueries.push(
+            supabase
+              .from('part_images')
+              .select('part_id, color_id, uploaded_url')
+              .in('part_id', allPartIdsForImages)
+              .in('color_id', allColorIdsForImages)
+              .not('uploaded_url', 'is', null),
+            supabase
+              .from('image_metadata')
+              .select('part_num, color_id, supabase_url')
+              .in('part_num', allPartIdsForImages)
+              .in('color_id', allColorIdsForImages)
+              .not('supabase_url', 'is', null)
+          )
+        }
+
+        // 모든 쿼리를 병렬로 실행
+        const allResults = await Promise.all(allQueries)
+
+        // 결과 분리
+        const partsResult = allResults[0]
+        const colorsResult = allResults[1]
+        let imageResults = []
+        if (elementIds.length > 0) {
+          imageResults = allResults.slice(2, 4)
+          if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
+            imageResults = allResults.slice(2, 6)
+          }
+        } else if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
+          imageResults = allResults.slice(2, 4)
+        }
 
         const { data: partsInfo, error: partsError } = partsResult
         if (partsError) throw partsError
@@ -1292,112 +1420,77 @@ export default {
         if (colorsError) throw colorsError
 
         const partsMap = new Map((partsInfo || []).map(p => [p.part_num, p]))
-        // color_id가 0인 경우도 포함하도록 수정
         const colorsMap = new Map((colorsInfo || []).map(c => [c.color_id, c]))
 
-        // element_id 목록 수집 (이미지 조회용)
-        const elementIds = [...new Set(missingItems.map(i => i.element_id).filter(Boolean))].map(id => String(id))
-        console.log('[MissingParts] element_id 목록:', elementIds.length, elementIds.slice(0, 5))
-        
-        // element_id 기반 이미지 조회 (part_images 우선)
+        // element_id 기반 이미지 맵 구성
         const elementImageMap = new Map()
+        let imageResultIndex = 0
         if (elementIds.length > 0) {
-          const { data: elementImages, error: elementImagesError } = await supabase
-            .from('part_images')
-            .select('element_id, uploaded_url')
-            .in('element_id', elementIds)
-            .not('uploaded_url', 'is', null)
+          const elementImagesResult = imageResults[imageResultIndex++]
+          const elementMetadataResult = imageResults[imageResultIndex++]
 
-          console.log('[MissingParts] part_images 조회 결과:', elementImages?.length || 0, '개')
-          if (elementImages && elementImages.length > 0) {
-            console.log('[MissingParts] part_images 샘플:', elementImages.slice(0, 3))
-          }
-
-          if (!elementImagesError && elementImages) {
-            elementImages.forEach(img => {
+          if (!elementImagesResult.error && elementImagesResult.data) {
+            for (const img of elementImagesResult.data) {
               if (img.element_id && img.uploaded_url) {
-                // JPG는 무시, WebP만 사용
-                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                  elementImageMap.set(String(img.element_id), img.uploaded_url)
-                  console.log('[MissingParts] element_id 이미지 추가:', img.element_id, '→', img.uploaded_url.substring(0, 80))
-                } else {
-                  console.log('[MissingParts] JPG 무시:', img.element_id, img.uploaded_url)
+                const elementId = String(img.element_id)
+                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(elementId, img.uploaded_url)
                 }
               }
-            })
-          }
-          console.log('[MissingParts] elementImageMap 크기:', elementImageMap.size)
-        }
-
-        // element_id 기반 image_metadata fallback 조회 (part_images에 없는 경우만)
-        const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
-        console.log('[MissingParts] image_metadata 조회 필요:', missingElementIds.length, '개')
-        
-        if (missingElementIds.length > 0) {
-          const { data: metadataImages, error: metadataError } = await supabase
-            .from('image_metadata')
-            .select('element_id, supabase_url')
-            .in('element_id', missingElementIds)
-            .not('supabase_url', 'is', null)
-
-          console.log('[MissingParts] image_metadata 조회 결과:', metadataImages?.length || 0, '개')
-          if (metadataImages && metadataImages.length > 0) {
-            console.log('[MissingParts] image_metadata 샘플:', metadataImages.slice(0, 3))
+            }
           }
 
-          if (!metadataError && metadataImages) {
-            metadataImages.forEach(img => {
+          if (!elementMetadataResult.error && elementMetadataResult.data) {
+            for (const img of elementMetadataResult.data) {
               if (img.element_id && img.supabase_url) {
-                // JPG는 무시, WebP만 사용
-                if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
-                  elementImageMap.set(String(img.element_id), img.supabase_url)
-                  console.log('[MissingParts] metadata 이미지 추가:', img.element_id, '→', img.supabase_url.substring(0, 80))
+                const elementId = String(img.element_id)
+                if (!elementImageMap.has(elementId)) {
+                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(elementId, img.supabase_url)
+                  }
                 }
               }
-            })
+            }
           }
-          console.log('[MissingParts] elementImageMap 최종 크기:', elementImageMap.size)
         }
 
-        // part_id + color_id 기반 이미지 조회 (element_id 이미지가 없는 경우 fallback용)
+        // part_id + color_id 기반 이미지 맵 구성
         const partColorImageMap = new Map()
-        // 모든 누락 아이템의 part_id와 color_id 조회 (element_id가 있어도 fallback으로 사용)
-        const allPartIdsForImages = [...new Set(missingItems.map(i => i.part_id).filter(id => id !== null && id !== undefined && id !== ''))]
-        const allColorIdsForImages = [...new Set(missingItems.map(i => i.color_id).filter(id => id !== null && id !== undefined))]
-        console.log('[MissingParts] part_id + color_id 조회:', allPartIdsForImages.length, 'part_ids,', allColorIdsForImages.length, 'color_ids')
+        if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0 && imageResults.length > imageResultIndex) {
+          const partImagesResult = imageResults[imageResultIndex++]
+          const metadataImagesResult = imageResults[imageResultIndex++]
 
-        if (allPartIdsForImages.length > 0 && allColorIdsForImages.length > 0) {
-          const { data: partImages, error: partImagesError } = await supabase
-            .from('part_images')
-            .select('part_id, color_id, uploaded_url')
-            .in('part_id', allPartIdsForImages)
-            .in('color_id', allColorIdsForImages)
-            .not('uploaded_url', 'is', null)
-
-          console.log('[MissingParts] part_images (part_id+color_id) 조회 결과:', partImages?.length || 0, '개')
-          if (partImages && partImages.length > 0) {
-            console.log('[MissingParts] part_images (part_id+color_id) 샘플:', partImages.slice(0, 3))
-          }
-
-          if (!partImagesError && partImages) {
-            partImages.forEach(img => {
-              if (img.part_id && img.color_id && img.uploaded_url) {
+          if (!partImagesResult.error && partImagesResult.data) {
+            for (const img of partImagesResult.data) {
+              if (img.part_id && img.color_id !== null && img.color_id !== undefined && img.uploaded_url) {
                 const key = `${img.part_id}_${img.color_id}`
-                // JPG는 무시, WebP만 사용 (모달과 동일한 로직)
-                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
                   partColorImageMap.set(key, img.uploaded_url)
-                  console.log('[MissingParts] part+color 이미지 추가:', key, '→', img.uploaded_url.substring(0, 80))
-                } else {
-                  console.log('[MissingParts] JPG 무시 (part+color):', key, img.uploaded_url)
                 }
               }
-            })
+            }
           }
-          console.log('[MissingParts] partColorImageMap 크기:', partColorImageMap.size)
+
+          if (!metadataImagesResult.error && metadataImagesResult.data) {
+            for (const img of metadataImagesResult.data) {
+              if (img.part_num && img.color_id !== null && img.color_id !== undefined && img.supabase_url) {
+                const key = `${img.part_num}_${img.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    partColorImageMap.set(key, img.supabase_url)
+                  }
+                }
+              }
+            }
+          }
         }
 
-        // 누락 부품 데이터 구성 (비동기 처리)
-        const partsDataWithImages = await Promise.all(missingItems.map(async (item) => {
+        // 누락 부품 데이터 구성 (동기 처리로 최적화)
+        const partsDataWithImages = missingItems.map((item) => {
           const setId = sessionSetMap.get(item.session_id)
           const meta = metadataMap.get(setId) || {}
           const partInfo = partsMap.get(item.part_id)
@@ -1406,32 +1499,30 @@ export default {
           // ManualInspection.vue와 동일한 로직: total_count - checked_count가 누락 개수
           const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
 
-          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id
           let imageUrl = null
-          let imageSource = 'none'
           
           // 1. element_id 기반 이미지 우선 확인
           if (item.element_id && elementImageMap.has(String(item.element_id))) {
             imageUrl = elementImageMap.get(String(item.element_id))
-            imageSource = 'element_id'
           }
           
           // 2. element_id 이미지가 없으면 part_id + color_id 기반 이미지 확인
-          if (!imageUrl) {
+          if (!imageUrl && item.part_id && item.color_id !== null && item.color_id !== undefined) {
             const key = `${item.part_id}_${item.color_id}`
             if (partColorImageMap.has(key)) {
               imageUrl = partColorImageMap.get(key)
-              imageSource = 'part_id+color_id'
             }
           }
 
-          // 3. 마지막 fallback: part_img_url (Rebrickable CDN)
-          if (!imageUrl && partInfo?.part_img_url) {
-            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
-            imageSource = 'fallback_cdn'
+          // 3. 버킷에도 없으면 Rebrickable CDN으로 폴백
+          if (!imageUrl) {
+            const elementId = item.element_id ? String(item.element_id) : null
+            imageUrl = getRebrickableCdnUrl(elementId, item.part_id, item.color_id)
+            if (!imageUrl && elementId) {
+              imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
+            }
           }
-          
-          console.log(`[MissingParts] 이미지 결정 - element_id: ${item.element_id}, part_id: ${item.part_id}, color_id: ${item.color_id}, source: ${imageSource}, url: ${imageUrl?.substring(0, 80) || 'null'}`)
 
           const partData = {
             set_id: setId,
@@ -1446,16 +1537,8 @@ export default {
             missing_count: missingCount
           }
           
-          console.log('[MissingParts] 부품 데이터 생성:', {
-            element_id: partData.element_id,
-            part_id: partData.part_id,
-            color_id: partData.color_id,
-            supabase_image_url: partData.supabase_image_url?.substring(0, 80) || 'null',
-            hasSupabaseImageUrl: !!partData.supabase_image_url
-          })
-          
           return partData
-        }))
+        })
 
         console.log('[MissingParts] 최종 부품 데이터:', partsDataWithImages.length, '개')
         if (partsDataWithImages.length > 0) {
@@ -1466,7 +1549,58 @@ export default {
             hasSupabaseImageUrl: !!partsDataWithImages[0].supabase_image_url
           })
         }
-        missingParts.value = partsDataWithImages
+
+        // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
+        const isSticker = (item) => {
+          const partName = (item.part_name || '').toLowerCase()
+          const partId = (item.part_id || '').toLowerCase()
+          return partName.includes('sticker') || 
+                 partName.includes('스티커') ||
+                 partId.includes('sticker') ||
+                 partId.includes('stk-')
+        }
+
+        const isMinifigure = (item) => {
+          const partId = item.part_id || ''
+          return String(partId).toLowerCase().startsWith('fig-')
+        }
+
+        const sortParts = (partsList) => {
+          return [...partsList].sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '', 'ko')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              return String(aElementId || '').localeCompare(String(bElementId || ''), 'ko')
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+          })
+        }
+
+        missingParts.value = sortParts(partsDataWithImages)
         console.log('[MissingParts] missingParts 설정 완료:', missingParts.value.length, 'missingPartsBySet:', missingPartsBySet.value.length)
       } catch (err) {
         console.error('[MissingParts] 누락 부품 로드 실패:', err)
@@ -1478,8 +1612,34 @@ export default {
     }
 
     const handleImageError = (event) => {
-      event.target.style.display = 'none'
-      const placeholder = event.target.nextElementSibling
+      const img = event.target
+      const originalSrc = img.src
+      const elementId = img.dataset.elementId
+      const partId = img.dataset.partId
+      const colorId = img.dataset.colorId
+      
+      // Rebrickable CDN으로 폴백
+      if (elementId || partId) {
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+        
+        const cdnUrl = getRebrickableCdnUrl(elementId, partId, colorId)
+        if (cdnUrl && cdnUrl !== originalSrc) {
+          img.src = cdnUrl
+          return
+        }
+      }
+      
+      img.style.display = 'none'
+      const placeholder = img.nextElementSibling
       if (placeholder) {
         placeholder.style.display = 'flex'
       }
@@ -1584,7 +1744,12 @@ export default {
       return rgbStr || null
     }
 
-    const formatColorLabel = (colorName, colorId) => {
+    const formatColorLabel = (colorName, colorId, partId = null) => {
+      // 미니피규어인 경우 (part_id가 fig-로 시작)
+      if (partId && String(partId).toLowerCase().startsWith('fig-')) {
+        return 'Any Color'
+      }
+      
       // colorName이 있으면 우선 사용 (colorId가 0이어도 colorName이 있으면 표시)
       if (colorName) {
         const normalized = String(colorName).trim()
@@ -1746,7 +1911,42 @@ export default {
         const elementIds = [...new Set(missingItems.map(i => i.element_id).filter(Boolean))].map(id => String(id))
         console.log('[MissingParts Modal] element_id 목록:', elementIds.length, elementIds.slice(0, 5))
         
-        // element_id 기반 이미지 배치 조회
+        // 버킷 URL 생성 헬퍼 함수
+        const getBucketImageUrl = (elementId, partId, colorId) => {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+          const bucketName = 'lego_parts_images'
+          const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
+          return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+        }
+
+        // Rebrickable CDN URL 생성 헬퍼 함수 (jpg 사용)
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            // partId만 있는 경우 (colorId가 0이거나 null일 수 있음)
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+
+        // 버킷 이미지 존재 확인 헬퍼 함수
+        const checkBucketImageExists = async (url) => {
+          try {
+            const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+            // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+            if (response.status === 400 || response.status === 404) {
+              return false
+            }
+            return response.ok
+          } catch {
+            return false
+          }
+        }
+
+        // element_id 기반 이미지 배치 조회 (버킷 URL 우선)
         const elementImageMap = new Map()
         if (elementIds.length > 0) {
           const { data: elementImages, error: elementImagesError } = await supabase
@@ -1758,14 +1958,25 @@ export default {
           console.log('[MissingParts Modal] part_images 조회 결과:', elementImages?.length || 0, '개')
 
           if (!elementImagesError && elementImages) {
-            elementImages.forEach(img => {
+            for (const img of elementImages) {
               if (img.element_id && img.uploaded_url) {
-                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                  elementImageMap.set(String(img.element_id), img.uploaded_url)
-                  console.log('[MissingParts Modal] element_id 이미지 추가:', img.element_id, '→', img.uploaded_url.substring(0, 80))
+                const elementId = String(img.element_id)
+                // 버킷 URL인지 확인
+                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(elementId, img.uploaded_url)
+                  console.log('[MissingParts Modal] element_id 이미지 추가:', elementId, '→', img.uploaded_url.substring(0, 80))
+                } else if (!isBucketUrl) {
+                  // CDN/API URL이면 버킷에 저장된 이미지 확인
+                  const bucketUrl = getBucketImageUrl(elementId, null, null)
+                  const exists = await checkBucketImageExists(bucketUrl)
+                  if (exists) {
+                    elementImageMap.set(elementId, bucketUrl)
+                    console.log('[MissingParts Modal] 버킷 이미지 추가:', elementId, '→', bucketUrl.substring(0, 80))
+                  }
                 }
               }
-            })
+            }
           }
 
           const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
@@ -1781,20 +1992,42 @@ export default {
             console.log('[MissingParts Modal] image_metadata 조회 결과:', metadataImages?.length || 0, '개')
 
             if (!metadataError && metadataImages) {
-              metadataImages.forEach(img => {
+              for (const img of metadataImages) {
                 if (img.element_id && img.supabase_url) {
-                  if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
-                    elementImageMap.set(String(img.element_id), img.supabase_url)
-                    console.log('[MissingParts Modal] metadata 이미지 추가:', img.element_id, '→', img.supabase_url.substring(0, 80))
+                  const elementId = String(img.element_id)
+                  // 버킷 URL인지 확인
+                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(elementId, img.supabase_url)
+                    console.log('[MissingParts Modal] metadata 이미지 추가:', elementId, '→', img.supabase_url.substring(0, 80))
+                  } else if (!isBucketUrl) {
+                    // CDN/API URL이면 버킷에 저장된 이미지 확인
+                    const bucketUrl = getBucketImageUrl(elementId, null, null)
+                    const exists = await checkBucketImageExists(bucketUrl)
+                    if (exists) {
+                      elementImageMap.set(elementId, bucketUrl)
+                      console.log('[MissingParts Modal] 버킷 이미지 추가 (metadata):', elementId, '→', bucketUrl.substring(0, 80))
+                    }
                   }
                 }
-              })
+              }
+            }
+          }
+
+          // part_images/image_metadata에 없으면 버킷 직접 확인
+          const stillMissingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+          for (const elementId of stillMissingElementIds) {
+            const bucketUrl = getBucketImageUrl(elementId, null, null)
+            const exists = await checkBucketImageExists(bucketUrl)
+            if (exists) {
+              elementImageMap.set(elementId, bucketUrl)
+              console.log('[MissingParts Modal] 버킷 직접 확인 이미지 추가:', elementId, '→', bucketUrl.substring(0, 80))
             }
           }
           console.log('[MissingParts Modal] elementImageMap 최종 크기:', elementImageMap.size)
         }
 
-        // part_id + color_id 기반 이미지 조회 (element_id 이미지가 없는 경우 fallback용)
+        // part_id + color_id 기반 이미지 조회 (버킷 URL 우선)
         const partColorImageMap = new Map()
         // 모든 누락 아이템의 part_id와 color_id 조회 (element_id가 있어도 fallback으로 사용)
         const allPartIdsForImages = [...new Set(missingItems.map(i => i.part_id).filter(Boolean))]
@@ -1809,27 +2042,47 @@ export default {
             .not('uploaded_url', 'is', null)
 
           if (!partImagesError && partImages) {
-            partImages.forEach(img => {
+            for (const img of partImages) {
               if (img.part_id && img.color_id && img.uploaded_url) {
                 const key = `${img.part_id}_${img.color_id}`
                 if (!partColorImageMap.has(key)) {
-                  // JPG는 무시, WebP만 사용
-                  if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  // 버킷 URL인지 확인
+                  const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
                     partColorImageMap.set(key, img.uploaded_url)
+                  } else if (!isBucketUrl) {
+                    // CDN/API URL이면 버킷에 저장된 이미지 확인
+                    const bucketUrl = getBucketImageUrl(null, img.part_id, img.color_id)
+                    const exists = await checkBucketImageExists(bucketUrl)
+                    if (exists) {
+                      partColorImageMap.set(key, bucketUrl)
+                    }
                   }
                 }
               }
-            })
+            }
+          }
+
+          // part_images에 없으면 버킷 직접 확인
+          for (const item of missingItems) {
+            const key = `${item.part_id}_${item.color_id}`
+            if (!partColorImageMap.has(key)) {
+              const bucketUrl = getBucketImageUrl(null, item.part_id, item.color_id)
+              const exists = await checkBucketImageExists(bucketUrl)
+              if (exists) {
+                partColorImageMap.set(key, bucketUrl)
+              }
+            }
           }
         }
 
-        // 누락부품 데이터 구성
-        const partsWithImages = missingItems.map((item) => {
+        // 누락부품 데이터 구성 (비동기 처리)
+        const partsWithImages = await Promise.all(missingItems.map(async (item) => {
           const partInfo = partsInfoMap.get(item.part_id)
           const colorInfo = colorsInfoMap.get(item.color_id)
           const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
 
-          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 버킷 직접 확인
           let imageUrl = null
           let imageSource = 'none'
           
@@ -1848,10 +2101,28 @@ export default {
             }
           }
 
-          // 3. 마지막 fallback: part_img_url (Rebrickable CDN)
-          if (!imageUrl && partInfo?.part_img_url) {
-            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
-            imageSource = 'fallback_cdn'
+          // 3. 버킷 직접 확인 (fallback 1)
+          if (!imageUrl) {
+            const bucketUrl = item.element_id 
+              ? getBucketImageUrl(item.element_id, item.part_id, item.color_id)
+              : getBucketImageUrl(null, item.part_id, item.color_id)
+            const exists = await checkBucketImageExists(bucketUrl)
+            if (exists) {
+              imageUrl = bucketUrl
+              imageSource = 'bucket_direct'
+            }
+          }
+
+          // 4. 버킷에도 없으면 Rebrickable CDN으로 폴백
+          if (!imageUrl) {
+            imageUrl = getRebrickableCdnUrl(item.element_id, item.part_id, item.color_id)
+            // CDN URL도 없으면 element_id만으로 시도
+            if (!imageUrl && item.element_id) {
+              imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${item.element_id}.jpg`
+            }
+            if (imageUrl) {
+              imageSource = 'rebrickable_cdn'
+            }
           }
           
           console.log(`[MissingParts Modal] 이미지 결정 - element_id: ${item.element_id}, part_id: ${item.part_id}, color_id: ${item.color_id}, source: ${imageSource}, url: ${imageUrl?.substring(0, 80) || 'null'}`)
@@ -1876,7 +2147,7 @@ export default {
           })
           
           return partData
-        })
+        }))
 
         console.log('[MissingParts Modal] 최종 부품 데이터:', partsWithImages.length, '개')
         if (partsWithImages.length > 0) {
@@ -1887,7 +2158,58 @@ export default {
             hasImageUrl: !!partsWithImages[0].image_url
           })
         }
-        missingPartsModalData.value = partsWithImages
+
+        // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
+        const isSticker = (item) => {
+          const partName = (item.part_name || '').toLowerCase()
+          const partId = (item.part_id || '').toLowerCase()
+          return partName.includes('sticker') || 
+                 partName.includes('스티커') ||
+                 partId.includes('sticker') ||
+                 partId.includes('stk-')
+        }
+
+        const isMinifigure = (item) => {
+          const partId = item.part_id || ''
+          return String(partId).toLowerCase().startsWith('fig-')
+        }
+
+        const sortParts = (partsList) => {
+          return [...partsList].sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '', 'ko')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              return String(aElementId || '').localeCompare(String(bElementId || ''), 'ko')
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+          })
+        }
+
+        missingPartsModalData.value = sortParts(partsWithImages)
       } catch (err) {
         missingPartsModalError.value = err.message || '누락부품 목록을 불러오는 중 오류가 발생했습니다.'
         console.error('누락부품 목록 조회 실패:', err)
@@ -1903,8 +2225,40 @@ export default {
       missingPartsModalError.value = null
     }
 
+    // CDN URL인지 확인하는 함수
+    const isCdnUrl = (url) => {
+      if (!url) return false
+      return url.includes('cdn.rebrickable.com')
+    }
+
     const handlePartImageError = (event) => {
-      event.target.style.display = 'none'
+      const img = event.target
+      const originalSrc = img.src
+      const elementId = img.dataset.elementId
+      const partId = img.dataset.partId
+      const colorId = img.dataset.colorId
+      
+      // Rebrickable CDN으로 폴백
+      if (elementId || partId) {
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+        
+        const cdnUrl = getRebrickableCdnUrl(elementId, partId, colorId)
+        if (cdnUrl && cdnUrl !== originalSrc) {
+          img.src = cdnUrl
+          return
+        }
+      }
+      
+      img.style.display = 'none'
     }
 
     // URL 쿼리 파라미터 변경 감지
@@ -1973,6 +2327,7 @@ export default {
       handleSearchEnter,
       handleSearchBlur,
       handleSelectSet,
+      isCdnUrl,
       formatSetDisplay,
       formatSetNumber,
       formatDate,
@@ -2948,6 +3303,26 @@ export default {
   border-radius: 4px;
 }
 
+.cdn-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.part-image-section .cdn-badge {
+  top: 8px;
+  right: 8px;
+}
+
 .part-card .quantity-section {
   display: flex;
   align-items: center;
@@ -3018,6 +3393,7 @@ export default {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
 }
 
 .modal-header {
@@ -3056,8 +3432,10 @@ export default {
 
 .modal-body {
   padding: 1.5rem;
+  padding-bottom: 2rem;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .loading-message,
@@ -3074,6 +3452,11 @@ export default {
 
 .set-parts-list {
   max-height: calc(90vh - 120px);
+  padding-bottom: 0;
+}
+
+.set-parts-list .modal-parts-grid {
+  padding-bottom: 2rem !important;
 }
 
 @media (max-width: 768px) {

@@ -44,15 +44,22 @@
                       <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
                   </button>
-                  <div class="part-image-container">
+                  <div class="part-image-container" style="position: relative;">
                     <img
                       v-if="searchResult.part_image_url"
                       :src="searchResult.part_image_url"
                       :alt="searchResult.part_name"
                       class="part-image"
                       @error="handlePartImageError"
+                      @load="(e) => { if (e.target) searchResult._currentSrc = e.target.src }"
                     />
                     <div v-else class="no-part-image">이미지 없음</div>
+                    <span 
+                      v-if="searchResult.part_image_url && (isCdnUrl(searchResult.part_image_url) || (searchResult._currentSrc && isCdnUrl(searchResult._currentSrc)))"
+                      class="cdn-badge"
+                    >
+                      CDN
+                    </span>
                   </div>
                   <div class="part-info">
                     <div v-if="searchResult.element_id" class="element-id-badge">
@@ -67,13 +74,109 @@
                         color: getColorTextColor(searchResult.color_rgb)
                       }"
                     >
-                      {{ formatColorLabel(searchResult.color_name, searchResult.color_id) }}
+                      {{ formatColorLabel(searchResult.color_name, searchResult.color_id, searchResult.part_id) }}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- 최근 등록 부품 리스트 -->
+      <div v-if="!loading && !error && !searchResult && recentParts.length > 0" class="recent-parts-section">
+        <div class="result-header">
+          <h3>최근 등록 부품</h3>
+        </div>
+        <div class="parts-grid">
+          <div
+            v-for="part in paginatedRecentParts"
+            :key="`${part.part_id}-${part.color_id}`"
+            class="part-card"
+          >
+            <div class="card-header">
+              <div class="part-info">
+                <div v-if="part.element_id" class="element-id">
+                  {{ part.element_id }}
+                </div>
+                <h4 class="part-name">{{ part.part_name }}</h4>
+                <span 
+                  class="color-badge"
+                  :style="{ 
+                    backgroundColor: getColorRgb(part.color_rgb) || '#ccc',
+                    color: getColorTextColor(part.color_rgb)
+                  }"
+                >
+                  {{ formatColorLabel(part.color_name, part.color_id, part.part_id) }}
+                </span>
+              </div>
+              <button
+                type="button"
+                class="part-info-btn"
+                @click="showPartInfo(part)"
+                title="부품 정보"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 16V12M12 8H12.01M22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+            </div>
+            <div class="card-body">
+              <div class="part-image-section" style="position: relative;">
+                <img
+                  v-if="part.image_url"
+                  :src="part.image_url"
+                  :alt="part.part_name"
+                  class="part-image"
+                  @error="handlePartImageError"
+                  @load="(e) => { if (e.target) part._currentSrc = e.target.src }"
+                />
+                <div v-else class="no-part-image">이미지 없음</div>
+                <span 
+                  v-if="part.image_url && (isCdnUrl(part.image_url) || (part._currentSrc && isCdnUrl(part._currentSrc)))"
+                  class="cdn-badge"
+                >
+                  CDN
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 페이지네이션 -->
+        <div v-if="recentPartsTotalPages > 1" class="pagination">
+          <button
+            class="pagination-button"
+            :class="{ disabled: recentPartsCurrentPage === 1 }"
+            @click="goToRecentPartsPage(recentPartsCurrentPage - 1)"
+            :disabled="recentPartsCurrentPage === 1"
+          >
+            이전
+          </button>
+          <div class="pagination-numbers">
+            <span
+              v-for="page in recentPartsVisiblePages"
+              :key="page"
+            >
+              <button
+                v-if="page !== '...'"
+                class="pagination-number"
+                :class="{ active: page === recentPartsCurrentPage }"
+                @click="goToRecentPartsPage(page)"
+              >
+                {{ page }}
+              </button>
+              <span v-else class="pagination-ellipsis">...</span>
+            </span>
+          </div>
+          <button
+            class="pagination-button"
+            :class="{ disabled: recentPartsCurrentPage === recentPartsTotalPages }"
+            @click="goToRecentPartsPage(recentPartsCurrentPage + 1)"
+            :disabled="recentPartsCurrentPage === recentPartsTotalPages"
+          >
+            다음
+          </button>
         </div>
       </div>
 
@@ -155,15 +258,22 @@
                   </div>
                 </div>
                 <div class="card-body">
-                  <div class="part-image-section">
+                  <div class="part-image-section" style="position: relative;">
                     <img
                       v-if="color.image_url"
                       :src="color.image_url"
                       :alt="searchResult.alternatives[0].part_name"
                       @error="handlePartImageError"
                       class="part-image"
+                      @load="(e) => { if (e.target) color._currentSrc = e.target.src }"
                     />
                     <div v-else class="no-part-image">이미지 없음</div>
+                    <span 
+                      v-if="color.image_url && (isCdnUrl(color.image_url) || (color._currentSrc && isCdnUrl(color._currentSrc)))"
+                      class="cdn-badge"
+                    >
+                      CDN
+                    </span>
                   </div>
                 </div>
               </div>
@@ -204,7 +314,7 @@
                         color: getColorTextColor(part.color_rgb)
                       }"
                     >
-                      {{ formatColorLabel(part.color_name, part.color_id) }}
+                      {{ formatColorLabel(part.color_name, part.color_id, part.part_id) }}
                     </span>
                   </div>
                 </div>
@@ -246,6 +356,79 @@
       @close="handleSyncClose"
       @retry="handleSyncRetry"
     />
+
+    <!-- 부품 정보 모달 -->
+    <div v-if="showPartInfoModal" class="part-info-modal-overlay" @click="closePartInfoModal">
+      <div class="part-info-modal" @click.stop>
+        <div class="modal-header">
+          <h3>부품 정보</h3>
+          <button @click="closePartInfoModal" class="modal-close-btn">×</button>
+        </div>
+        <div class="modal-body">
+          <div v-if="selectedPart" class="part-info-content">
+            <div class="info-section">
+              <div v-if="selectedPart.element_id" class="element-id-display">
+                <strong>{{ selectedPart.element_id }}</strong>
+              </div>
+              <h4>{{ selectedPart.part_name }}</h4>
+              <p class="part-color-info">{{ formatColorLabel(selectedPart.color_name, selectedPart.color_id, selectedPart.part_id) }}</p>
+            </div>
+
+            <div class="info-section">
+              <h5>포함된 세트</h5>
+              <div v-if="partSetsLoading" class="loading-text">로딩 중...</div>
+              <div v-else-if="partSets.length === 0" class="empty-text">포함된 세트가 없습니다</div>
+              <div v-else class="sets-list">
+                <div
+                  v-for="set in partSets"
+                  :key="set.id"
+                  class="set-item"
+                  @click="handleSetRowClick(set)"
+                  tabindex="0"
+                >
+                  <span class="set-name">{{ set.name }}</span>
+                  <span class="set-num">{{ formatSetNumber(set.set_num) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="info-section">
+              <h5>대체 부품</h5>
+              <div v-if="alternativePartsLoading" class="loading-text">로딩 중...</div>
+              <div v-else-if="alternativeParts.length === 0" class="empty-text">대체 부품이 없습니다</div>
+              <div v-else class="alternatives-list">
+                <div
+                  v-for="alt in alternativeParts.slice(0, 10)"
+                  :key="alt.part_id"
+                  class="alternative-item"
+                  @click="handleAlternativePartClick(alt)"
+                  tabindex="0"
+                >
+                  <div class="alt-part-info">
+                    <span class="alt-part-name">{{ alt.part_name }}</span>
+                    <span class="alt-part-id">부품 번호: {{ alt.part_id }}</span>
+                  </div>
+                  <div class="alt-colors">
+                    <div
+                      v-for="color in alt.colors"
+                      :key="`${alt.part_id}-${color.color_id}`"
+                      class="alt-color-row"
+                    >
+                      <span
+                        class="color-chip"
+                        :style="{ backgroundColor: color.rgb ? (color.rgb.startsWith('#') ? color.rgb : `#${color.rgb}`) : '#ccc' }"
+                      ></span>
+                      <span class="alt-color-name">{{ formatColorLabel(color.name, color.color_id, alt.part_id) }}</span>
+                      <span v-if="color.element_id" class="alt-element-id">Element ID: {{ color.element_id }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -275,6 +458,20 @@ export default {
     const elementIdInput = ref('')
     const lastQuerySignature = ref('') // 🔧 수정됨
     const searchResult = ref(null)
+    
+    // 최근 등록 부품 관련
+    const recentParts = ref([])
+    const recentPartsCurrentPage = ref(1)
+    const recentPartsItemsPerPage = 40
+    
+    // 부품 정보 모달 관련
+    const showPartInfoModal = ref(false)
+    const selectedPart = ref(null)
+    const partSets = ref([])
+    const partSetsLoading = ref(false)
+    const alternativeParts = ref([])
+    const alternativePartsLoading = ref(false)
+    
     const error = ref(null)
     const showSetPartsModal = ref(false)
     const selectedSet = ref(null)
@@ -421,22 +618,94 @@ export default {
 
         // 부품 이미지 URL 조회: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
         let partImageUrl = null
+        const debugElementId = elementIdInput.value.trim()
+        console.log('[PartToSetSearch] 이미지 로딩 시작 - element_id:', debugElementId, 'part_id:', setPart.part_id, 'color_id:', setPart.color_id)
+
+        // 버킷 URL 생성 헬퍼 함수
+        const getBucketImageUrl = (elementId, partId, colorId) => {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+          const bucketName = 'lego_parts_images'
+          const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
+          const url = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+          console.log('[PartToSetSearch] 버킷 URL 생성:', { elementId, partId, colorId, fileName, url })
+          return url
+        }
+
+        // Rebrickable CDN URL 생성 헬퍼 함수 (jpg 사용)
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          let url = null
+          if (elementId) {
+            url = `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            url = `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            // partId만 있는 경우 (colorId가 0이거나 null일 수 있음)
+            url = `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          console.log('[PartToSetSearch] CDN URL 생성:', { elementId, partId, colorId, url })
+          return url
+        }
+
+        // 버킷 이미지 존재 확인 헬퍼 함수
+        const checkBucketImageExists = async (url) => {
+          try {
+            console.log('[PartToSetSearch] 버킷 이미지 존재 확인:', url)
+            const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+            // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+            if (response.status === 400 || response.status === 404) {
+              console.log('[PartToSetSearch] 버킷 이미지 없음 (400/404):', response.status)
+              return false
+            }
+            const exists = response.ok
+            console.log('[PartToSetSearch] 버킷 이미지 존재 여부:', exists, 'status:', response.status)
+            return exists
+          } catch (err) {
+            console.log('[PartToSetSearch] 버킷 이미지 확인 실패:', err)
+            return false
+          }
+        }
         
         if (elementIdInput.value.trim()) {
           // element_id로 먼저 조회
+          console.log('[PartToSetSearch] part_images 테이블에서 element_id로 조회:', elementIdInput.value.trim())
           const { data: partImageByElement, error: elementError } = await supabase
             .from('part_images')
             .select('uploaded_url')
             .eq('element_id', String(elementIdInput.value.trim()))
             .maybeSingle()
 
+          console.log('[PartToSetSearch] part_images 조회 결과:', { error: elementError, data: partImageByElement })
+
           if (!elementError && partImageByElement?.uploaded_url) {
-            partImageUrl = partImageByElement.uploaded_url
+            const uploadedUrl = partImageByElement.uploaded_url
+            console.log('[PartToSetSearch] part_images에서 uploaded_url 발견:', uploadedUrl)
+            // 버킷 URL인지 확인
+            const isBucketUrl = uploadedUrl.includes('/storage/v1/object/public/lego_parts_images/')
+            if (isBucketUrl && !uploadedUrl.toLowerCase().endsWith('.jpg')) {
+              partImageUrl = uploadedUrl
+              console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
+            } else if (!isBucketUrl) {
+              // CDN/API URL이면 버킷에 저장된 이미지 확인
+              const bucketUrl = getBucketImageUrl(elementIdInput.value.trim(), null, null)
+              console.log('[PartToSetSearch] 버킷 직접 확인 시도:', bucketUrl)
+              const exists = await checkBucketImageExists(bucketUrl)
+              console.log('[PartToSetSearch] 버킷 존재 여부:', exists)
+              if (exists) {
+                partImageUrl = bucketUrl
+                console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
+              } else {
+                partImageUrl = uploadedUrl
+                console.log('[PartToSetSearch] uploaded_url 사용:', partImageUrl)
+              }
+            }
+          } else {
+            console.log('[PartToSetSearch] part_images에서 이미지 없음')
           }
         }
 
         // element_id로 찾지 못했으면 part_id + color_id로 조회
         if (!partImageUrl) {
+          console.log('[PartToSetSearch] part_id + color_id로 조회:', setPart.part_id, setPart.color_id)
           const { data: partImage, error: partImageError } = await supabase
             .from('part_images')
             .select('uploaded_url')
@@ -444,30 +713,69 @@ export default {
             .eq('color_id', setPart.color_id)
             .maybeSingle()
 
+          console.log('[PartToSetSearch] part_id+color_id 조회 결과:', { error: partImageError, data: partImage })
+
           if (!partImageError && partImage?.uploaded_url) {
-            partImageUrl = partImage.uploaded_url
-          }
-        }
-
-        // element_id가 있지만 이미지가 없으면 Rebrickable API에서 element_img_url 가져오기
-        if (!partImageUrl && elementIdInput.value.trim()) {
-          try {
-            const { getElement } = useRebrickable()
-            const elementData = await getElement(elementIdInput.value.trim())
-            if (elementData?.element_img_url) {
-              partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
-            } else if (elementData?.part_img_url) {
-              partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+            const uploadedUrl = partImage.uploaded_url
+            console.log('[PartToSetSearch] part_id+color_id에서 uploaded_url 발견:', uploadedUrl)
+            // 버킷 URL인지 확인
+            const isBucketUrl = uploadedUrl.includes('/storage/v1/object/public/lego_parts_images/')
+            if (isBucketUrl && !uploadedUrl.toLowerCase().endsWith('.jpg')) {
+              partImageUrl = uploadedUrl
+              console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
+            } else if (!isBucketUrl) {
+              // CDN/API URL이면 버킷에 저장된 이미지 확인
+              const bucketUrl = getBucketImageUrl(null, setPart.part_id, setPart.color_id)
+              console.log('[PartToSetSearch] 버킷 직접 확인 시도:', bucketUrl)
+              const exists = await checkBucketImageExists(bucketUrl)
+              console.log('[PartToSetSearch] 버킷 존재 여부:', exists)
+              if (exists) {
+                partImageUrl = bucketUrl
+                console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
+              } else {
+                partImageUrl = uploadedUrl
+                console.log('[PartToSetSearch] uploaded_url 사용:', partImageUrl)
+              }
             }
-          } catch (elementErr) {
-            console.warn(`⚠️ element_id ${elementIdInput.value.trim()} 이미지 조회 실패:`, elementErr)
+          } else {
+            console.log('[PartToSetSearch] part_id+color_id에서 이미지 없음')
           }
         }
 
-        // element_id 실패 시 part_img_url 사용 (fallback)
-        if (!partImageUrl && partInfo?.part_img_url) {
-          partImageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+        // part_images에 없으면 버킷 직접 확인
+        if (!partImageUrl) {
+          console.log('[PartToSetSearch] part_images에 없음, 버킷 직접 확인 시작')
+          const bucketUrl = elementIdInput.value.trim()
+            ? getBucketImageUrl(elementIdInput.value.trim(), setPart.part_id, setPart.color_id)
+            : getBucketImageUrl(null, setPart.part_id, setPart.color_id)
+          console.log('[PartToSetSearch] 버킷 직접 확인 URL:', bucketUrl)
+          const exists = await checkBucketImageExists(bucketUrl)
+          console.log('[PartToSetSearch] 버킷 직접 확인 결과:', exists)
+          if (exists) {
+            partImageUrl = bucketUrl
+            console.log('[PartToSetSearch] 버킷 직접 확인 성공, URL 설정:', partImageUrl)
+          } else {
+            console.log('[PartToSetSearch] 버킷 직접 확인 실패')
+          }
+        } else {
+          console.log('[PartToSetSearch] 이미지 URL 설정됨 (part_images):', partImageUrl)
         }
+
+        // 버킷에도 없으면 Rebrickable CDN으로 폴백
+        if (!partImageUrl) {
+          console.log('[PartToSetSearch] 버킷에도 없음, CDN 폴백 시작')
+          const elementId = elementIdInput.value.trim() || null
+          console.log('[PartToSetSearch] CDN 폴백 파라미터:', { elementId, partId: setPart.part_id, colorId: setPart.color_id })
+          partImageUrl = getRebrickableCdnUrl(elementId, setPart.part_id, setPart.color_id)
+          console.log('[PartToSetSearch] getRebrickableCdnUrl 결과:', partImageUrl)
+          // CDN URL도 없으면 element_id만으로 시도
+          if (!partImageUrl && elementId) {
+            partImageUrl = `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
+            console.log('[PartToSetSearch] element_id만으로 CDN URL 생성:', partImageUrl)
+          }
+        }
+
+        console.log('[PartToSetSearch] 최종 이미지 URL:', partImageUrl)
 
         // 세트 찾기
         const allSets = await findSetsByPart(setPart.part_id, setPart.color_id)
@@ -487,6 +795,12 @@ export default {
         }
         
         // 기본 검색 결과 먼저 표시 (세트 목록)
+        console.log('[PartToSetSearch] searchResult 설정:', { 
+          element_id: elementIdInput.value.trim(), 
+          part_id: setPart.part_id, 
+          color_id: setPart.color_id,
+          part_image_url: partImageUrl 
+        })
         searchResult.value = {
           element_id: elementIdInput.value.trim(),
           part_id: setPart.part_id,
@@ -498,6 +812,7 @@ export default {
           sets: sets,
           alternatives: null // 나중에 업데이트
         }
+        console.log('[PartToSetSearch] searchResult.value 설정 완료:', searchResult.value)
         
         // 유사부품 찾기 (백그라운드에서 실행, element_id 포함)
         const alternatives = await findAlternativeParts(setPart.part_id, setPart.color_id)
@@ -513,9 +828,27 @@ export default {
             .filter(Boolean)
             .map(id => String(id))
 
-          // 2. element_id로 이미지 배치 조회
+          // 2. element_id로 이미지 배치 조회 (버킷 URL 우선)
           const elementImageMap = new Map()
           if (elementIds.length > 0) {
+            // 버킷 URL 생성 헬퍼 함수
+            const getBucketImageUrl = (elementId) => {
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+              const bucketName = 'lego_parts_images'
+              const fileName = `${String(elementId)}.webp`
+              return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+            }
+
+            // 버킷 이미지 존재 확인 헬퍼 함수
+            const checkBucketImageExists = async (url) => {
+              try {
+                const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+                return response.ok
+              } catch {
+                return false
+              }
+            }
+
             const { data: elementImages, error: elementImagesError } = await supabase
               .from('part_images')
               .select('element_id, uploaded_url')
@@ -523,17 +856,57 @@ export default {
               .not('uploaded_url', 'is', null)
 
             if (!elementImagesError && elementImages) {
-              elementImages.forEach(img => {
+              for (const img of elementImages) {
                 if (img.element_id && img.uploaded_url) {
-                  elementImageMap.set(String(img.element_id), img.uploaded_url)
+                  const elementId = String(img.element_id)
+                  // 버킷 URL인지 확인
+                  const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(elementId, img.uploaded_url)
+                  } else if (!isBucketUrl) {
+                    // CDN/API URL이면 버킷에 저장된 이미지 확인
+                    const bucketUrl = getBucketImageUrl(elementId)
+                    const exists = await checkBucketImageExists(bucketUrl)
+                    if (exists) {
+                      elementImageMap.set(elementId, bucketUrl)
+                    }
+                  }
                 }
-              })
+              }
+            }
+
+            // part_images에 없으면 버킷 직접 확인
+            const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
+            for (const elementId of missingElementIds) {
+              const bucketUrl = getBucketImageUrl(elementId)
+              const exists = await checkBucketImageExists(bucketUrl)
+              if (exists) {
+                elementImageMap.set(elementId, bucketUrl)
+              }
             }
           }
 
-          // 3. element_id로 찾지 못한 색상들을 part_id + color_id로 배치 조회
+          // 3. element_id로 찾지 못한 색상들을 part_id + color_id로 배치 조회 (버킷 URL 우선)
           const colorsWithoutImage = colors.filter(c => !c.element_id || !elementImageMap.has(String(c.element_id)))
           if (colorsWithoutImage.length > 0) {
+            // 버킷 URL 생성 헬퍼 함수
+            const getBucketImageUrl = (partId, colorId) => {
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+              const bucketName = 'lego_parts_images'
+              const fileName = `${partId}_${colorId}.webp`
+              return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+            }
+
+            // 버킷 이미지 존재 확인 헬퍼 함수
+            const checkBucketImageExists = async (url) => {
+              try {
+                const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+                return response.ok
+              } catch {
+                return false
+              }
+            }
+
             const missingColorIds = colorsWithoutImage.map(c => c.color_id).filter(Boolean)
             if (missingColorIds.length > 0) {
               const { data: partImages, error: partImagesError } = await supabase
@@ -545,12 +918,35 @@ export default {
 
               if (!partImagesError && partImages) {
                 const partColorImageMap = new Map()
-                partImages.forEach(img => {
+                for (const img of partImages) {
                   const key = `${img.part_id}_${img.color_id}`
                   if (!partColorImageMap.has(key)) {
-                    partColorImageMap.set(key, img.uploaded_url)
+                    // 버킷 URL인지 확인
+                    const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                    if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                      partColorImageMap.set(key, img.uploaded_url)
+                    } else if (!isBucketUrl) {
+                      // CDN/API URL이면 버킷에 저장된 이미지 확인
+                      const bucketUrl = getBucketImageUrl(img.part_id, img.color_id)
+                      const exists = await checkBucketImageExists(bucketUrl)
+                      if (exists) {
+                        partColorImageMap.set(key, bucketUrl)
+                      }
+                    }
                   }
-                })
+                }
+
+                // part_images에 없으면 버킷 직접 확인
+                for (const color of colorsWithoutImage) {
+                  const key = `${partId}_${color.color_id}`
+                  if (!partColorImageMap.has(key)) {
+                    const bucketUrl = getBucketImageUrl(partId, color.color_id)
+                    const exists = await checkBucketImageExists(bucketUrl)
+                    if (exists) {
+                      partColorImageMap.set(key, bucketUrl)
+                    }
+                  }
+                }
 
                 // 이미지 URL 할당
                 colorsWithoutImage.forEach(color => {
@@ -563,17 +959,57 @@ export default {
             }
           }
 
-          // 4. 이미지 URL 할당 (element_id 우선, fallback은 part_img_url)
-          colors.forEach(color => {
+          // 4. 이미지 URL 할당 (element_id 우선, 버킷 직접 확인)
+          for (const color of colors) {
             if (!color.image_url) {
               if (color.element_id && elementImageMap.has(String(color.element_id))) {
                 color.image_url = elementImageMap.get(String(color.element_id))
-              } else if (alternatives[0].part_img_url) {
-                // 이미지가 없으면 part_img_url 사용 (fallback, Rebrickable API 호출 없이)
-                color.image_url = `/api/upload/proxy-image?url=${encodeURIComponent(alternatives[0].part_img_url)}`
+              } else {
+                // 버킷 직접 확인
+                const getBucketImageUrl = (elementId, partId, colorId) => {
+                  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+                  const bucketName = 'lego_parts_images'
+                  const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
+                  return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+                }
+
+                const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+                  if (elementId) {
+                    return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+                  } else if (partId && colorId !== null && colorId !== undefined) {
+                    return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+                  } else if (partId) {
+                    return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+                  }
+                  return null
+                }
+
+                const checkBucketImageExists = async (url) => {
+                  try {
+                    const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+                    // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+                    if (response.status === 400 || response.status === 404) {
+                      return false
+                    }
+                    return response.ok
+                  } catch {
+                    return false
+                  }
+                }
+
+                const bucketUrl = color.element_id
+                  ? getBucketImageUrl(color.element_id, alternatives[0].part_id, color.color_id)
+                  : getBucketImageUrl(null, alternatives[0].part_id, color.color_id)
+                const exists = await checkBucketImageExists(bucketUrl)
+                if (exists) {
+                  color.image_url = bucketUrl
+                } else {
+                  // 버킷에 없으면 Rebrickable CDN으로 폴백
+                  color.image_url = getRebrickableCdnUrl(color.element_id, alternatives[0].part_id, color.color_id)
+                }
               }
             }
-          })
+          }
         }
 
         // 유사부품 정보 업데이트
@@ -626,132 +1062,197 @@ export default {
           return
         }
 
-        // 부품 정보 조회
-        const partIds = [...new Set(partsData.map(p => p.part_id).filter(Boolean))]
-        const { data: partsInfo, error: partsInfoError } = await supabase
-          .from('lego_parts')
-          .select('part_num, name, part_img_url')
-          .in('part_num', partIds)
+        // 예비부품 제외
+        const nonSpareParts = partsData.filter(p => !p.is_spare)
 
-        if (partsInfoError) throw partsInfoError
+        // 부품 정보와 색상 정보를 병렬로 조회
+        const partIds = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
+        const colorIds = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
 
-        // 색상 정보 조회 (color_id가 0인 경우도 포함)
-        const colorIds = [...new Set(partsData.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
-        const { data: colorsInfo, error: colorsError } = await supabase
-          .from('lego_colors')
-          .select('color_id, name, rgb')
-          .in('color_id', colorIds)
+        const [partsInfoResult, colorsInfoResult] = await Promise.all([
+          partIds.length > 0 ? supabase
+            .from('lego_parts')
+            .select('part_num, name, part_img_url')
+            .in('part_num', partIds) : Promise.resolve({ data: [], error: null }),
+          colorIds.length > 0 ? supabase
+            .from('lego_colors')
+            .select('color_id, name, rgb')
+            .in('color_id', colorIds) : Promise.resolve({ data: [], error: null })
+        ])
 
-        if (colorsError) throw colorsError
+        if (partsInfoResult.error) throw partsInfoResult.error
+        if (colorsInfoResult.error) throw colorsInfoResult.error
+
+        const partsInfo = partsInfoResult.data || []
+        const colorsInfo = colorsInfoResult.data || []
 
         // 부품 이미지 URL 조회
         const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
         const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
 
+        // 버킷 URL 생성 헬퍼 함수
+        const getBucketImageUrl = (elementId, partId, colorId) => {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+          const bucketName = 'lego_parts_images'
+          const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
+          return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+        }
+
+        // Rebrickable CDN URL 생성 헬퍼 함수
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+
+        // 버킷 이미지 존재 확인 헬퍼 함수
+        const checkBucketImageExists = async (url) => {
+          try {
+            const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+            // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+            if (response.status === 400 || response.status === 404) {
+              return false
+            }
+            return response.ok
+          } catch {
+            return false
+          }
+        }
+
         // element_id 목록 수집
         const elementIds = [...new Set(partsData.map(p => p.element_id).filter(Boolean))].map(id => String(id))
         
-        // element_id 기반 이미지 배치 조회 (part_images + image_metadata)
+        // element_id 기반 이미지 배치 조회 (병렬 처리로 최적화)
         const elementImageMap = new Map()
         if (elementIds.length > 0) {
-          // 1. part_images에서 배치 조회
-          const { data: elementImages, error: elementImagesError } = await supabase
-            .from('part_images')
-            .select('element_id, uploaded_url')
-            .in('element_id', elementIds)
-            .not('uploaded_url', 'is', null)
-
-          if (!elementImagesError && elementImages) {
-            elementImages.forEach(img => {
-              if (img.element_id && img.uploaded_url) {
-                // JPG는 무시, WebP만 사용
-                if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                  elementImageMap.set(String(img.element_id), img.uploaded_url)
-                }
-              }
-            })
-          }
-
-          // 2. image_metadata 테이블에서도 배치 조회 (part_images에 없는 경우만)
-          const missingElementIds = elementIds.filter(id => !elementImageMap.has(id))
-          if (missingElementIds.length > 0) {
-            const { data: metadataImages, error: metadataError } = await supabase
+          // part_images와 image_metadata를 병렬로 조회
+          const [elementImagesResult, elementMetadataResult] = await Promise.all([
+            supabase
+              .from('part_images')
+              .select('element_id, uploaded_url')
+              .in('element_id', elementIds)
+              .not('uploaded_url', 'is', null),
+            supabase
               .from('image_metadata')
               .select('element_id, supabase_url')
-              .in('element_id', missingElementIds)
+              .in('element_id', elementIds)
               .not('supabase_url', 'is', null)
+          ])
 
-            if (!metadataError && metadataImages) {
-              metadataImages.forEach(img => {
-                if (img.element_id && img.supabase_url) {
-                  // JPG는 무시, WebP만 사용
-                  if (!img.supabase_url.toLowerCase().endsWith('.jpg')) {
-                    elementImageMap.set(String(img.element_id), img.supabase_url)
-                  }
+          // part_images 결과 처리
+          if (!elementImagesResult.error && elementImagesResult.data) {
+            for (const img of elementImagesResult.data) {
+              if (img.element_id && img.uploaded_url) {
+                const elementId = String(img.element_id)
+                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(elementId, img.uploaded_url)
                 }
-              })
+              }
             }
           }
+
+          // image_metadata 결과 처리 (part_images에 없는 것만)
+          if (!elementMetadataResult.error && elementMetadataResult.data) {
+            for (const img of elementMetadataResult.data) {
+              if (img.element_id && img.supabase_url) {
+                const elementId = String(img.element_id)
+                if (!elementImageMap.has(elementId)) {
+                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(elementId, img.supabase_url)
+                  }
+                }
+              }
+            }
+          }
+
+          // 버킷 직접 확인은 제거 (DB에서 이미 확인했으므로)
         }
 
-        // part_id + color_id 기반 이미지 배치 조회 (element_id가 없는 부품용)
+        // part_id + color_id 기반 이미지 배치 조회
         const partColorImageMap = new Map()
-        const itemsWithoutElementId = partsData.filter(p => !p.element_id)
-        if (itemsWithoutElementId.length > 0) {
-          const partColorKeys = itemsWithoutElementId.map(p => `${p.part_id}_${p.color_id}`)
-          const uniquePartColorPairs = [...new Set(partColorKeys)]
-          
-          // part_id와 color_id 목록 추출
-          const partColorPairs = uniquePartColorPairs.map(key => {
-            const [partId, colorId] = key.split('_')
-            return { part_id: partId, color_id: parseInt(colorId) }
-          })
+        const partIdsForImages = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
+        const colorIdsForImages = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
 
-          if (partColorPairs.length > 0) {
-            // part_images에서 part_id + color_id로 배치 조회
-            const partIds = [...new Set(partColorPairs.map(p => p.part_id))]
-            const colorIds = [...new Set(partColorPairs.map(p => p.color_id))]
-            
-            const { data: partColorImages, error: partColorError } = await supabase
+        if (partIdsForImages.length > 0 && colorIdsForImages.length > 0) {
+          // part_images와 image_metadata를 병렬로 조회
+          const [partImagesResult, metadataImagesResult] = await Promise.all([
+            supabase
               .from('part_images')
               .select('part_id, color_id, uploaded_url')
-              .in('part_id', partIds)
-              .in('color_id', colorIds)
-              .not('uploaded_url', 'is', null)
+              .in('part_id', partIdsForImages)
+              .in('color_id', colorIdsForImages)
+              .not('uploaded_url', 'is', null),
+            supabase
+              .from('image_metadata')
+              .select('part_num, color_id, supabase_url')
+              .in('part_num', partIdsForImages)
+              .in('color_id', colorIdsForImages)
+              .not('supabase_url', 'is', null)
+          ])
 
-            if (!partColorError && partColorImages) {
-              partColorImages.forEach(img => {
+          // part_images 결과 처리
+          if (!partImagesResult.error && partImagesResult.data) {
+            for (const img of partImagesResult.data) {
+              if (img.part_id && img.color_id !== null && img.color_id !== undefined && img.uploaded_url) {
                 const key = `${img.part_id}_${img.color_id}`
-                if (!partColorImageMap.has(key)) {
-                  // JPG는 무시, WebP만 사용
-                  if (!img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                    partColorImageMap.set(key, img.uploaded_url)
-                  }
+                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  partColorImageMap.set(key, img.uploaded_url)
                 }
-              })
+              }
             }
           }
+
+          // image_metadata 결과 처리 (part_images에 없는 것만)
+          if (!metadataImagesResult.error && metadataImagesResult.data) {
+            for (const img of metadataImagesResult.data) {
+              if (img.part_num && img.color_id !== null && img.color_id !== undefined && img.supabase_url) {
+                const key = `${img.part_num}_${img.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    partColorImageMap.set(key, img.supabase_url)
+                  }
+                }
+              }
+            }
+          }
+
+          // 버킷 직접 확인은 제거 (DB에서 이미 확인했으므로)
         }
 
-        // 부품 데이터와 이미지 URL 매핑
-        const partsWithImages = partsData.map((part) => {
+        // 부품 데이터와 이미지 URL 매핑 (동기 처리로 최적화)
+        const partsWithImages = nonSpareParts.map((part) => {
           const partInfo = partsInfoMap.get(part.part_id)
           const colorInfo = colorsInfoMap.get(part.color_id)
 
-          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
+          // 이미지 URL 결정: element_id 우선, 없으면 part_id + color_id
           let imageUrl = null
           if (part.element_id && elementImageMap.has(String(part.element_id))) {
             imageUrl = elementImageMap.get(String(part.element_id))
-          } else if (!part.element_id) {
+          }
+          
+          if (!imageUrl && part.part_id && part.color_id !== null && part.color_id !== undefined) {
             const key = `${part.part_id}_${part.color_id}`
             if (partColorImageMap.has(key)) {
               imageUrl = partColorImageMap.get(key)
             }
           }
 
-          // element_id 실패 시 part_img_url 사용 (fallback)
-          if (!imageUrl && partInfo?.part_img_url) {
-            imageUrl = `/api/upload/proxy-image?url=${encodeURIComponent(partInfo.part_img_url)}`
+          // 버킷에도 없으면 Rebrickable CDN으로 폴백
+          if (!imageUrl) {
+            const elementId = part.element_id ? String(part.element_id) : null
+            imageUrl = getRebrickableCdnUrl(elementId, part.part_id, part.color_id)
+            if (!imageUrl && elementId) {
+              imageUrl = `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
+            }
           }
 
           return {
@@ -766,7 +1267,57 @@ export default {
           }
         })
 
-        setParts.value = partsWithImages
+        // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
+        const isSticker = (item) => {
+          const partName = (item.part_name || '').toLowerCase()
+          const partId = (item.part_id || '').toLowerCase()
+          return partName.includes('sticker') || 
+                 partName.includes('스티커') ||
+                 partId.includes('sticker') ||
+                 partId.includes('stk-')
+        }
+
+        const isMinifigure = (item) => {
+          const partId = item.part_id || ''
+          return String(partId).toLowerCase().startsWith('fig-')
+        }
+
+        const sortParts = (partsList) => {
+          return [...partsList].sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
+        }
+
+        setParts.value = sortParts(partsWithImages)
       } catch (err) {
         setPartsError.value = err.message || '부품 목록을 불러오는 중 오류가 발생했습니다.'
         console.error('부품 목록 조회 실패:', err)
@@ -871,7 +1422,18 @@ export default {
       return '#ffffff' // 기본값 (흰색 텍스트)
     }
 
-    const formatColorLabel = (colorName, colorId) => {
+    // CDN URL인지 확인하는 함수
+    const isCdnUrl = (url) => {
+      if (!url) return false
+      return url.includes('cdn.rebrickable.com')
+    }
+
+    const formatColorLabel = (colorName, colorId, partId = null) => {
+      // 미니피규어인 경우 (part_id가 fig-로 시작)
+      if (partId && String(partId).toLowerCase().startsWith('fig-')) {
+        return 'Any Color'
+      }
+      
       // colorName이 있으면 우선 사용 (colorId가 0이어도 colorName이 있으면 표시)
       if (colorName) {
         const normalized = String(colorName).trim()
@@ -928,9 +1490,54 @@ export default {
 
     const handlePartImageError = async (event) => {
       const img = event.target
+      const originalSrc = img.src
       const partCard = img.closest('.alternative-part-card')
+      
+      console.log('[PartToSetSearch] 이미지 로드 실패:', { originalSrc, hasPartCard: !!partCard })
+      
       if (!partCard) {
-        // 검색 결과 이미지인 경우
+        // 검색 결과 이미지인 경우 - Rebrickable CDN으로 폴백
+        console.log('[PartToSetSearch] 검색 결과 이미지 로드 실패, CDN 폴백 시도')
+        if (searchResult.value && originalSrc) {
+          console.log('[PartToSetSearch] searchResult.value:', searchResult.value)
+          const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+            // elementId를 문자열로 변환하여 처리 (jpg 사용)
+            if (elementId) {
+              return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+            } else if (partId && colorId !== null && colorId !== undefined) {
+              return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+            } else if (partId) {
+              return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+            }
+            return null
+          }
+          
+          const cdnUrl = getRebrickableCdnUrl(
+            searchResult.value.element_id,
+            searchResult.value.part_id,
+            searchResult.value.color_id
+          )
+          
+          console.log('[PartToSetSearch] CDN 폴백 URL:', { 
+            element_id: searchResult.value.element_id,
+            part_id: searchResult.value.part_id,
+            color_id: searchResult.value.color_id,
+            cdnUrl,
+            originalSrc,
+            willRetry: cdnUrl && cdnUrl !== originalSrc
+          })
+          
+          if (cdnUrl && cdnUrl !== originalSrc) {
+            console.log('[PartToSetSearch] CDN URL로 재시도:', cdnUrl)
+            img.src = cdnUrl
+            return
+          } else {
+            console.log('[PartToSetSearch] CDN URL 재시도 불가:', { cdnUrl, originalSrc })
+          }
+        } else {
+          console.log('[PartToSetSearch] searchResult.value 없음 또는 originalSrc 없음')
+        }
+        console.log('[PartToSetSearch] 이미지 숨김 처리')
         img.style.display = 'none'
         return
       }
@@ -980,6 +1587,291 @@ export default {
       handleSyncConfirm()
     }
 
+    // 부품 정보 모달 관련 함수
+    const showPartInfo = async (part) => {
+      if (!part) return
+
+      selectedPart.value = {
+        ...part,
+        part_img_url: part.image_url || null
+      }
+      showPartInfoModal.value = true
+
+      partSetsLoading.value = true
+      try {
+        partSets.value = await findSetsByPart(part.part_id, part.color_id)
+      } catch (err) {
+        partSets.value = []
+      } finally {
+        partSetsLoading.value = false
+      }
+
+      alternativePartsLoading.value = true
+      try {
+        alternativeParts.value = await findAlternativeParts(part.part_id, part.color_id)
+      } catch (err) {
+        alternativeParts.value = []
+      } finally {
+        alternativePartsLoading.value = false
+      }
+    }
+
+    const closePartInfoModal = () => {
+      showPartInfoModal.value = false
+      selectedPart.value = null
+      partSets.value = []
+      alternativeParts.value = []
+    }
+
+    const handleSetRowClick = async (set) => {
+      if (!set || !set.set_num) return
+      closePartInfoModal()
+      // 세트 번호로 검색하도록 변경 (부품 정보 모달에서 세트 클릭 시)
+      // 여기서는 부품 정보만 표시하므로 모달만 닫기
+    }
+
+    const handleAlternativePartClick = (alt) => {
+      if (!alt) return
+      closePartInfoModal()
+      if (alt.colors && alt.colors.length > 0 && alt.colors[0].element_id) {
+        searchByAlternativeElementId(alt.colors[0].element_id)
+      }
+    }
+
+    // 최근 등록 부품 로드
+    const loadRecentParts = async () => {
+      try {
+        // part_images 테이블에서 최근 등록된 부품 조회 (created_at 기준)
+        const { data: recentImages, error: recentImagesError } = await supabase
+          .from('part_images')
+          .select('part_id, color_id, element_id, uploaded_url, created_at')
+          .not('uploaded_url', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(200) // 최대 200개만 조회
+
+        if (recentImagesError) throw recentImagesError
+
+        if (!recentImages || recentImages.length === 0) {
+          recentParts.value = []
+          return
+        }
+
+        // 부품 정보 조회
+        const partIds = [...new Set(recentImages.map(img => img.part_id).filter(Boolean))]
+        const { data: partsInfo, error: partsInfoError } = await supabase
+          .from('lego_parts')
+          .select('part_num, name')
+          .in('part_num', partIds)
+
+        if (partsInfoError) throw partsInfoError
+
+        // 색상 정보 조회
+        const colorIds = [...new Set(recentImages.map(img => img.color_id).filter(id => id !== null && id !== undefined))]
+        const { data: colorsInfo, error: colorsError } = await supabase
+          .from('lego_colors')
+          .select('color_id, name, rgb')
+          .in('color_id', colorIds)
+
+        if (colorsError) throw colorsError
+
+        const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
+        const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
+
+        // 버킷 URL 생성 헬퍼 함수
+        const getBucketImageUrl = (elementId, partId, colorId) => {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+          const bucketName = 'lego_parts_images'
+          const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
+          return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
+        }
+
+        // Rebrickable CDN URL 생성 헬퍼 함수
+        const getRebrickableCdnUrl = (elementId, partId, colorId) => {
+          if (elementId) {
+            return `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
+          } else if (partId && colorId !== null && colorId !== undefined) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+          } else if (partId) {
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+          }
+          return null
+        }
+
+        // 버킷 이미지 존재 확인 헬퍼 함수
+        const checkBucketImageExists = async (url) => {
+          try {
+            const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+            // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+            if (response.status === 400 || response.status === 404) {
+              return false
+            }
+            return response.ok
+          } catch {
+            return false
+          }
+        }
+
+        // 부품 데이터 구성
+        const partsWithData = await Promise.all(recentImages.map(async (img) => {
+          const partInfo = partsInfoMap.get(img.part_id)
+          const colorInfo = colorsInfoMap.get(img.color_id)
+          
+          let imageUrl = null
+          
+          // uploaded_url이 버킷 URL인지 확인
+          if (img.uploaded_url) {
+            const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+            if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+              imageUrl = img.uploaded_url
+            } else if (!isBucketUrl) {
+              // CDN/API URL이면 버킷에 저장된 이미지 확인
+              const bucketUrl = img.element_id
+                ? getBucketImageUrl(img.element_id, img.part_id, img.color_id)
+                : getBucketImageUrl(null, img.part_id, img.color_id)
+              const exists = await checkBucketImageExists(bucketUrl)
+              if (exists) {
+                imageUrl = bucketUrl
+              }
+            }
+          }
+
+          // 버킷 직접 확인
+          if (!imageUrl) {
+            const bucketUrl = img.element_id
+              ? getBucketImageUrl(img.element_id, img.part_id, img.color_id)
+              : getBucketImageUrl(null, img.part_id, img.color_id)
+            const exists = await checkBucketImageExists(bucketUrl)
+            if (exists) {
+              imageUrl = bucketUrl
+            }
+          }
+
+          // 버킷에도 없으면 Rebrickable CDN으로 폴백
+          if (!imageUrl) {
+            imageUrl = getRebrickableCdnUrl(img.element_id, img.part_id, img.color_id)
+          }
+
+          return {
+            part_id: img.part_id,
+            color_id: img.color_id,
+            element_id: img.element_id,
+            part_name: partInfo?.name || img.part_id,
+            color_name: colorInfo ? (colorInfo.name || null) : null,
+            color_rgb: colorInfo?.rgb || null,
+            image_url: imageUrl
+          }
+        }))
+
+        // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
+        const isSticker = (item) => {
+          const partName = (item.part_name || '').toLowerCase()
+          const partId = (item.part_id || '').toLowerCase()
+          return partName.includes('sticker') || 
+                 partName.includes('스티커') ||
+                 partId.includes('sticker') ||
+                 partId.includes('stk-')
+        }
+
+        const isMinifigure = (item) => {
+          const partId = item.part_id || ''
+          return String(partId).toLowerCase().startsWith('fig-')
+        }
+
+        const sortParts = (partsList) => {
+          return [...partsList].sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
+        }
+
+        recentParts.value = sortParts(partsWithData)
+      } catch (err) {
+        console.error('최근 등록 부품 로드 실패:', err)
+        recentParts.value = []
+      }
+    }
+
+    // 최근 등록 부품 페이지네이션
+    const recentPartsTotalPages = computed(() => {
+      return Math.ceil(recentParts.value.length / recentPartsItemsPerPage)
+    })
+
+    const paginatedRecentParts = computed(() => {
+      const start = (recentPartsCurrentPage.value - 1) * recentPartsItemsPerPage
+      const end = start + recentPartsItemsPerPage
+      return recentParts.value.slice(start, end)
+    })
+
+    const recentPartsVisiblePages = computed(() => {
+      const pages = []
+      const total = recentPartsTotalPages.value
+      const current = recentPartsCurrentPage.value
+      
+      if (total <= 7) {
+        for (let i = 1; i <= total; i++) {
+          pages.push(i)
+        }
+      } else {
+        if (current <= 3) {
+          for (let i = 1; i <= 5; i++) {
+            pages.push(i)
+          }
+          pages.push('...')
+          pages.push(total)
+        } else if (current >= total - 2) {
+          pages.push(1)
+          pages.push('...')
+          for (let i = total - 4; i <= total; i++) {
+            pages.push(i)
+          }
+        } else {
+          pages.push(1)
+          pages.push('...')
+          for (let i = current - 1; i <= current + 1; i++) {
+            pages.push(i)
+          }
+          pages.push('...')
+          pages.push(total)
+        }
+      }
+      
+      return pages
+    })
+
+    const goToRecentPartsPage = (page) => {
+      if (page < 1 || page > recentPartsTotalPages.value || page === recentPartsCurrentPage.value) return
+      recentPartsCurrentPage.value = page
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
     // 사용자 변경 시 매장 인벤토리 로드
     watch(user, async (newUser) => {
       if (newUser) {
@@ -998,6 +1890,7 @@ export default {
       if (user.value) {
         await loadStoreInventory()
       }
+      await loadRecentParts()
     })
 
     return {
@@ -1034,7 +1927,24 @@ export default {
       setPartsLoading,
       setPartsError,
       formatSetDisplay,
-      formatSetNumber
+      formatSetNumber,
+      recentParts,
+      paginatedRecentParts,
+      recentPartsCurrentPage,
+      recentPartsTotalPages,
+      recentPartsVisiblePages,
+      goToRecentPartsPage,
+      showPartInfo,
+      closePartInfoModal,
+      showPartInfoModal,
+      selectedPart,
+      partSets,
+      partSetsLoading,
+      alternativeParts,
+      alternativePartsLoading,
+      handleSetRowClick,
+      handleAlternativePartClick,
+      isCdnUrl
     }
   }
 }
@@ -1251,6 +2161,10 @@ export default {
   font-size: 1.5rem;
   font-weight: 700;
   color: #111827;
+}
+
+.recent-parts-section {
+  margin-top: 2rem;
 }
 
 .close-result-button {
@@ -2217,6 +3131,33 @@ export default {
   border-radius: 4px;
 }
 
+.cdn-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.part-image-container .cdn-badge {
+  top: 4px;
+  right: 4px;
+  padding: 3px 6px;
+  font-size: 0.65rem;
+}
+
+.part-image-section .cdn-badge {
+  top: 8px;
+  right: 8px;
+}
+
 .part-card .quantity-section {
   display: flex;
   align-items: center;
@@ -2230,6 +3171,312 @@ export default {
   color: white;
   border-radius: 8px;
   font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.pagination-button {
+  padding: 0.5rem 1rem;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pagination-button.disabled,
+.pagination-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-numbers {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pagination-number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pagination-number.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+.pagination-ellipsis {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.part-info-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.part-info-btn:hover {
+  color: #2563eb;
+  background: #f3f4f6;
+}
+
+.part-info-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.part-info-modal {
+  background: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.part-info-modal .modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-radius: 12px 12px 0 0;
+}
+
+.part-info-modal .modal-header h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.modal-close-btn:hover {
+  background: #f3f4f6;
+  color: #111827;
+}
+
+.part-info-modal .modal-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.part-info-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.info-section h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 0.5rem 0;
+}
+
+.info-section h5 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 0.75rem 0;
+}
+
+.part-color-info {
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.loading-text,
+.empty-text {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  padding: 1rem;
+  text-align: center;
+}
+
+.sets-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.set-item:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+.set-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #111827;
+}
+
+.set-num {
+  font-size: 0.75rem;
+  color: #6b7280;
+  background: #ffffff;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.alternatives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.alternative-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.alternative-item:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  transform: translateY(-1px);
+}
+
+.alt-part-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.alt-part-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #111827;
+}
+
+.alt-part-id {
+  font-size: 0.8125rem;
+  color: #6b7280;
+}
+
+.alt-colors {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.alt-color-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.color-chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.alt-color-name {
+  font-size: 0.8125rem;
+  color: #374151;
+}
+
+.alt-element-id {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-left: auto;
+}
+
+.element-id-display {
+  font-size: 1rem;
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+}
+
+.element-id-display strong {
+  color: #111827;
   font-weight: 600;
 }
 

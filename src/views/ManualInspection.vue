@@ -332,16 +332,22 @@
                         </div>
 
                         <div class="card-body">
-                          <div class="part-image-section">
+                          <div class="part-image-section" style="position: relative;">
                             <img
                               v-if="partImageUrls[displayedItems[0].id]"
                               :src="partImageUrls[displayedItems[0].id]"
                               :alt="`${displayedItems[0].part_name} (${displayedItems[0].color_name})`"
                               class="part-image"
                               @error="handleImageError($event)"
-                              @load="handleImageLoad($event)"
+                              @load="(e) => { if (e && e.target) { displayedItems[0]._currentSrc = e.target.src; handleImageLoad(e); } }"
                             />
                             <div v-else class="no-part-image">이미지 없음</div>
+                            <span 
+                              v-if="partImageUrls[displayedItems[0].id] && (isCdnUrl(partImageUrls[displayedItems[0].id]) || (displayedItems[0]._currentSrc && isCdnUrl(displayedItems[0]._currentSrc)))"
+                              class="cdn-badge"
+                            >
+                              CDN
+                            </span>
                           </div>
 
                           <div class="quantity-section">
@@ -354,14 +360,7 @@
                                 <span>−</span>
                               </button>
                               <div class="qty-display">
-                                <input 
-                                  type="number"
-                                  :value="displayedItems[0].checked_count"
-                                  @input="updateItemCount(displayedItems[0], $event.target.value)"
-                                  :max="displayedItems[0].total_count"
-                                  min="0"
-                                  class="qty-input"
-                                />
+                                <span class="qty-current">{{ displayedItems[0].checked_count }}</span>
                                 <span class="qty-divider">/</span>
                                 <span class="qty-total">{{ displayedItems[0].total_count }}</span>
                               </div>
@@ -381,7 +380,7 @@
                                 @click="setItemStatus(displayedItems[0], 'checked')"
                                 :class="['status-button', 'checked', { active: displayedItems[0].status === 'checked' }]"
                               >
-                                정상확인
+                                정상
                               </button>
                               <button
                                 @click="setItemStatus(displayedItems[0], 'missing')"
@@ -472,16 +471,22 @@
                       </div>
 
                     <div class="card-body">
-                      <div class="part-image-section">
+                      <div class="part-image-section" style="position: relative;">
                         <img
                           v-if="partImageUrls[item.id]"
                           :src="partImageUrls[item.id]"
                           :alt="`${item.part_name} (${item.color_name})`"
                           class="part-image"
                           @error="handleImageError($event)"
-                          @load="handleImageLoad($event)"
+                          @load="(e) => { if (e && e.target) { item._currentSrc = e.target.src; handleImageLoad(e); } }"
                         />
                         <div v-else class="no-part-image">이미지 없음</div>
+                        <span 
+                          v-if="partImageUrls[item.id] && (isCdnUrl(partImageUrls[item.id]) || (item._currentSrc && isCdnUrl(item._currentSrc)))"
+                          class="cdn-badge"
+                        >
+                          CDN
+                        </span>
                       </div>
 
                       <div class="quantity-section">
@@ -494,14 +499,7 @@
                             <span>−</span>
                           </button>
                           <div class="qty-display">
-                            <input 
-                              type="number"
-                              :value="item.checked_count"
-                              @input="updateItemCount(item, $event.target.value)"
-                              :max="item.total_count"
-                              min="0"
-                              class="qty-input"
-                            />
+                            <span class="qty-current">{{ item.checked_count }}</span>
                             <span class="qty-divider">/</span>
                             <span class="qty-total">{{ item.total_count }}</span>
                           </div>
@@ -521,7 +519,7 @@
                             @click="setItemStatus(item, 'checked')"
                             :class="['status-button', 'checked', { active: item.status === 'checked' }]"
                           >
-                            정상확인
+                            정상
                           </button>
                           <button
                             @click="setItemStatus(item, 'missing')"
@@ -582,7 +580,7 @@
                 <strong>{{ selectedPart.element_id }}</strong>
               </div>
               <h4>{{ selectedPart.part_name }}</h4>
-              <p class="part-color-info">{{ formatColorLabel(selectedPart.color_name, selectedPart.color_id) }}</p> <!-- // 🔧 수정됨 -->
+              <p class="part-color-info">{{ formatColorLabel(selectedPart.color_name, selectedPart.color_id, selectedPart.part_id) }}</p> <!-- // 🔧 수정됨 -->
             </div>
 
             <!-- 1. 부품으로 세트 찾기 -->
@@ -635,7 +633,7 @@
                         class="color-chip"
                         :style="{ backgroundColor: color.rgb ? (String(color.rgb).startsWith('#') ? color.rgb : `#${color.rgb}`) : '#ccc' }"
                       ></span>
-                      <span class="alt-color-name">{{ formatColorLabel(color.name, color.color_id) }}</span>
+                      <span class="alt-color-name">{{ formatColorLabel(color.name, color.color_id, alt.part_id) }}</span>
                       <span v-if="color.element_id" class="alt-element-id">Element ID: {{ color.element_id }}</span>
                     </div>
                   </div>
@@ -720,7 +718,7 @@ export default {
     const syncErrorToast = ref('')
     let syncErrorTimer = null
     const statusFilter = ref('all')
-    const selectedSortMode = ref('sequence')
+    const selectedSortMode = ref('color')
     const isOffline = ref(!navigator.onLine) // 🔧 수정됨
     const inspectionMode = ref('single') // 🔧 수정됨: 'single' 또는 'grid'
     const currentItemIndex = ref(0) // 🔧 수정됨
@@ -1009,12 +1007,23 @@ export default {
       return str.replace(/-1$/, '') // 🔧 수정됨
     } // 🔧 수정됨
 
+    // CDN URL인지 확인하는 함수
+    const isCdnUrl = (url) => {
+      if (!url) return false
+      return url.includes('cdn.rebrickable.com')
+    }
+
     const displaySetNumber = (setNum) => { // 🔧 수정됨
       const normalized = normalizeSetNumber(setNum) // 🔧 수정됨
       return formatSetNumber(normalized) // 🔧 수정됨
     } // 🔧 수정됨
 
-    const formatColorLabel = (colorName, colorId) => { // 🔧 수정됨
+    const formatColorLabel = (colorName, colorId, partId = null) => { // 🔧 수정됨
+      // 미니피규어인 경우 (part_id가 fig-로 시작)
+      if (partId && String(partId).toLowerCase().startsWith('fig-')) {
+        return 'Any Color'
+      }
+      
       if (colorName) { // 🔧 수정됨
         const normalized = String(colorName).trim() // 🔧 수정됨
         const lower = normalized.toLowerCase() // 🔧 수정됨
@@ -1091,6 +1100,25 @@ export default {
     }
 
 
+    // 스티커 판별 함수
+    const isSticker = (item) => {
+      const partName = (item.part_name || '').toLowerCase()
+      const shapeTag = (item.shape_tag || '').toLowerCase()
+      const partId = (item.part_id || '').toLowerCase()
+      
+      return partName.includes('sticker') || 
+             partName.includes('스티커') ||
+             shapeTag === 'sticker' ||
+             partId.includes('sticker') ||
+             partId.includes('stk-')
+    }
+
+    // 피규어 판별 함수
+    const isMinifigure = (item) => {
+      const partId = item.part_id || ''
+      return String(partId).toLowerCase().startsWith('fig-')
+    }
+
     const displayedItems = computed(() => {
       const filtered = statusFilter.value === 'all'
         ? items.value
@@ -1100,37 +1128,137 @@ export default {
 
       switch (selectedSortMode.value) {
         case 'color':
-          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            // 우선순위 계산: 일반 부품=0, 피규어=1, 스티커=2
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'shape':
-          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+          })
           break
         case 'size':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             if (aSize === bSize) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aSize - bSize
           })
           break
         case 'rarity':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
             const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
             if (aFreq === bFreq) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aFreq - bFreq
           })
           break
         case 'name':
-          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'sequence':
         default:
-          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+          })
           break
       }
 
@@ -1160,37 +1288,137 @@ export default {
 
       switch (selectedSortMode.value) {
         case 'color':
-          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            // 우선순위 계산: 일반 부품=0, 피규어=1, 스티커=2
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'shape':
-          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+          })
           break
         case 'size':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             if (aSize === bSize) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aSize - bSize
           })
           break
         case 'rarity':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
             const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
             if (aFreq === bFreq) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aFreq - bFreq
           })
           break
         case 'name':
-          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'sequence':
         default:
-          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+          })
           break
       }
 
@@ -1209,37 +1437,129 @@ export default {
       
       switch (selectedSortMode.value) {
         case 'color':
-          sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            if (aIsSticker !== bIsSticker) {
+              return aIsSticker ? 1 : -1
+            }
+            // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'shape':
-          sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+          })
           break
         case 'size':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
             if (aSize === bSize) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aSize - bSize
           })
           break
         case 'rarity':
           sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
             const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
             const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
             if (aFreq === bFreq) {
-              return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+              return (a.part_name || '').localeCompare(b.part_name || '')
             }
             return aFreq - bFreq
           })
           break
         case 'name':
-          sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.part_name || '').localeCompare(b.part_name || '')
+          })
           break
         case 'sequence':
         default:
-          sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+          sorted.sort((a, b) => {
+            // 우선순위: 일반 부품(0) > 피규어(1) > 스티커(2)
+            const aIsSticker = isSticker(a)
+            const bIsSticker = isSticker(b)
+            const aIsMinifigure = isMinifigure(a)
+            const bIsMinifigure = isMinifigure(b)
+            
+            const aPriority = aIsSticker ? 2 : (aIsMinifigure ? 1 : 0)
+            const bPriority = bIsSticker ? 2 : (bIsMinifigure ? 1 : 0)
+            
+            if (aPriority !== bPriority) {
+              return aPriority - bPriority
+            }
+            return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+          })
           break
       }
       
@@ -1749,37 +2069,94 @@ export default {
           // 정렬 로직 적용 (displayedItems와 동일)
           switch (selectedSortMode.value) {
             case 'color':
-              sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+              sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
+                // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+              })
               break
             case 'shape':
-              sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+              sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
+                return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+              })
               break
             case 'size':
               sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
                 const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
                 const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
                 if (aSize === bSize) {
-                  return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                  return (a.part_name || '').localeCompare(b.part_name || '')
                 }
                 return aSize - bSize
               })
               break
             case 'rarity':
               sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
                 const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
                 const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
                 if (aFreq === bFreq) {
-                  return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                  return (a.part_name || '').localeCompare(b.part_name || '')
                 }
                 return aFreq - bFreq
               })
               break
             case 'name':
-              sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+              sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
+                return (a.part_name || '').localeCompare(b.part_name || '')
+              })
               break
             case 'sequence':
             default:
-              sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+              sorted.sort((a, b) => {
+                const aIsSticker = isSticker(a)
+                const bIsSticker = isSticker(b)
+                if (aIsSticker !== bIsSticker) {
+                  return aIsSticker ? 1 : -1
+                }
+                return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+              })
               break
           }
           // 현재 인덱스 이후의 다음 pending 아이템 찾기
@@ -1846,37 +2223,94 @@ export default {
         // 정렬 로직 적용 (displayedItems와 동일)
         switch (selectedSortMode.value) {
           case 'color':
-            sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+            })
             break
           case 'shape':
-            sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+            })
             break
           case 'size':
             sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
               const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aSize - bSize
             })
             break
           case 'rarity':
             sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
               const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
               const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
               if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aFreq - bFreq
             })
             break
           case 'name':
-            sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.part_name || '').localeCompare(b.part_name || '')
+            })
             break
           case 'sequence':
           default:
-            sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+            })
             break
         }
         // 현재 인덱스 이후의 다음 pending 아이템 찾기
@@ -1931,37 +2365,94 @@ export default {
         // 정렬 로직 적용 (displayedItems와 동일)
         switch (selectedSortMode.value) {
           case 'color':
-            sorted.sort((a, b) => (a.color_name || '').localeCompare(b.color_name || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              // 1차: 색상명
+            const colorCompare = (a.color_name || '').localeCompare(b.color_name || '')
+            if (colorCompare !== 0) {
+              return colorCompare
+            }
+            // 2차: element_id (숫자 우선, 없으면 문자열 비교)
+            const aElementId = a.element_id
+            const bElementId = b.element_id
+            if (aElementId !== bElementId) {
+              // 둘 다 숫자면 숫자 비교, 아니면 문자열 비교
+              const aNum = typeof aElementId === 'number' ? aElementId : (aElementId ? parseInt(String(aElementId)) : null)
+              const bNum = typeof bElementId === 'number' ? bElementId : (bElementId ? parseInt(String(bElementId)) : null)
+              if (aNum !== null && bNum !== null && !isNaN(aNum) && !isNaN(bNum)) {
+                return aNum - bNum
+              }
+              // 숫자 변환 실패 시 문자열 비교
+              return String(aElementId || '').localeCompare(String(bElementId || ''))
+            }
+            // 3차: 부품명 (같은 element_id 내에서)
+            return (a.part_name || '').localeCompare(b.part_name || '')
+            })
             break
           case 'shape':
-            sorted.sort((a, b) => (a.shape_tag || '').localeCompare(b.shape_tag || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.shape_tag || '').localeCompare(b.shape_tag || '')
+            })
             break
           case 'size':
             sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
               const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aSize - bSize
             })
             break
           case 'rarity':
             sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
               const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
               const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
               if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aFreq - bFreq
             })
             break
           case 'name':
-            sorted.sort((a, b) => (a.part_name || '').localeCompare(b.part_name || '', 'ko'))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.part_name || '').localeCompare(b.part_name || '')
+            })
             break
           case 'sequence':
           default:
-            sorted.sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+            sorted.sort((a, b) => {
+              const aIsSticker = isSticker(a)
+              const bIsSticker = isSticker(b)
+              if (aIsSticker !== bIsSticker) {
+                return aIsSticker ? 1 : -1
+              }
+              return (a.sequence_index ?? 0) - (b.sequence_index ?? 0)
+            })
             break
         }
         // 현재 인덱스 이후의 다음 pending 아이템 찾기 (checked가 아닌 아이템)
@@ -2060,7 +2551,7 @@ export default {
               const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aSize - bSize
             })
@@ -2070,7 +2561,7 @@ export default {
               const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
               const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
               if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aFreq - bFreq
             })
@@ -2133,7 +2624,7 @@ export default {
               const aSize = a.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               const bSize = b.expected_stud_count ?? Number.MAX_SAFE_INTEGER
               if (aSize === bSize) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aSize - bSize
             })
@@ -2143,7 +2634,7 @@ export default {
               const aFreq = a.usage_frequency ?? Number.MAX_SAFE_INTEGER
               const bFreq = b.usage_frequency ?? Number.MAX_SAFE_INTEGER
               if (aFreq === bFreq) {
-                return (a.part_name || '').localeCompare(b.part_name || '', 'ko')
+                return (a.part_name || '').localeCompare(b.part_name || '')
               }
               return aFreq - bFreq
             })
@@ -2201,7 +2692,11 @@ export default {
               const fileName = `${String(item.element_id)}.webp`
               const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
               try {
-                const response = await fetch(directUrl, { method: 'HEAD' })
+                const response = await fetch(directUrl, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
+                // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
+                if (response.status === 400 || response.status === 404) {
+                  continue
+                }
                 if (response.ok) {
                   imageUrlMap[item.id] = directUrl
                 }
@@ -2218,9 +2713,9 @@ export default {
                 const { getElement } = useRebrickable()
                 const elementData = await getElement(item.element_id)
                 if (elementData?.element_img_url) {
-                  imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.element_img_url)}`
+                  imageUrlMap[item.id] = elementData.element_img_url
                 } else if (elementData?.part_img_url) {
-                  imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(elementData.part_img_url)}`
+                  imageUrlMap[item.id] = elementData.part_img_url
                 }
               } catch (elementErr) {
                 console.warn(`⚠️ element_id ${item.element_id} 이미지 조회 실패:`, elementErr)
@@ -2231,7 +2726,7 @@ export default {
           // 4. element_id 실패 시 part_img_url 사용 (fallback)
           itemsWithElementId.forEach(item => {
             if (!imageUrlMap[item.id] && item.part_img_url) {
-              imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(item.part_img_url)}`
+              imageUrlMap[item.id] = item.part_img_url
             }
           })
         }
@@ -2266,7 +2761,7 @@ export default {
           // Rebrickable URL 사용
           partKeys.forEach(item => {
             if (!imageUrlMap[item.id] && item.part_img_url) {
-              imageUrlMap[item.id] = `/api/upload/proxy-image?url=${encodeURIComponent(item.part_img_url)}`
+              imageUrlMap[item.id] = item.part_img_url
             }
           })
 
@@ -2310,7 +2805,9 @@ export default {
 
     const handleImageLoad = (event) => {
       // 이미지 로드 성공 시 표시
-      event.target.style.display = 'block'
+      if (event && event.target) {
+        event.target.style.display = 'block'
+      }
     }
 
     // items가 변경될 때 이미지 URL 로드 및 색상 RGB 캐시 업데이트
@@ -2347,6 +2844,60 @@ export default {
             }
           }
         }
+      }
+    }, { immediate: true })
+
+    // 단일검수 모드에서 부품 이미지 출력 영역 스타일 디버깅
+    watch([() => inspectionMode.value, () => displayedItems.value], async () => {
+      if (inspectionMode.value === 'single' && displayedItems.value.length > 0) {
+        await nextTick()
+        // 약간의 지연을 두어 DOM이 완전히 렌더링된 후 확인
+        setTimeout(() => {
+          const partImageSection = document.querySelector('.part-card-wrapper .part-image-section')
+          if (partImageSection) {
+            const computedStyle = window.getComputedStyle(partImageSection)
+            const partImage = partImageSection.querySelector('.part-image')
+            const partImageStyle = partImage ? window.getComputedStyle(partImage) : null
+            const partImageNatural = partImage ? {
+              naturalWidth: partImage.naturalWidth,
+              naturalHeight: partImage.naturalHeight,
+              clientWidth: partImage.clientWidth,
+              clientHeight: partImage.clientHeight,
+              offsetWidth: partImage.offsetWidth,
+              offsetHeight: partImage.offsetHeight
+            } : null
+            
+            console.log('[ManualInspection] 단일검수 모드 - 부품 이미지 출력 영역 스타일:', {
+              inspectionMode: inspectionMode.value,
+              element: partImageSection,
+              classList: Array.from(partImageSection.classList),
+              parentClassList: partImageSection.parentElement ? Array.from(partImageSection.parentElement.classList) : [],
+              sectionStyles: {
+                padding: computedStyle.padding,
+                paddingTop: computedStyle.paddingTop,
+                paddingBottom: computedStyle.paddingBottom,
+                minHeight: computedStyle.minHeight,
+                height: computedStyle.height,
+                display: computedStyle.display,
+                alignItems: computedStyle.alignItems,
+                justifyContent: computedStyle.justifyContent,
+                clientHeight: partImageSection.clientHeight,
+                offsetHeight: partImageSection.offsetHeight
+              },
+              imageStyles: partImageStyle ? {
+                maxWidth: partImageStyle.maxWidth,
+                maxHeight: partImageStyle.maxHeight,
+                width: partImageStyle.width,
+                height: partImageStyle.height,
+                objectFit: partImageStyle.objectFit
+              } : null,
+              imageDimensions: partImageNatural,
+              inlineStyle: partImageSection.getAttribute('style')
+            })
+          } else {
+            console.warn('[ManualInspection] 단일검수 모드 - .part-card-wrapper .part-image-section 요소를 찾을 수 없습니다')
+          }
+        }, 100)
       }
     }, { immediate: true })
 
@@ -2931,6 +3482,7 @@ export default {
       partImageUrls,
       handleImageError,
       handleImageLoad,
+      isCdnUrl,
       inspectionMode,
       currentItemIndex,
       slideDirection,
@@ -4177,7 +4729,7 @@ export default {
 
 .part-card.card-checked {
   background: #ffffff;
-  border: 1px solid #10b981;
+  border: 2px solid #10b981;
 }
 
 .part-card.card-hold {
@@ -4187,7 +4739,7 @@ export default {
 
 .part-card.card-missing {
   background: #ffffff;
-  border: 1px solid #ef4444;
+  border: 2px solid #ef4444;
 }
 
 
@@ -4294,26 +4846,34 @@ export default {
 }
 
 .qty-button {
-  width: 48px;
-  height: 48px;
-  border: 1px solid #d1d5db;
+  width: 56px;
+  height: 56px;
+  border: 2px solid #e5e7eb;
   background: #ffffff;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: 1.75rem;
+  font-weight: 700;
   color: #374151;
-  transition: all 0.2s;
-  min-width: 48px;
-  min-height: 48px;
+  transition: all 0.2s ease;
+  min-width: 56px;
+  min-height: 56px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .qty-button:hover:not(:disabled) {
-  background: #f3f4f6;
-  border-color: #9ca3af;
+  background: #f9fafb;
+  border-color: #2563eb;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
+  transform: translateY(-1px);
+}
+
+.qty-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .qty-button:disabled {
@@ -4327,32 +4887,30 @@ export default {
   gap: 0.5rem;
   flex: 1;
   justify-content: center;
+  padding: 0.5rem 1rem;
+  background: #f9fafb;
+  border-radius: 10px;
+  min-width: 120px;
 }
 
-.qty-input {
-  width: 60px;
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+.qty-current {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  min-width: 2ch;
   text-align: center;
-  font-size: 1rem;
-  font-weight: 500;
-}
-
-.qty-input:focus {
-  outline: none;
-  border-color: #2563eb;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .qty-divider {
   color: #9ca3af;
   font-weight: 500;
+  font-size: 1rem;
 }
 
 .qty-total {
   color: #6b7280;
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 1.125rem;
 }
 
 .status-buttons {
@@ -4363,7 +4921,7 @@ export default {
 
 .status-button {
   flex: 1;
-  padding: 0.625rem;
+  padding: 0.875rem;
   border: 1px solid #d1d5db;
   background: #ffffff;
   border-radius: 8px;
@@ -4673,6 +5231,41 @@ export default {
   border-radius: 8px;
 }
 
+/* 단일검수 모드: 부품 이미지 출력 영역 세로 높이 축소 */
+.part-card-wrapper .part-image-section {
+  padding: 0.5rem 0;
+  min-height: 80px;
+  max-height: 250px;
+  overflow: hidden;
+}
+
+/* 단일검수 모드: 이미지 크기 제한 */
+.part-card-wrapper .part-image-section .part-image {
+  max-height: 200px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.cdn-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.part-image-section .cdn-badge {
+  top: 8px;
+  right: 8px;
+}
+
 .part-image {
   max-width: 100%;
   max-height: 200px;
@@ -4732,6 +5325,12 @@ export default {
     max-width: 100%;
   }
 
+  /* 단일검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (태블릿) */
+  .part-card-wrapper .part-image-section {
+    padding: 0.375rem 0;
+    min-height: 70px;
+  }
+
   .thumbnails-scroll {
     grid-template-columns: repeat(auto-fill, minmax(65px, 1fr));
   }
@@ -4775,6 +5374,12 @@ export default {
   .part-card {
     width: 100%;
     max-width: 100%;
+  }
+
+  /* 단일검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (모바일) */
+  .part-card-wrapper .part-image-section {
+    padding: 0.25rem 0;
+    min-height: 60px;
   }
 
   .thumbnails-scroll {
@@ -5060,17 +5665,25 @@ export default {
   }
 
   .qty-button {
-    width: 56px;
-    height: 56px;
-    font-size: 1.75rem;
-    min-width: 56px;
-    min-height: 56px;
+    width: 64px;
+    height: 64px;
+    font-size: 2rem;
+    min-width: 64px;
+    min-height: 64px;
+    border-radius: 14px;
   }
 
-  .qty-input {
-    width: 50px;
-    padding: 0.375rem;
-    font-size: 0.875rem;
+  .qty-display {
+    min-width: 140px;
+    padding: 0.625rem 1.25rem;
+  }
+
+  .qty-current {
+    font-size: 1.5rem;
+  }
+
+  .qty-total {
+    font-size: 1.25rem;
   }
 
   .status-buttons {
@@ -5079,7 +5692,7 @@ export default {
   }
 
   .status-button {
-    padding: 0.5rem;
+    padding: 0.75rem;
     font-size: 0.875rem !important;
   }
 
@@ -5126,21 +5739,33 @@ export default {
     font-size: 0.875rem !important;
   }
 
-  .part-card .qty-input {
-    font-size: 0.875rem !important;
-  }
-
   .part-card .section-label {
     font-size: 0.75rem !important;
   }
 
   .part-card .qty-display {
+    min-width: 100px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .part-card .qty-current {
+    font-size: 1.125rem !important;
+  }
+
+  .part-card .qty-total {
+    font-size: 1rem !important;
+  }
+
+  .part-card .qty-divider {
     font-size: 0.875rem !important;
   }
 
-  .part-card .qty-total,
-  .part-card .qty-divider {
-    font-size: 0.875rem !important;
+  .part-card .qty-button {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    min-height: 52px;
+    font-size: 1.625rem;
   }
 
   .status-filter-button {
@@ -5273,16 +5898,21 @@ export default {
   width: 100%;
   max-width: 600px;
   max-height: 80vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
 }
 
-.modal-header {
+.part-info-modal .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
   border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+  background: #ffffff;
+  border-radius: 12px 12px 0 0;
 }
 
 .modal-header h3 {
@@ -5313,8 +5943,11 @@ export default {
   color: #111827;
 }
 
-.modal-body {
+.part-info-modal .modal-body {
   padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .part-info-content {

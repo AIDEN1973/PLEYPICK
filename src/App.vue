@@ -386,63 +386,15 @@
                   class="account-dropdown-panel"
                 >
                   <div class="account-dropdown-header">
-                    <div class="account-dropdown-name">BrickBox</div>
-                    <div class="account-dropdown-email">{{ user?.email || '사용자' }}</div>
+                    <div class="account-dropdown-name">플레이 관리자</div>
+                    <div class="account-dropdown-email">{{ user?.email || 'smj0826@gmail.com' }}</div>
                   </div>
-
-                  <div v-if="storeInfo && storeInfo.store" class="account-dropdown-store-section">
-                    <div class="account-dropdown-section-title">
-                      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                        <polyline points="9 22 9 12 15 12 15 22"></polyline>
-                      </svg>
-                      매장 정보
-                    </div>
-                    <div class="account-dropdown-store-info">
-                      <div class="account-dropdown-store-item">
-                        <span class="account-dropdown-store-label">매장명:</span>
-                        <span class="account-dropdown-store-value">{{ storeInfo.store.name }}</span>
-                      </div>
-                      <div v-if="storeInfo.store.address" class="account-dropdown-store-item">
-                        <span class="account-dropdown-store-label">주소:</span>
-                        <span class="account-dropdown-store-value">{{ storeInfo.store.address }}</span>
-                      </div>
-                      <div v-if="storeInfo.store.store_phone || storeInfo.store.owner_phone" class="account-dropdown-store-item">
-                        <span class="account-dropdown-store-label">연락처:</span>
-                        <span class="account-dropdown-store-value">{{ storeInfo.store.store_phone || storeInfo.store.owner_phone }}</span>
-                      </div>
-                      <div class="account-dropdown-store-item">
-                        <span class="account-dropdown-store-label">역할:</span>
-                        <span class="account-dropdown-store-value">{{ storeInfo.storeUserRole }}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div v-if="storeInfo && storeInfo.store" class="account-dropdown-divider"></div>
-
-                  <router-link
-                    v-if="storeInfo && storeInfo.store"
-                    to="/dashboard"
-                    @click="showUserMenu = false"
-                    class="account-dropdown-item"
-                  >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="3" y="3" width="7" height="7"></rect>
-                      <rect x="14" y="3" width="7" height="7"></rect>
-                      <rect x="14" y="14" width="7" height="7"></rect>
-                      <rect x="3" y="14" width="7" height="7"></rect>
-                    </svg>
-                    레고 인벤토리 보기
-                  </router-link>
 
                   <button
                     @click="showUserMenu = false"
                     class="account-dropdown-item"
                     type="button"
                   >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/>
-                    </svg>
                     정보수정
                   </button>
 
@@ -453,11 +405,6 @@
                     class="account-dropdown-item account-dropdown-item-danger"
                     type="button"
                   >
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16,17 21,12 16,7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
                     로그아웃
                   </button>
                 </div>

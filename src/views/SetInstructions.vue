@@ -1399,16 +1399,16 @@ export default {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   overflow: hidden;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: default;
+  transition: none;
   min-width: 0;
   width: 100%;
   max-width: 100%;
 }
 
 .set-card:hover { /* // 🔧 수정됨 */
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: none;
+  box-shadow: none;
 }
 
 .set-image { /* // 🔧 수정됨 */
@@ -1523,7 +1523,7 @@ export default {
 }
 
 .instruction-card-button { /* // 🔧 수정됨 */
-  padding: 0.5rem 1rem;
+  padding: 0.4375rem 0.9375rem;
   background: #ffffff;
   color: #374151;
   border: 1px solid #d1d5db;

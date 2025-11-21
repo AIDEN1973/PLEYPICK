@@ -2284,7 +2284,7 @@ export default {
           .maybeSingle()
         
         if (!partError && partData?.part_img_url) {
-          return `/api/upload/proxy-image?url=${encodeURIComponent(partData.part_img_url)}`
+          return partData.part_img_url
         }
         
         return null
@@ -2320,7 +2320,7 @@ export default {
           .maybeSingle()
         
         if (!partError && partData?.part_img_url) {
-          return `/api/upload/proxy-image?url=${encodeURIComponent(partData.part_img_url)}`
+          return partData.part_img_url
         }
         
         // 3. image_metadata에서 조회
