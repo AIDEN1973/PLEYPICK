@@ -10,6 +10,11 @@
       "destination": "/index.html"
     }
   ],
+  "functions": {
+    "api/lego-instructions/[...path].js": {
+      "maxDuration": 30
+    }
+  },
   "headers": [
     {
       "source": "/api/(.*)",
