@@ -305,115 +305,177 @@ export default {
         return cached.data
       }
 
-      const locale = 'en-au'
-      const legoPath = `${locale}/service/buildinginstructions/${setNum}`
-      
-      // 타임아웃 설정 (10초)
+      const locales = ['en-au', 'en-us', 'en-gb', 'ko-kr']
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 10000)
+      const timeoutId = setTimeout(() => controller.abort(), 15000)
 
       try {
-        // 프로덕션/개발 모드에 따라 프록시 URL 결정
-        const isDev = import.meta.env.DEV
-        let proxyUrl
-        
-        if (isDev) {
-          // 개발 모드: 로컬 프록시 서버 사용 (Vite 프록시)
-          proxyUrl = `/api/lego-instructions/${legoPath}`
-        } else {
-          // 프로덕션 모드: Vercel 서버리스 함수 사용
-          proxyUrl = `/api/lego-instructions/${legoPath}`
-        }
-        
-        console.log('[SetInstructions] 프록시 URL:', proxyUrl)
-        
-        const response = await fetch(proxyUrl, {
-          headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          },
-          signal: controller.signal
-        })
-
-        clearTimeout(timeoutId)
-
-        if (!response.ok) {
-          throw new Error('레고 공식 웹사이트에 연결할 수 없습니다.')
-        }
-
-        const html = await response.text()
-
-      // window.__INITIAL_STATE__ 에서 설명서 정보 추출
-      const instructionEntries = []
-      const initialStateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/s)
-      if (initialStateMatch) {
-        try {
-          const stateData = JSON.parse(initialStateMatch[1])
-          const candidates = stateData?.instructions || stateData?.buildingInstructions || []
-          if (Array.isArray(candidates)) {
-            candidates.forEach((inst, index) => {
-              const url = inst?.url || inst?.pdfUrl || inst?.downloadUrl || null
-              if (!url || !url.includes('.pdf')) return
-              const pdfUrl = url
-              const resolvedThumbnail = inst?.thumbnail || inst?.image || deriveThumbnailFromPdfUrl(pdfUrl) || fallbackThumbnail || DEFAULT_THUMBNAIL
-              instructionEntries.push({
-                id: url || `instruction-${index}`,
-                title: inst?.title || inst?.name || `Building Instructions ${setNum} - Part ${index + 1}`,
-                description: inst?.description || null,
-                url,
-                thumbnail: resolvedThumbnail,
-                source: 'LEGO.com',
-                fileSize: inst?.fileSize || null
-              })
-            })
+        for (const locale of locales) {
+          const legoPath = `${locale}/service/buildinginstructions/${setNum}`
+          
+          // 프로덕션/개발 모드에 따라 프록시 URL 결정
+          const isDev = import.meta.env.DEV
+          let proxyUrl
+          
+          if (isDev) {
+            // 개발 모드: 로컬 프록시 서버 사용 (Vite 프록시)
+            proxyUrl = `/api/lego-instructions/${legoPath}`
+          } else {
+            // 프로덕션 모드: Vercel 서버리스 함수 사용
+            proxyUrl = `/api/lego-instructions/${legoPath}`
           }
-        } catch (err) {
-          console.warn('[SetInstructions] 초기 상태 JSON 파싱 실패:', err)
+          
+          console.log('[SetInstructions] 프록시 URL 시도:', proxyUrl, `(locale: ${locale})`)
+          
+          try {
+            const response = await fetch(proxyUrl, {
+              headers: {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              },
+              signal: controller.signal
+            })
+
+            if (!response.ok) {
+              console.warn(`[SetInstructions] Locale ${locale} 실패: ${response.status}`)
+              continue
+            }
+
+            const html = await response.text()
+            console.log(`[SetInstructions] Locale ${locale} HTML 길이:`, html.length)
+
+            // window.__INITIAL_STATE__ 에서 설명서 정보 추출
+            const instructionEntries = []
+            const initialStateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/s)
+            if (initialStateMatch) {
+              try {
+                const stateData = JSON.parse(initialStateMatch[1])
+                const candidates = stateData?.instructions || stateData?.buildingInstructions || stateData?.product?.instructions || []
+                if (Array.isArray(candidates) && candidates.length > 0) {
+                  candidates.forEach((inst, index) => {
+                    const url = inst?.url || inst?.pdfUrl || inst?.downloadUrl || inst?.pdf || null
+                    if (!url || !url.includes('.pdf')) return
+                    const pdfUrl = url.startsWith('http') ? url : `https://www.lego.com${url}`
+                    const resolvedThumbnail = inst?.thumbnail || inst?.image || inst?.thumbnailUrl || deriveThumbnailFromPdfUrl(pdfUrl) || fallbackThumbnail || DEFAULT_THUMBNAIL
+                    instructionEntries.push({
+                      id: pdfUrl || `instruction-${index}`,
+                      title: inst?.title || inst?.name || `Building Instructions ${setNum} - Part ${index + 1}`,
+                      description: inst?.description || null,
+                      url: pdfUrl,
+                      thumbnail: resolvedThumbnail,
+                      source: 'LEGO.com',
+                      fileSize: inst?.fileSize || null
+                    })
+                  })
+                }
+              } catch (err) {
+                console.warn(`[SetInstructions] Locale ${locale} 초기 상태 JSON 파싱 실패:`, err)
+              }
+            }
+
+            if (instructionEntries.length > 0) {
+              clearTimeout(timeoutId)
+              // 캐시에 저장
+              instructionCache.set(cacheKey, {
+                data: instructionEntries,
+                timestamp: Date.now()
+              })
+              console.log(`[SetInstructions] Locale ${locale}에서 설명서 찾음:`, instructionEntries.length, '개')
+              return instructionEntries
+            }
+
+            // JSON-LD 스크립트 태그에서 설명서 데이터 추출 시도
+            const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gs)
+            for (const jsonLdMatch of jsonLdMatches) {
+              try {
+                const jsonLdData = JSON.parse(jsonLdMatch[1])
+                if (jsonLdData['@type'] === 'Product' && jsonLdData.offers) {
+                  const offers = Array.isArray(jsonLdData.offers) ? jsonLdData.offers : [jsonLdData.offers]
+                  offers.forEach((offer, index) => {
+                    if (offer.url && offer.url.includes('.pdf')) {
+                      instructionEntries.push({
+                        id: offer.url || `instruction-ld-${index}`,
+                        title: `Building Instructions ${setNum} - Part ${index + 1}`,
+                        description: null,
+                        url: offer.url,
+                        thumbnail: deriveThumbnailFromPdfUrl(offer.url) || fallbackThumbnail || DEFAULT_THUMBNAIL,
+                        source: 'LEGO.com',
+                        fileSize: null
+                      })
+                    }
+                  })
+                }
+              } catch (e) {
+                // JSON-LD 파싱 실패 시 무시
+              }
+            }
+
+            if (instructionEntries.length > 0) {
+              clearTimeout(timeoutId)
+              instructionCache.set(cacheKey, {
+                data: instructionEntries,
+                timestamp: Date.now()
+              })
+              console.log(`[SetInstructions] Locale ${locale} JSON-LD에서 설명서 찾음:`, instructionEntries.length, '개')
+              return instructionEntries
+            }
+
+            // 빠른 PDF URL 추출 (정규식만 사용)
+            const pdfRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
+            const matches = [...html.matchAll(pdfRegex)]
+            let urls = [...new Set(matches.map(m => m[0]).filter(Boolean))]
+
+            if (urls.length === 0) {
+              // 더 넓은 패턴 시도
+              const broadRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/[^"'\\s]*\.pdf/gi
+              const broadMatches = [...html.matchAll(broadRegex)]
+              urls = [...new Set(broadMatches.map(m => m[0]).filter(Boolean))]
+            }
+
+            // 상대 경로도 시도
+            if (urls.length === 0) {
+              const relativeRegex = /\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
+              const relativeMatches = [...html.matchAll(relativeRegex)]
+              urls = relativeMatches.map(m => `https://www.lego.com${m[0]}`)
+            }
+
+            const uniqueUrls = [...new Set(urls)]
+            if (uniqueUrls.length > 0) {
+              const result = uniqueUrls.map((url, index) => {
+                const derivedThumbnail = deriveThumbnailFromPdfUrl(url) || fallbackThumbnail || DEFAULT_THUMBNAIL
+                return {
+                  id: `${setNum}-pdf-${index}`,
+                  title: `Building Instructions ${setNum} - Part ${index + 1}`,
+                  description: null,
+                  url,
+                  thumbnail: derivedThumbnail,
+                  source: 'LEGO.com',
+                  fileSize: null
+                }
+              })
+
+              clearTimeout(timeoutId)
+              // 캐시에 저장
+              instructionCache.set(cacheKey, {
+                data: result,
+                timestamp: Date.now()
+              })
+              console.log(`[SetInstructions] Locale ${locale} 정규식에서 설명서 찾음:`, result.length, '개')
+              return result
+            }
+          } catch (fetchErr) {
+            if (fetchErr.name === 'AbortError') {
+              throw new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')
+            }
+            console.warn(`[SetInstructions] Locale ${locale} fetch 오류:`, fetchErr)
+            continue
+          }
         }
-      }
 
-      if (instructionEntries.length > 0) {
-        // 캐시에 저장
-        instructionCache.set(cacheKey, {
-          data: instructionEntries,
-          timestamp: Date.now()
-        })
-        return instructionEntries
-      }
-
-      // 빠른 PDF URL 추출 (정규식만 사용)
-      const pdfRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
-      const matches = [...html.matchAll(pdfRegex)]
-      const urls = [...new Set(matches.map(m => m[0]).filter(Boolean))]
-
-      if (urls.length === 0) {
-        // 더 넓은 패턴 시도
-        const broadRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/[^"'\\s]*\.pdf/gi
-        const broadMatches = [...html.matchAll(broadRegex)]
-        urls.push(...broadMatches.map(m => m[0]).filter(Boolean))
-      }
-
-      const uniqueUrls = [...new Set(urls)]
-      const result = uniqueUrls.map((url, index) => {
-        const derivedThumbnail = deriveThumbnailFromPdfUrl(url) || fallbackThumbnail || DEFAULT_THUMBNAIL
-        return {
-        id: `${setNum}-pdf-${index}`,
-        title: `Building Instructions ${setNum} - Part ${index + 1}`,
-        description: null,
-        url,
-        thumbnail: derivedThumbnail,
-        source: 'LEGO.com',
-        fileSize: null
-        }
-      })
-
-      // 캐시에 저장
-      instructionCache.set(cacheKey, {
-        data: result,
-        timestamp: Date.now()
-      })
-
-      return result
+        // 모든 로케일에서 실패
+        clearTimeout(timeoutId)
+        console.warn('[SetInstructions] 모든 로케일에서 설명서를 찾지 못함:', setNum)
+        return []
       } catch (err) {
         clearTimeout(timeoutId)
         if (err.name === 'AbortError') {

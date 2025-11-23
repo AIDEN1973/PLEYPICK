@@ -332,9 +332,9 @@
                       </div>
                       <div class="set-stats">
                         <div class="set-stats-row">
-                          <span class="set-quantity">부품수: {{ sessionItem.total_parts || 0 }}개</span>
+                          <span class="set-quantity">부품수 : {{ sessionItem.total_parts || 0 }}개</span>
                         </div>
-                        <span v-if="sessionItem?.last_saved_at" class="last-inspection-date">마지막 검수: {{ formatDate(sessionItem.last_saved_at) }}</span>
+                        <span v-if="sessionItem?.last_saved_at" class="last-inspection-date">마지막 검수 : {{ formatDate(sessionItem.last_saved_at) }}</span>
                       </div>
                       <div class="resume-session-actions">
                         <button @click.stop="resumeSessionById(sessionItem.id)" class="btn-primary btn-resume">
