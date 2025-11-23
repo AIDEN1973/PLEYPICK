@@ -12,5 +12,8 @@ api/**
 !api/proxy/media/[...path].js
 !api/lego-instructions/[...path].js
 
+# Exclude conflicting files
+api/lego-instructions.js
+
 # Keep everything else by default
 

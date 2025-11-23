@@ -73,6 +73,12 @@ export default async function handler(req, res) {
       res.setHeader('Cache-Control', 'public, max-age=300')
 
       console.log(`✅ LEGO 설명서 프록시 성공: ${response.status}, HTML 길이: ${html.length}바이트`)
+      
+      // 응답 본문이 너무 짧으면 에러일 가능성
+      if (html.length < 1000) {
+        console.warn(`⚠️ 응답이 너무 짧음, 샘플:`, html.substring(0, 500))
+      }
+      
       return res.status(200).send(html)
     } catch (fetchError) {
       clearTimeout(timeoutId)
@@ -93,5 +99,11 @@ export default async function handler(req, res) {
       details: error.message
     })
   }
+}
+
+export const config = {
+  api: {
+    responseLimit: false,
+  },
 }
 

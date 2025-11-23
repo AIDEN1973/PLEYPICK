@@ -336,6 +336,10 @@ export default {
               signal: controller.signal
             })
 
+            console.log(`[SetInstructions] Locale ${locale} 응답 상태:`, response.status, response.statusText)
+            console.log(`[SetInstructions] Locale ${locale} 응답 URL:`, response.url)
+            console.log(`[SetInstructions] Locale ${locale} 응답 헤더:`, Object.fromEntries(response.headers.entries()))
+
             if (!response.ok) {
               console.warn(`[SetInstructions] Locale ${locale} 실패: ${response.status}`)
               continue
@@ -344,6 +348,13 @@ export default {
             const contentType = response.headers.get('content-type') || ''
             const html = await response.text()
             console.log(`[SetInstructions] Locale ${locale} HTML 길이:`, html.length, `Content-Type: ${contentType}`)
+            
+            // BrickBox index.html이 반환된 경우 감지
+            if (html.includes('BrickBox') && html.includes('@vite/client')) {
+              console.error(`[SetInstructions] Locale ${locale} 서버리스 함수가 실행되지 않음 - index.html이 반환됨`)
+              console.error(`[SetInstructions] 프록시 URL: ${proxyUrl}`)
+              continue
+            }
             
             // JSON 에러 응답인 경우 처리
             if (contentType.includes('application/json') || (html.length < 1000 && html.trim().startsWith('{'))) {
