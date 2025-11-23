@@ -9,8 +9,8 @@ api/**
 !api/system/metrics.js
 !api/training/status.js
 !api/synthetic/validate.js
-!api/proxy/media/[...path].js
-!api/lego-instructions/[...path].js
+!api/proxy/
+!api/lego-instructions/
 
 # Exclude conflicting files
 api/lego-instructions.js
