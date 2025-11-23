@@ -189,6 +189,11 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           configure: createProxyLogger('RebrickableAPI')
         },
+        '/api/lego-instructions': {
+          target: `http://localhost:${portConfig.webpApi}`,
+          changeOrigin: true,
+          configure: createProxyLogger('LEGO Instructions')
+        },
         '/api/synthetic': {
           target: `http://localhost:${portConfig.syntheticApi}`,
           changeOrigin: true,

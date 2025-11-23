@@ -10,6 +10,7 @@ api/**
 !api/training/status.js
 !api/synthetic/validate.js
 !api/proxy/media/[...path].js
+!api/lego-instructions/[...path].js
 
 # Keep everything else by default
 
