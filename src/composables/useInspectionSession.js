@@ -308,7 +308,10 @@ export function useInspectionSession() {
       loading.value = true
       error.value = null
 
-      if (!user.value) throw new Error('로그인이 필요합니다')
+      if (!user.value) {
+        // 로그인 필요 에러는 error.value에 설정하지 않음 (모달로 처리)
+        throw new Error('로그인이 필요합니다')
+      }
 
       // 동일 제품의 모든 활성 세션을 paused로 변경 (하나의 진행 상태만 유지)
       try {
@@ -368,7 +371,10 @@ export function useInspectionSession() {
 
       return newSession
     } catch (err) {
-      error.value = err.message
+      // 로그인 필요 에러는 error.value에 설정하지 않음 (모달로 처리)
+      if (!err.message || !err.message.includes('로그인이 필요')) {
+        error.value = err.message
+      }
       throw err
     } finally {
       loading.value = false

@@ -187,6 +187,94 @@ app.get('/api/proxy/*', async (req, res) => {
   }
 })
 
+// Rebrickable API 프록시 (CORS 해결)
+app.get('/api/rebrickable/*', async (req, res) => {
+  try {
+    const apiPath = req.params[0]
+    // URL에서 쿼리 스트링 추출 (endpoint에 포함된 쿼리 파라미터 포함)
+    const queryIndex = req.originalUrl.indexOf('?')
+    const queryString = queryIndex !== -1 ? req.originalUrl.substring(queryIndex) : ''
+    const targetUrl = `https://rebrickable.com/api/v3/${apiPath}${queryString}`
+    
+    const apiKey = process.env.VITE_REBRICKABLE_API_KEY || 'd966442dee02b69a7d05a63805216a85'
+    
+    console.log(`📡 Rebrickable API 프록시 요청: ${targetUrl}`)
+    
+    const response = await fetch(targetUrl, {
+      headers: {
+        'Authorization': `key ${apiKey}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'BrickBox/1.0'
+      }
+    })
+    
+    // 429 Rate Limit 처리
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('retry-after') || '60'
+      console.warn(`⚠️ Rate limit (429). Retry-After: ${retryAfter}s`)
+      res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      })
+      return res.status(429).json({ 
+        error: 'Rate limit exceeded',
+        retryAfter: parseInt(retryAfter)
+      })
+    }
+    
+    if (!response.ok) {
+      console.error(`❌ Rebrickable API 호출 실패: ${response.status} ${response.statusText}`)
+      const errorText = await response.text()
+      res.set({
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      })
+      return res.status(response.status).json({ 
+        error: `API Error: ${response.status} ${response.statusText}`,
+        details: errorText
+      })
+    }
+    
+    const data = await response.json()
+    
+    res.set({
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Cache-Control': 'public, max-age=300'
+    })
+    
+    console.log(`✅ Rebrickable API 프록시 성공: ${response.status}`)
+    res.json(data)
+    
+  } catch (error) {
+    console.error('❌ Rebrickable API 프록시 오류:', error)
+    res.set({
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    })
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
+    })
+  }
+})
+
+// OPTIONS 요청 처리 (CORS preflight)
+app.options('/api/rebrickable/*', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400'
+  })
+  res.sendStatus(204)
+})
+
 // 헬스 체크 엔드포인트
 app.get('/health', (req, res) => {
   res.json({ 
@@ -204,6 +292,7 @@ app.listen(PORT, () => {
   console.log(`  - Supabase Storage: http://localhost:${PORT}/api/supabase/image/lego_parts_images/`)
   console.log(`  - Rebrickable → WebP: http://localhost:${PORT}/api/upload/proxy-image`)
   console.log(`  - Rebrickable 프록시: http://localhost:${PORT}/api/proxy/`)
+  console.log(`  - Rebrickable API: http://localhost:${PORT}/api/rebrickable/`)
   console.log(`🏥 헬스 체크: http://localhost:${PORT}/health`)
 })
 

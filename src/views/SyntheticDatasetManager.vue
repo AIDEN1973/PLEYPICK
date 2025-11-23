@@ -189,15 +189,19 @@
 
             <!-- 엘리먼트 ID 검색 -->
             <div v-if="searchType === 'elementId'" class="search-inputs">
-              <div class="input-group">
-                <label>엘리먼트 ID</label>
-                <div class="input-with-button">
-                  <input 
-                    v-model="elementId" 
-                    placeholder="예: 300121"
-                    class="form-input"
-                    @keyup.enter="searchByElementId"
-                  >
+                <div class="input-group">
+                  <label>엘리먼트 ID</label>
+                  <div class="input-with-button" ref="searchInputRef">
+                    <input 
+                      v-model="elementId" 
+                      placeholder="예: 300121"
+                      class="form-input"
+                      @keyup.enter="searchByElementId"
+                    >
+                    <!-- 검색 툴팁 -->
+                    <div v-if="searchTooltip" class="search-tooltip">
+                      <span>{{ searchTooltip }}</span>
+                    </div>
                   <button 
                     @click="searchByElementId" 
                     :disabled="!elementId"
@@ -1292,8 +1296,26 @@ const updateAutoTrainingSetting = async () => {
 }
 
 // 엘리먼트 ID로 부품 검색
+const searchTooltip = ref('')
+const searchInputRef = ref(null)
+let searchTooltipTimer = null
+
+const showSearchTooltip = (message) => {
+  if (searchTooltipTimer) {
+    clearTimeout(searchTooltipTimer)
+  }
+  searchTooltip.value = message
+  searchTooltipTimer = setTimeout(() => {
+    searchTooltip.value = ''
+    searchTooltipTimer = null
+  }, 3000)
+}
+
 const searchByElementId = async () => {
-  if (!elementId.value) return
+  if (!elementId.value) {
+    showSearchTooltip('검색어를 입력해주세요.')
+    return
+  }
   
   try {
     renderLogs.value.push({ type: 'info', message: `엘리먼트 ID ${elementId.value} 검색 중...` })
@@ -4911,6 +4933,46 @@ onMounted(async () => {
   color: #166534;
   font-size: 14px;
   font-weight: 600;
+}
+
+/* 검색 툴팁 스타일 */
+.input-with-button {
+  position: relative;
+}
+
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 10000;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  animation: slideInTooltip 0.3s ease;
+}
+
+.search-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 1rem;
+  border: 6px solid transparent;
+  border-bottom-color: #1f2937;
+}
+
+@keyframes slideInTooltip {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 </style>

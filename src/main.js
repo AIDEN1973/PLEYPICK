@@ -37,7 +37,7 @@ import SetInstructions from './views/SetInstructions.vue'
 import PartManager from './views/PartManager.vue'
 
 const routes = [
-  { path: '/', name: 'Home', component: Home },
+  { path: '/', name: 'Home', component: SetParts },
   { path: '/login', name: 'Login', component: Login },
   { path: '/dashboard', name: 'Dashboard', component: Dashboard },
   { path: '/new-lego', name: 'NewLegoRegistration', component: NewLegoRegistration },

@@ -7,7 +7,7 @@
 
     <!-- 세트 검색 -->
     <div class="search-section">
-      <div class="search-box">
+      <div class="search-box" ref="searchInputRef">
         <input
           v-model="searchQuery"
           type="text"
@@ -15,6 +15,10 @@
           @keyup.enter="handleSearchOrBatch"
           class="search-input"
         />
+        <!-- 검색 툴팁 -->
+        <div v-if="searchTooltip" class="search-tooltip">
+          <span>{{ searchTooltip }}</span>
+        </div>
         <button @click="handleSearchOrBatch" :disabled="loading || batchProcessing" class="search-btn">
           {{ loading ? '검색 중...' : batchProcessing ? '일괄 등록 중...' : '검색' }}
         </button>
@@ -685,24 +689,34 @@ export default {
     const minifigOnlyProcessing = ref(false) // 피규어 정보만 등록 진행 중 여부
     const minifigOnlyProgress = ref({ current: 0, total: 0, currentSet: '' }) // 피규어 정보만 등록 진행률
 
-    // 여러 세트 번호가 있는지 확인하는 함수
+    // 여러 세트 번호가 있는지 확인하는 함수 (성능 최적화: 대량 입력 시 샘플링 검증)
     const hasMultipleSetNumbers = (query) => {
       if (!query || !query.trim()) return false
       const trimmed = query.trim()
       // 띄어쓰기 또는 콤마로 구분된 세트 번호 패턴 확인
       const parts = trimmed.split(/[\s,]+/).filter(p => p.trim())
       if (parts.length < 2) return false
-      // 각 부분이 세트 번호 패턴인지 확인
+      
+      // 성능 최적화: 대량 입력 시 샘플링 검증 (처음 10개만 검증)
       const setNumberPattern = /^\d{3,6}(-\d+)?$/
-      return parts.every(part => setNumberPattern.test(part.trim()))
+      const sampleSize = Math.min(10, parts.length)
+      const sample = parts.slice(0, sampleSize)
+      
+      // 샘플이 모두 세트 번호 패턴이면 일괄 등록 버튼 표시
+      // 실제 검증은 등록 시 parseSetNumbers에서 수행
+      return sample.every(part => setNumberPattern.test(part.trim()))
     }
 
-    // 세트 번호 목록 파싱
+    // 세트 번호 목록 파싱 (실제 등록 시 검증 포함)
     const parseSetNumbers = (query) => {
       if (!query || !query.trim()) return []
       const trimmed = query.trim()
       const parts = trimmed.split(/[\s,]+/).filter(p => p.trim())
-      return parts.map(p => p.trim())
+      const setNumberPattern = /^\d{3,6}(-\d+)?$/
+      // 유효한 세트 번호만 반환
+      return parts
+        .map(p => p.trim())
+        .filter(part => setNumberPattern.test(part))
     }
 
     // 단일 제품 번호인지 확인하는 함수
@@ -909,9 +923,27 @@ export default {
       }
     }
 
+    const searchTooltip = ref('')
+    const searchInputRef = ref(null)
+    let searchTooltipTimer = null
+
+    const showSearchTooltip = (message) => {
+      if (searchTooltipTimer) {
+        clearTimeout(searchTooltipTimer)
+      }
+      searchTooltip.value = message
+      searchTooltipTimer = setTimeout(() => {
+        searchTooltip.value = ''
+        searchTooltipTimer = null
+      }, 3000)
+    }
+
     // 검색 또는 일괄 등록 처리
     const handleSearchOrBatch = async () => {
-      if (!searchQuery.value.trim()) return
+      if (!searchQuery.value.trim()) {
+        showSearchTooltip('검색어를 입력해주세요.')
+        return
+      }
       
       // 여러 세트 번호가 있으면 일괄 등록
       if (hasMultipleSetNumbers(searchQuery.value)) {
@@ -2539,303 +2571,31 @@ export default {
             
             const existingSet = existingSetOriginal || existingSetFormatted || existingSetReverse
             
+            let setData = null
+            let savedSet = null
+            
             if (existingSet) {
-              // 중복 세트 처리 모달 표시
-              const setInfo = await getSet(formattedSetNum)
-              if (!setInfo) {
+              // 일괄 등록 시 중복 세트 발견: 모달 없이 자동으로 누락 부품만 체크 및 추가
+              console.log(`세트 ${setNum} (또는 ${formattedSetNum})는 이미 등록되어 있습니다. 누락 부품 자동 체크 및 추가 진행...`)
+              missingOnly = true
+              // 기존 세트 정보 사용
+              setData = {
+                set_num: existingSet.set_num,
+                name: existingSet.name,
+                year: existingSet.year,
+                theme_id: existingSet.theme_id,
+                num_parts: existingSet.num_parts,
+                set_img_url: existingSet.set_img_url,
+                set_url: existingSet.set_url
+              }
+              savedSet = existingSet
+            } else {
+              // 세트 정보 가져오기
+              setData = await getSet(formattedSetNum)
+              if (!setData) {
                 results.failed.push({ setNum, reason: '세트 정보를 가져올 수 없습니다' })
                 continue
               }
-              
-              const userChoice = await showDuplicateSetModal(existingSet, setInfo)
-              
-              if (userChoice === 'cancel') {
-                results.skipped.push({ setNum, reason: '사용자 취소' })
-                continue
-              }
-              
-              if (userChoice === 'replace') {
-                shouldReplace = true
-                // 기존 데이터 삭제 후 새로 저장
-                console.log(`세트 ${setNum} 기존 데이터 삭제 중...`)
-                try {
-                  const { error: deletePartsError } = await supabase
-                    .from('set_parts')
-                    .delete()
-                    .eq('set_id', existingSet.id)
-                  
-                  if (deletePartsError) {
-                    console.warn('Failed to delete set_parts:', deletePartsError)
-                  }
-                  
-                  const { error: deleteSetError } = await supabase
-                    .from('lego_sets')
-                    .delete()
-                    .eq('id', existingSet.id)
-                  
-                  if (deleteSetError) {
-                    console.warn('Failed to delete lego_sets:', deleteSetError)
-                  }
-                } catch (err) {
-                  console.error('Error during deletion:', err)
-                }
-              } else if (userChoice === 'missing') {
-                missingOnly = true
-                console.log(`세트 ${setNum} 누락 부품만 등록 모드`)
-              }
-              
-              console.log(`세트 ${setNum} (또는 ${formattedSetNum})는 이미 등록되어 있습니다. 부품 이미지 확인 중...`)
-              
-              // 중복된 세트의 부품 이미지 확인 및 누락된 이미지 다운로드 (replace 모드가 아닐 때만)
-              if (!shouldReplace) {
-                try {
-                  // API 호출 간 딜레이 (Rate Limit 방지)
-                  await new Promise(resolve => setTimeout(resolve, 1100)) // 1.1초 대기
-                
-                  // 부품 정보 가져오기
-                  const partsResult = await getSetPartsAPI(formattedSetNum)
-                  const parts = partsResult.results || []
-                  
-                  if (parts.length > 0) {
-                    let imageProcessedCount = 0
-                    let imageSkippedCount = 0
-                    const BATCH_SIZE = 10
-                    
-                    // Rebrickable API Rate Limit 방지: element_id 조회를 순차 처리하기 위한 락
-                    let duplicateCheckApiLock = Promise.resolve()
-                    let duplicateCheckLastApiCall = 0
-                    const MIN_API_INTERVAL = 1100
-                    
-                    for (let imgIdx = 0; imgIdx < parts.length; imgIdx += BATCH_SIZE) {
-                      const batch = parts.slice(imgIdx, imgIdx + BATCH_SIZE)
-                      
-                      await Promise.allSettled(
-                        batch.map(async (part) => {
-                          try {
-                            const partImgUrl = part?.part?.part_img_url || part?.part_img_url
-                            if (!partImgUrl) {
-                              return
-                            }
-                            
-                            // element_id 검증
-                            const validElementId = (part.element_id && 
-                              part.element_id !== 'null' && 
-                              part.element_id !== 'undefined' && 
-                              String(part.element_id).trim() !== '' &&
-                              part.element_id !== 0) 
-                              ? String(part.element_id).trim() 
-                              : null
-                            
-                            // part_num과 color_id 추출
-                            const partNum = part?.part?.part_num || part?.part_num
-                            const colorId = part?.color?.id || part?.color_id
-                            
-                            if (!partNum || colorId === undefined) {
-                              return
-                            }
-                            
-                            // 이미지 중복 확인
-                            const isDuplicate = validElementId
-                              ? await checkPartImageDuplicateByElementId(validElementId)
-                              : await checkPartImageDuplicate(partNum, colorId)
-                            
-                            // Storage에 이미지가 있지만 part_images 테이블에 기록이 없을 수 있음
-                            // Storage URL을 확인하고 part_images 테이블에 기록 추가
-                            if (isDuplicate) {
-                              // Storage에 이미지가 있는지 확인하고 part_images 테이블에 기록 추가
-                              try {
-                                const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 
-                                  (import.meta.env.PROD ? null : 'https://npferbxuxocbfnfbpcnz.supabase.co')
-                                
-                                if (!supabaseUrl) {
-                                  throw new Error('VITE_SUPABASE_URL 환경 변수가 설정되지 않았습니다. 프로덕션 모드에서는 필수입니다.')
-                                }
-                                const bucketName = 'lego_parts_images'
-                                const fileName = validElementId 
-                                  ? `${String(validElementId)}.webp`
-                                  : `${partNum}_${colorId}.webp`
-                                const storageUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
-                                
-                                // Storage에 실제로 이미지가 있는지 확인
-                                const storageCheck = await fetch(storageUrl, { method: 'HEAD' })
-                                if (storageCheck.ok) {
-                                  // part_images 테이블에 기록이 있는지 확인
-                                  let existingRecord = null
-                                  if (validElementId) {
-                                    const { data } = await supabase
-                                      .from('part_images')
-                                      .select('part_id')
-                                      .eq('element_id', String(validElementId))
-                                      .maybeSingle()
-                                    existingRecord = data
-                                  } else {
-                                    const { data } = await supabase
-                                      .from('part_images')
-                                      .select('part_id')
-                                      .eq('part_id', String(partNum))
-                                      .eq('color_id', colorId)
-                                      .maybeSingle()
-                                    existingRecord = data
-                                  }
-                                  
-                                  if (!existingRecord) {
-                                    // Storage에 이미지가 있지만 DB에 기록이 없으면 추가
-                                    console.log(`[BatchRegister] ✅ Storage에 이미지 있음, part_images 테이블에 기록 추가: ${fileName}`)
-                                    await upsertPartImage({
-                                      partNum,
-                                      colorId,
-                                      uploadedUrl: storageUrl,
-                                      filename: fileName,
-                                      elementId: validElementId
-                                    })
-                                    imageProcessedCount++ // DB 기록 추가로 카운트
-                                    console.log(`[BatchRegister] ✅ part_images 테이블 기록 완료: ${fileName}`)
-                                  } else {
-                                    console.log(`[BatchRegister] 이미 part_images 테이블에 기록 있음: ${fileName}`)
-                                    imageSkippedCount++
-                                  }
-                                } else {
-                                  console.log(`[BatchRegister] Storage에 이미지 없음: ${fileName}`)
-                                  imageSkippedCount++
-                                }
-                              } catch (syncError) {
-                                console.warn(`[BatchRegister] part_images 동기화 실패:`, syncError)
-                                imageSkippedCount++
-                              }
-                              return
-                            }
-                            
-                            // 이미지가 없으면 다운로드
-                            let imageUrl = null
-                            let imageSource = 'unknown'
-                            let effectiveColorId = colorId
-                            let elementData = null
-                            
-                            if (validElementId) {
-                              try {
-                                // Rate Limit 방지: 락을 사용하여 순차 처리
-                                duplicateCheckApiLock = duplicateCheckApiLock.then(async () => {
-                                  const timeSinceLastCall = Date.now() - duplicateCheckLastApiCall
-                                  if (timeSinceLastCall < MIN_API_INTERVAL) {
-                                    const waitTime = MIN_API_INTERVAL - timeSinceLastCall
-                                    await new Promise(resolve => setTimeout(resolve, waitTime))
-                                  }
-                                  
-                                  duplicateCheckLastApiCall = Date.now()
-                                  return await getElement(validElementId)
-                                }).catch(err => {
-                                  console.warn(`[BatchRegister] element_id ${validElementId} API 호출 실패:`, err)
-                                  return null
-                                })
-                                
-                                elementData = await duplicateCheckApiLock
-                                
-                                // Element ID는 색상 정보를 포함하므로, API에서 가져온 색상 정보를 사용
-                                if (elementData?.color?.id) {
-                                  effectiveColorId = elementData.color.id
-                                  console.log(`✅ element_id ${validElementId}의 실제 색상: ${elementData.color.name} (ID: ${effectiveColorId})`)
-                                  
-                                  // 색상 불일치 감지 및 경고
-                                  if (effectiveColorId !== colorId) {
-                                    console.warn(`⚠️ 색상 불일치 감지: part.color.id=${colorId}, elementData.color.id=${effectiveColorId}`)
-                                    console.warn(`⚠️ element_id 기반 색상(${effectiveColorId})을 사용합니다.`)
-                                  }
-                                }
-                                
-                                if (elementData?.element_img_url) {
-                                  imageUrl = elementData.element_img_url
-                                  imageSource = 'element_id'
-                                } else if (elementData?.part_img_url) {
-                                  imageUrl = elementData.part_img_url
-                                  imageSource = 'element_id_part_img'
-                                }
-                              } catch (elementErr) {
-                                console.warn(`[BatchRegister] element_id ${validElementId} 이미지 조회 실패:`, elementErr)
-                              }
-                            }
-                            
-                            if (!imageUrl) {
-                              imageUrl = partImgUrl
-                              imageSource = 'part_num'
-                            }
-                            
-                            // 이미지 처리
-                            const imageResult = await processRebrickableImage(
-                              imageUrl,
-                              partNum,
-                              effectiveColorId, // element_id 기반 색상 사용 (핵심 수정)
-                              { elementId: validElementId, imageSource }
-                            )
-                            
-                            // 이미지 메타데이터 저장
-                            if (imageResult.uploadedUrl) {
-                              console.log(`[BatchRegister] 이미지 메타데이터 저장 시작: ${imageResult.filename}`)
-                              try {
-                                await saveImageMetadata({
-                                  original_url: imageUrl,
-                                  supabase_url: imageResult.uploadedUrl,
-                                  file_path: imageResult.path,
-                                  file_name: imageResult.filename,
-                                  part_num: partNum,
-                                  color_id: effectiveColorId, // element_id 기반 색상 사용 (핵심 수정)
-                                  element_id: validElementId,
-                                  set_num: existingSet.set_num
-                                })
-                                imageProcessedCount++
-                                console.log(`[BatchRegister] ✅ 이미지 메타데이터 저장 완료: ${imageResult.filename}`)
-                              } catch (metadataError) {
-                                console.error(`[BatchRegister] 이미지 메타데이터 저장 실패: ${imageResult.filename}`, metadataError)
-                              }
-                            } else {
-                              console.warn(`[BatchRegister] uploadedUrl이 없어 메타데이터 저장 건너뜀: ${partNum}_${colorId}`)
-                            }
-                          } catch (imageError) {
-                            const partNum = part?.part?.part_num || part?.part_num || 'unknown'
-                            console.warn(`[BatchRegister] 세트 ${setNum} 부품 ${partNum} 이미지 처리 실패:`, imageError)
-                          }
-                        })
-                      )
-                      
-                      // 배치 간 딜레이
-                      if (imgIdx + BATCH_SIZE < parts.length) {
-                        await new Promise(resolve => setTimeout(resolve, 500))
-                      }
-                    }
-                    
-                    console.log(`세트 ${setNum} 부품 이미지 확인 완료: 새로 다운로드 ${imageProcessedCount}개, 이미 존재 ${imageSkippedCount}개`)
-                    
-                    results.skipped.push({ 
-                      setNum, 
-                      reason: '이미 등록됨',
-                      existingSetNum: existingSet.set_num,
-                      imagesProcessed: imageProcessedCount,
-                      imagesSkipped: imageSkippedCount
-                    })
-                  } else {
-                    results.skipped.push({ 
-                      setNum, 
-                      reason: '이미 등록됨 (부품 정보 없음)',
-                      existingSetNum: existingSet.set_num
-                    })
-                  }
-                } catch (imageCheckError) {
-                  console.warn(`세트 ${setNum} 부품 이미지 확인 실패:`, imageCheckError)
-                  results.skipped.push({ 
-                    setNum, 
-                    reason: '이미 등록됨 (이미지 확인 실패)',
-                    existingSetNum: existingSet.set_num
-                  })
-                }
-              }
-              
-              continue
-            }
-
-            // 세트 정보 가져오기
-            const setData = await getSet(formattedSetNum)
-            if (!setData) {
-              results.failed.push({ setNum, reason: '세트 정보를 가져올 수 없습니다' })
-              continue
             }
             
             // 세트 정보 업데이트
@@ -2860,9 +2620,13 @@ export default {
             const failedParts = []
             
             try {
-              // 1. 세트 정보 저장
-              const savedSet = await saveLegoSet(setData)
-              console.log(`세트 ${setNum} 저장 완료:`, savedSet)
+              // 1. 세트 정보 저장 (중복 세트가 아닐 때만)
+              if (!savedSet) {
+                savedSet = await saveLegoSet(setData)
+                console.log(`세트 ${setNum} 저장 완료:`, savedSet)
+              } else {
+                console.log(`세트 ${setNum} 이미 등록됨, 기존 세트 사용:`, savedSet)
+              }
 
               // 1.5. 세트 이미지 WebP 변환 (단일 등록과 동일)
               try {
@@ -3918,6 +3682,7 @@ export default {
       batchRegisterSets,
       registerMinifigsOnly,
       hasMultipleSetNumbers,
+      searchTooltip,
       batchProcessing,
       minifigOnlyProcessing,
       minifigOnlyProgress,
@@ -5091,5 +4856,45 @@ export default {
 .cancel-btn:hover {
   background: #f1b0b7;
   border-color: #f5c6cb;
+}
+
+/* 검색 툴팁 스타일 */
+.search-box {
+  position: relative;
+}
+
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 10000;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  animation: slideInTooltip 0.3s ease;
+}
+
+.search-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 1rem;
+  border: 6px solid transparent;
+  border-bottom-color: #1f2937;
+}
+
+@keyframes slideInTooltip {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 </style>

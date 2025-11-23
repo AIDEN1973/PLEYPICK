@@ -2,8 +2,8 @@
   <div class="part-to-set-search-page">
     <div class="layout-container">
       <div class="page-header">
-        <h1>부품으로 세트찾기</h1>
-        <p>부품번호를 입력하여 해당 부품이 포함된 세트를 찾을 수 있습니다</p>
+        <h1>부품으로 레고 찾기</h1>
+        <p>부품번호를 입력하여 해당 부품이 포함된 레고를 찾을 수 있습니다</p>
       </div>
 
       <div class="search-content">
@@ -32,10 +32,14 @@
                   <button
                     @click="searchByElementId"
                     class="search-button"
-                    :disabled="!elementIdInput || loading"
+                    :disabled="loading"
                   >
                     {{ loading ? '검색 중...' : '검색' }}
                   </button>
+                </div>
+                <!-- 검색 툴팁 -->
+                <div v-if="searchTooltip" class="search-tooltip">
+                  <span>{{ searchTooltip }}</span>
                 </div>
                 <div v-if="searchResult" class="result-part-card">
                   <button class="close-result-button" @click="resetPage" title="초기화">
@@ -567,9 +571,23 @@ export default {
       )
     })
 
+    const searchTooltip = ref('')
+    let searchTooltipTimer = null
+
+    const showSearchTooltip = (message) => {
+      if (searchTooltipTimer) {
+        clearTimeout(searchTooltipTimer)
+      }
+      searchTooltip.value = message
+      searchTooltipTimer = setTimeout(() => {
+        searchTooltip.value = ''
+        searchTooltipTimer = null
+      }, 3000)
+    }
+
     const searchByElementId = async () => {
       if (!elementIdInput.value.trim()) {
-        error.value = '엘리먼트 ID를 입력해주세요.'
+        showSearchTooltip('검색어를 입력해주세요.')
         return
       }
 
@@ -781,8 +799,8 @@ export default {
         const allSets = await findSetsByPart(setPart.part_id, setPart.color_id)
         let sets = allSets
         
-        // 매장 인벤토리가 있으면 매장 보유 세트만 필터링
-        if (inventorySetNumbers.value.size > 0) {
+        // 로그인 상태일 때만 매장 보유 세트만 필터링
+        if (user.value && inventorySetNumbers.value.size > 0) {
           sets = allSets.filter(set => {
             const setNum = set.set_num
             // 세트 번호 정규화 (하이픈 제거하여 비교)
@@ -791,7 +809,8 @@ export default {
           })
           console.log(`[PartToSetSearch] 매장 보유 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개)`)
         } else {
-          console.log('[PartToSetSearch] 매장 인벤토리가 없어 전체 세트 표시')
+          // 로그아웃 상태: 전체 레고 세트에서 검색
+          console.log('[PartToSetSearch] 로그아웃 상태 - 전체 레고 세트에서 검색')
         }
         
         // 기본 검색 결과 먼저 표시 (세트 목록)
@@ -1599,7 +1618,19 @@ export default {
 
       partSetsLoading.value = true
       try {
-        partSets.value = await findSetsByPart(part.part_id, part.color_id)
+        const allPartSets = await findSetsByPart(part.part_id, part.color_id)
+        
+        // 로그인 상태일 때만 매장 보유 세트만 필터링
+        if (user.value && inventorySetNumbers.value.size > 0) {
+          partSets.value = allPartSets.filter(set => {
+            const setNum = set.set_num
+            const normalizedSetNum = setNum.replace(/-.*$/, '')
+            return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
+          })
+        } else {
+          // 로그아웃 상태: 전체 레고 세트
+          partSets.value = allPartSets
+        }
       } catch (err) {
         partSets.value = []
       } finally {
@@ -1900,6 +1931,7 @@ export default {
       error,
       loading,
       searchByElementId,
+      searchTooltip,
       openSetPartsModal,
       showSyncModal,
       syncSetNum,
@@ -2007,7 +2039,7 @@ export default {
   background: #ffffff;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card-header {
@@ -2131,6 +2163,47 @@ export default {
   background: #9ca3af;
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* 검색 툴팁 스타일 */
+.set-search-wrapper {
+  position: relative;
+  overflow: visible;
+}
+
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 10000;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  animation: slideInTooltip 0.3s ease;
+}
+
+.search-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 1rem;
+  border: 6px solid transparent;
+  border-bottom-color: #1f2937;
+}
+
+@keyframes slideInTooltip {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .error-message {

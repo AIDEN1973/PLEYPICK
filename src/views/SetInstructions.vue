@@ -12,7 +12,7 @@
             <div class="form-group">
               <label>레고번호를 입력하세요.</label>
               <div class="set-search-wrapper" ref="setDropdownRef">
-                <div class="set-search-input-row">
+                <div class="set-search-input-row" ref="searchInputRef">
                   <div class="set-search-input-wrapper">
                     <input
                       type="text"
@@ -36,6 +36,10 @@
                   >
                     검색
                   </button>
+                </div>
+                <!-- 검색 툴팁 -->
+                <div v-if="searchTooltip" class="search-tooltip">
+                  <span>{{ searchTooltip }}</span>
                 </div>
 
                 <transition name="select-fade">
@@ -111,6 +115,7 @@
       >
         <div class="result-header">
           <h3>레고 리스트</h3>
+          <span class="result-count">(총 {{ storeSetsCount }}개)</span><!-- // 🔧 수정됨 -->
         </div>
         <div class="sets-grid">
           <div
@@ -265,10 +270,12 @@ export default {
     const selectedSetId = ref('')
     const showSetDropdown = ref(false)
     const setDropdownRef = ref(null)
+    const searchInputRef = ref(null)
 
     const storeInventory = ref([])
     const storeInfo = ref(null)
     const storeSets = ref([])
+    const storeSetsCount = computed(() => storeSets.value.length) // 🔧 수정됨
     const currentPage = ref(1)
     const itemsPerPage = 40
 
@@ -456,105 +463,51 @@ export default {
       instructionError.value = null
     }
 
+    // 전체 레고 세트 로드 (매장 인벤토리 필터 제거)
     const loadStoreInventory = async () => {
-      if (!user.value) {
-        storeInfo.value = null
-        storeInventory.value = []
-        storeSets.value = []
-        return
-      }
-
-      try {
-        const storeData = await getStoreInfoByEmail(user.value.email)
-        if (storeData && storeData.store) {
-          storeInfo.value = storeData
-          const inventoryData = await getStoreInventory(storeData.store.id)
-          storeInventory.value = inventoryData || []
-          await loadStoreSets()
-        } else {
-          storeInfo.value = null
-          storeInventory.value = []
-          storeSets.value = []
-        }
-      } catch (err) {
-        console.error('[SetInstructions] 매장 인벤토리 로드 실패:', err)
-        storeInfo.value = null
-        storeInventory.value = []
-        storeSets.value = []
-      }
+      console.log('[SetInstructions] 전체 레고 세트 로드 시작')
+      // 매장 계정 필터 없이 전체 세트 로드
+      await loadStoreSets()
     }
 
     const loadStoreSets = async () => {
-      if (!storeInventory.value.length) {
-        storeSets.value = []
-        return
-      }
-
       try {
-        const inventorySetNumbers = storeInventory.value
-          .map(item => {
-            const legoSet = item.lego_sets
-            if (!legoSet) return null
-            if (Array.isArray(legoSet) && legoSet.length > 0) {
-              return legoSet[0].number
-            }
-            if (!Array.isArray(legoSet)) {
-              return legoSet.number
-            }
-            return null
-          })
-          .filter(Boolean)
-
-        if (!inventorySetNumbers.length) {
-          storeSets.value = []
-          return
-        }
-
-        const uniqueSetNumbers = [...new Set(inventorySetNumbers)]
-        const setNumVariations = new Set()
-        uniqueSetNumbers.forEach(setNum => {
-          const baseNum = setNum.split('-')[0]
-          setNumVariations.add(setNum)
-          setNumVariations.add(baseNum)
-          for (let i = 1; i <= 3; i++) {
-            setNumVariations.add(`${baseNum}-${i}`)
-          }
-        })
-
-        const allSetNums = Array.from(setNumVariations)
-        const batchSize = 100
-        const batchPromises = []
-        for (let i = 0; i < allSetNums.length; i += batchSize) {
-          batchPromises.push(
-            supabase
-              .from('lego_sets')
-              .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-              .in('set_num', allSetNums.slice(i, i + batchSize))
-          )
-        }
-
-        const batchResults = await Promise.all(batchPromises)
+        loading.value = true
+        
+        // 전체 레고 세트 조회 (페이지네이션으로 처리)
+        const batchSize = 1000
         let allSetsData = []
-        for (const result of batchResults) {
-          if (result.error) {
-            throw result.error
+        let offset = 0
+        let hasMore = true
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, created_at')
+            .order('created_at', { ascending: false })
+            .range(offset, offset + batchSize - 1)
+          
+          if (error) {
+            console.error('[SetInstructions] lego_sets 조회 오류:', error)
+            throw error
           }
-          if (result.data?.length) {
-            allSetsData.push(...result.data)
+          
+          if (data && data.length > 0) {
+            allSetsData.push(...data)
+            offset += batchSize
+            hasMore = data.length === batchSize
+          } else {
+            hasMore = false
           }
         }
 
-        const finalSetsData = allSetsData.filter(set => {
-          const baseSetNum = set.set_num.split('-')[0]
-          return uniqueSetNumbers.includes(set.set_num) || uniqueSetNumbers.includes(baseSetNum)
-        })
-
-        if (!finalSetsData.length) {
+        if (!allSetsData.length) {
           storeSets.value = []
+          loading.value = false
           return
         }
 
-        const themeIds = [...new Set(finalSetsData.map(s => s.theme_id).filter(Boolean))]
+        const themeIds = [...new Set(allSetsData.map(s => s.theme_id).filter(Boolean))]
         let themeMap = new Map()
         if (themeIds.length) {
           const { data: themesData, error: themesError } = await supabase
@@ -567,23 +520,7 @@ export default {
           }
         }
 
-        const quantityMap = new Map()
-        storeInventory.value.forEach(item => {
-          const legoSet = item.lego_sets
-          let setNum = null
-          if (legoSet) {
-            if (Array.isArray(legoSet) && legoSet.length > 0) {
-              setNum = legoSet[0].number
-            } else if (!Array.isArray(legoSet)) {
-              setNum = legoSet.number
-            }
-          }
-          if (setNum) {
-            quantityMap.set(setNum, (quantityMap.get(setNum) || 0) + (item.quantity || 0))
-          }
-        })
-
-        storeSets.value = finalSetsData
+        storeSets.value = allSetsData
           .map(set => {
             const normalizedImage =
               set.webp_image_url ||
@@ -599,15 +536,19 @@ export default {
               set_img_url: set.set_img_url || null,
               num_parts: set.num_parts || null,
               part_count: resolvePartCount(set),
-              quantity: quantityMap.get(set.set_num) || 0
+              quantity: 0
             }
           })
-          .sort((a, b) => a.set_num.localeCompare(b.set_num, 'ko'))
+          // 최근 등록 순으로 정렬 (created_at 기준, 이미 DB에서 정렬됨)
+          // 추가 정렬 불필요
 
         currentPage.value = 1
+        loading.value = false
+        console.log('[SetInstructions] 전체 레고 세트 로드 완료:', storeSets.value.length, '개')
       } catch (err) {
-        console.error('[SetInstructions] 매장 세트 로드 실패:', err)
+        console.error('[SetInstructions] 전체 레고 세트 로드 실패:', err)
         storeSets.value = []
+        loading.value = false
       }
     }
 
@@ -864,11 +805,26 @@ export default {
       }
     }
 
+    const searchTooltip = ref('')
+    let searchTooltipTimer = null
+
+    const showSearchTooltip = (message) => {
+      if (searchTooltipTimer) {
+        clearTimeout(searchTooltipTimer)
+      }
+      searchTooltip.value = message
+      searchTooltipTimer = setTimeout(() => {
+        searchTooltip.value = ''
+        searchTooltipTimer = null
+      }, 3000)
+    }
+
     const handleSearchEnter = async () => { // 🔧 수정됨
       const query = setSearchQuery.value.trim()
       if (!query) {
         searchResults.value = []
         showSetDropdown.value = false
+        showSearchTooltip('검색어를 입력해주세요.')
         return
       }
 
@@ -938,13 +894,8 @@ export default {
     }
 
     watch(user, async (newUser) => {
-      if (newUser) {
-        await loadStoreInventory()
-      } else {
-        storeInfo.value = null
-        storeInventory.value = []
-        storeSets.value = []
-      }
+      // 로그인 상태와 관계없이 전체 레고 세트 로드
+      await loadStoreInventory()
     }, { immediate: true })
 
     return {
@@ -964,11 +915,14 @@ export default {
       handleSearchEnter,
       handleSearchBlur,
       handleSelectSet,
+      searchTooltip,
+      searchInputRef,
       handleSetImageError,
       handleSelectedSetImageError,
       handleThumbnailError,
       resetPage,
       storeSets,
+      storeSetsCount, // 🔧 수정됨
       paginatedStoreSets,
       visiblePages,
       totalPages,
@@ -982,6 +936,47 @@ export default {
 </script>
 
 <style scoped>
+/* 검색 툴팁 스타일 */
+.set-search-wrapper {
+  position: relative;
+  overflow: visible;
+}
+
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 10000;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  animation: slideInTooltip 0.3s ease;
+}
+
+.search-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 1rem;
+  border: 6px solid transparent;
+  border-bottom-color: #1f2937;
+}
+
+@keyframes slideInTooltip {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 .set-instructions-page {
   min-height: 100vh;
   background: #f9fafb;
@@ -1028,7 +1023,7 @@ export default {
   background: #ffffff;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card-body {
@@ -1055,6 +1050,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  overflow: visible;
 }
 
 .set-search-input-row {
@@ -1352,6 +1348,9 @@ export default {
 }
 
 .result-header { /* // 🔧 수정됨 */
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
   margin-bottom: 1.5rem;
 }
 
@@ -1360,6 +1359,12 @@ export default {
   font-weight: 700;
   color: #111827;
   margin: 0;
+}
+
+.result-count { /* // 🔧 수정됨 */
+  font-size: 1rem;
+  font-weight: 500;
+  color: #6b7280;
 }
 
 .sets-grid { /* // 🔧 수정됨 */

@@ -12,7 +12,7 @@
             <div class="form-group">
               <label>레고번호를 입력하세요.</label>
               <div class="set-search-wrapper" ref="setDropdownRef">
-                <div class="set-search-input-row">
+                <div class="set-search-input-row" ref="searchInputRef">
                   <div class="set-search-input-wrapper">
                     <input
                       type="text"
@@ -36,6 +36,10 @@
                   >
                     검색
                   </button>
+                </div>
+                <!-- 검색 툴팁 -->
+                <div v-if="searchTooltip" class="search-tooltip">
+                  <span>{{ searchTooltip }}</span>
                 </div>
 
                 <transition name="select-fade">
@@ -313,6 +317,141 @@
         </div>
       </div>
     </div>
+
+    <!-- 로그인 모달 -->
+    <div v-if="showLoginModal" class="modal-overlay" @click="showLoginModal = false">
+      <div class="modal-content login-modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>로그인</h3>
+          <button 
+            type="button" 
+            class="modal-close-btn" 
+            @click="showLoginModal = false" 
+            aria-label="모달 닫기"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <form @submit.prevent="handleLoginInModal" class="login-form-in-modal">
+            <div class="form-group">
+              <label for="login-email">이메일</label>
+              <input
+                type="email"
+                id="login-email"
+                v-model="loginEmail"
+                required
+                placeholder="이메일을 입력하세요"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="login-password">비밀번호</label>
+              <input
+                type="password"
+                id="login-password"
+                v-model="loginPassword"
+                required
+                placeholder="비밀번호를 입력하세요"
+                class="form-input"
+              />
+            </div>
+            <div v-if="loginError" class="error-message-in-modal">
+              {{ loginError }}
+            </div>
+            <div class="modal-footer">
+              <button type="button" @click="showLoginModal = false" class="btn-secondary">취소</button>
+              <button type="submit" class="btn-primary" :disabled="loginLoading">
+                {{ loginLoading ? '로그인 중...' : '로그인' }}
+              </button>
+            </div>
+          </form>
+          <div class="login-modal-links">
+            <button type="button" @click="showSignupModal = true; showLoginModal = false" class="login-link-btn">
+              회원가입
+            </button>
+            <span class="link-separator">|</span>
+            <button type="button" @click="handleTestAccountLogin" class="login-link-btn" :disabled="loginLoading">
+              테스트 계정 로그인
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 회원가입 모달 -->
+    <div v-if="showSignupModal" class="modal-overlay" @click="showSignupModal = false">
+      <div class="modal-content login-modal-content" @click.stop>
+        <div class="modal-header">
+          <h3>회원가입</h3>
+          <button 
+            type="button" 
+            class="modal-close-btn" 
+            @click="showSignupModal = false" 
+            aria-label="모달 닫기"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="modal-body">
+          <form @submit.prevent="handleSignupInModal" class="login-form-in-modal">
+            <div class="form-group">
+              <label for="signup-email">이메일</label>
+              <input
+                type="email"
+                id="signup-email"
+                v-model="signupEmail"
+                required
+                placeholder="이메일을 입력하세요"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="signup-password">비밀번호</label>
+              <input
+                type="password"
+                id="signup-password"
+                v-model="signupPassword"
+                required
+                placeholder="비밀번호를 입력하세요"
+                minlength="6"
+                class="form-input"
+              />
+            </div>
+            <div class="form-group">
+              <label for="signup-password-confirm">비밀번호 확인</label>
+              <input
+                type="password"
+                id="signup-password-confirm"
+                v-model="signupPasswordConfirm"
+                required
+                placeholder="비밀번호를 다시 입력하세요"
+                minlength="6"
+                class="form-input"
+              />
+            </div>
+            <div v-if="signupError" class="error-message-in-modal">
+              {{ signupError }}
+            </div>
+            <div class="modal-footer">
+              <button type="button" @click="showSignupModal = false" class="btn-secondary">취소</button>
+              <button type="submit" class="btn-primary" :disabled="signupLoading">
+                {{ signupLoading ? '가입 중...' : '회원가입' }}
+              </button>
+            </div>
+          </form>
+          <div class="login-modal-links">
+            <button type="button" @click="showLoginModal = true; showSignupModal = false" class="login-link-btn">
+              로그인
+            </button>
+            <span class="link-separator">|</span>
+            <button type="button" @click="handleTestAccountLogin" class="login-link-btn" :disabled="signupLoading">
+              테스트 계정 로그인
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -327,7 +466,7 @@ import { formatSetDisplay, formatSetNumber, fetchSetMetadata } from '../utils/se
 export default {
   name: 'MissingParts',
   setup() {
-    const { supabase, user } = useSupabase()
+    const { supabase, user, signIn, signUp } = useSupabase()
     const { getStoreInfoByEmail, getStoreInventory } = useSupabasePleyon()
     const { checkSetPartsExist, syncSetParts } = usePleyonInventorySync()
     const route = useRoute()
@@ -342,6 +481,7 @@ export default {
     const selectedSet = ref(null)
     const showSetDropdown = ref(false)
     const setDropdownRef = ref(null)
+    const searchInputRef = ref(null)
     const storeInventory = ref([])
     const storeInfo = ref(null)
 
@@ -354,6 +494,22 @@ export default {
     const missingPartsModalData = ref([])
     const missingPartsModalLoading = ref(false)
     const missingPartsModalError = ref(null)
+
+    // 로그인 모달 관련
+    const showLoginModal = ref(false)
+    const showSignupModal = ref(false)
+    const loginEmail = ref('')
+    const loginPassword = ref('')
+    const loginLoading = ref(false)
+    const loginError = ref('')
+    
+    // 회원가입 모달 관련
+    const signupEmail = ref('')
+    const signupPassword = ref('')
+    const signupPasswordConfirm = ref('')
+    const signupLoading = ref(false)
+    const signupError = ref('')
+    const pendingSearchQuery = ref('')
 
     // 정렬 함수: 색상 우선, element_id 2차, 피규어는 스티커 바로 앞
     const isSticker = (item) => {
@@ -726,15 +882,41 @@ export default {
       }
     }
 
+    const searchTooltip = ref('')
+    let searchTooltipTimer = null
+
+    const showSearchTooltip = (message) => {
+      if (searchTooltipTimer) {
+        clearTimeout(searchTooltipTimer)
+      }
+      searchTooltip.value = message
+      searchTooltipTimer = setTimeout(() => {
+        searchTooltip.value = ''
+        searchTooltipTimer = null
+      }, 3000)
+    }
+
     const handleSearchEnter = async () => {
       console.log('[MissingParts] handleSearchEnter 호출:', { query: setSearchQuery.value })
       if (!setSearchQuery.value.trim()) {
         console.log('[MissingParts] 검색 쿼리 없음')
         searchResults.value = []
         showSetDropdown.value = false
+        showSearchTooltip('검색어를 입력해주세요.')
+        return
+      }
+
+      // 로그인 체크
+      if (!user.value) {
+        pendingSearchQuery.value = setSearchQuery.value
+        showLoginModal.value = true
         return
       }
       
+      await performSearch()
+    }
+
+    const performSearch = async () => {
       await searchSets()
       console.log('[MissingParts] searchSets 완료, 검색 결과 수:', searchResults.value.length)
       
@@ -746,6 +928,116 @@ export default {
         showSetDropdown.value = true
       } else {
         console.log('[MissingParts] 검색 결과 없음')
+      }
+    }
+
+    // 모달에서 로그인 처리
+    const handleLoginInModal = async () => {
+      loginLoading.value = true
+      loginError.value = ''
+      
+      try {
+        const { data, error: loginErr } = await signIn(loginEmail.value, loginPassword.value)
+        
+        if (loginErr) {
+          loginError.value = loginErr.message
+          loginLoading.value = false
+          return
+        }
+        
+        if (data?.user) {
+          // 로그인 성공 시 사용자 정보 즉시 업데이트
+          user.value = data.user
+          
+          // 세션 정보 확인
+          const { data: sessionData } = await supabase.auth.getSession()
+          if (sessionData?.session) {
+            user.value = sessionData.session.user
+          }
+          
+          // 모달 닫기
+          showLoginModal.value = false
+          loginEmail.value = ''
+          loginPassword.value = ''
+          loginError.value = ''
+          
+          // 사용자 정보 업데이트 대기
+          await new Promise(resolve => setTimeout(resolve, 300))
+          
+          // 저장된 검색 쿼리로 검색 수행
+          if (pendingSearchQuery.value) {
+            setSearchQuery.value = pendingSearchQuery.value
+            await performSearch()
+            pendingSearchQuery.value = ''
+          }
+        } else {
+          loginError.value = '로그인에 실패했습니다. 사용자 정보를 가져올 수 없습니다.'
+        }
+      } catch (err) {
+        console.error('로그인 오류:', err)
+        loginError.value = err.message || '로그인에 실패했습니다.'
+      } finally {
+        loginLoading.value = false
+      }
+    }
+
+    // 테스트 계정 로그인
+    const handleTestAccountLogin = async () => {
+      loginEmail.value = 'test@pley.co.kr'
+      loginPassword.value = '123456'
+      await handleLoginInModal()
+    }
+
+    // 모달에서 회원가입 처리
+    const handleSignupInModal = async () => {
+      signupLoading.value = true
+      signupError.value = ''
+      
+      // 비밀번호 확인 검증
+      if (signupPassword.value !== signupPasswordConfirm.value) {
+        signupError.value = '비밀번호가 일치하지 않습니다.'
+        signupLoading.value = false
+        return
+      }
+      
+      // 비밀번호 길이 검증
+      if (signupPassword.value.length < 6) {
+        signupError.value = '비밀번호는 최소 6자 이상이어야 합니다.'
+        signupLoading.value = false
+        return
+      }
+      
+      try {
+        const { data, error: signupErr } = await signUp(signupEmail.value, signupPassword.value)
+        
+        if (signupErr) {
+          signupError.value = signupErr.message
+          signupLoading.value = false
+          return
+        }
+        
+        if (data?.user) {
+          // 회원가입 성공 시 로그인 모달로 전환
+          showSignupModal.value = false
+          signupEmail.value = ''
+          signupPassword.value = ''
+          signupPasswordConfirm.value = ''
+          signupError.value = ''
+          
+          // 로그인 모달 표시 및 이메일 자동 입력
+          loginEmail.value = data.user.email || signupEmail.value
+          showLoginModal.value = true
+          
+          // 성공 메시지 표시
+          loginError.value = '회원가입이 완료되었습니다. 로그인해주세요.'
+        } else {
+          signupError.value = '회원가입에 실패했습니다.'
+        }
+      } catch (err) {
+        console.error('회원가입 오류:', err)
+        signupError.value = err.message || '회원가입에 실패했습니다.'
+      } finally {
+        signupLoading.value = false
       }
     }
 
@@ -2327,6 +2619,7 @@ export default {
       handleSearchEnter,
       handleSearchBlur,
       handleSelectSet,
+      searchTooltip,
       isCdnUrl,
       formatSetDisplay,
       formatSetNumber,
@@ -2339,7 +2632,21 @@ export default {
       resolvePartCount,
       inspectionSets,
       handleSetImageError,
-      resetPage
+      resetPage,
+      showLoginModal,
+      loginEmail,
+      loginPassword,
+      loginLoading,
+      loginError,
+      handleLoginInModal,
+      handleTestAccountLogin,
+      showSignupModal,
+      signupEmail,
+      signupPassword,
+      signupPasswordConfirm,
+      signupLoading,
+      signupError,
+      handleSignupInModal
     }
   }
 }
@@ -2392,7 +2699,7 @@ export default {
   background: #ffffff;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .card-body {
@@ -3363,6 +3670,47 @@ export default {
   }
 }
 
+/* 검색 툴팁 스타일 */
+.set-search-wrapper {
+  position: relative;
+  overflow: visible;
+}
+
+.search-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  background: #1f2937;
+  color: #ffffff;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  z-index: 10000;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  animation: slideInTooltip 0.3s ease;
+}
+
+.search-tooltip::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  left: 1rem;
+  border: 6px solid transparent;
+  border-bottom-color: #1f2937;
+}
+
+@keyframes slideInTooltip {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 1200px) and (min-width: 900px) {
   .modal-parts-grid {
     grid-template-columns: repeat(4, 1fr) !important;
@@ -3590,6 +3938,95 @@ export default {
   .part-card .part-image {
     max-height: 150px;
   }
+}
+
+/* 로그인 모달 스타일 */
+.login-modal-content {
+  max-width: 450px;
+}
+
+.login-form-in-modal {
+  padding: 0;
+}
+
+.login-form-in-modal .form-group {
+  margin-bottom: 1.25rem;
+}
+
+.login-form-in-modal .form-group:last-of-type {
+  margin-bottom: 1rem;
+}
+
+.login-form-in-modal .form-input {
+  width: 100%;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.login-form-in-modal .form-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.error-message-in-modal {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #dc2626;
+  font-size: 0.875rem;
+}
+
+.login-modal-links {
+  padding: 1rem 1.5rem;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.login-link {
+  color: #2563eb;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.login-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.login-link-btn {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s ease;
+  text-decoration: none;
+}
+
+.login-link-btn:hover:not(:disabled) {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.login-link-btn:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.link-separator {
+  color: #9ca3af;
 }
 </style>
 

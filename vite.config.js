@@ -184,6 +184,11 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/api\/proxy/, ''),
           configure: createProxyLogger('Rebrickable')
         },
+        '/api/rebrickable': {
+          target: `http://localhost:${portConfig.webpApi}`,
+          changeOrigin: true,
+          configure: createProxyLogger('RebrickableAPI')
+        },
         '/api/synthetic': {
           target: `http://localhost:${portConfig.syntheticApi}`,
           changeOrigin: true,

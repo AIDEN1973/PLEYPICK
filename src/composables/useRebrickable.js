@@ -3,7 +3,10 @@ import { ref } from 'vue'
 // 프로덕션 모드에서는 환경 변수 필수, 개발 모드에서는 fallback 허용
 const REBRICKABLE_API_KEY = import.meta.env.VITE_REBRICKABLE_API_KEY || 
   (import.meta.env.PROD ? null : 'd966442dee02b69a7d05a63805216a85')
-const REBRICKABLE_BASE_URL = 'https://rebrickable.com/api/v3'
+// 프록시를 통해 API 호출 (CORS 해결)
+const REBRICKABLE_BASE_URL = import.meta.env.DEV 
+  ? '/api/rebrickable'
+  : 'https://rebrickable.com/api/v3'
 
 // 프로덕션 환경에서는 디버그 로그 비활성화
 if (import.meta.env.DEV) {
@@ -35,12 +38,19 @@ export function useRebrickable() {
         throw new Error(errorMsg)
       }
       const url = `${REBRICKABLE_BASE_URL}${endpoint}`
+      // 프록시 사용 시 Authorization 헤더 제거 (서버에서 처리)
+      const headers = import.meta.env.DEV 
+        ? {
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        : {
+            'Authorization': `key ${REBRICKABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
       const response = await fetch(url, {
-        headers: {
-          'Authorization': `key ${REBRICKABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-          ...options.headers
-        },
+        headers,
         ...options
       })
 
