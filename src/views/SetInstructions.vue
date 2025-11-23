@@ -327,7 +327,7 @@ export default {
           
           console.log('[SetInstructions] 프록시 URL 시도:', proxyUrl, `(locale: ${locale})`)
           
-          try {
+            try {
             const response = await fetch(proxyUrl, {
               headers: {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -341,8 +341,25 @@ export default {
               continue
             }
 
+            const contentType = response.headers.get('content-type') || ''
             const html = await response.text()
-            console.log(`[SetInstructions] Locale ${locale} HTML 길이:`, html.length)
+            console.log(`[SetInstructions] Locale ${locale} HTML 길이:`, html.length, `Content-Type: ${contentType}`)
+            
+            // JSON 에러 응답인 경우 처리
+            if (contentType.includes('application/json') || (html.length < 1000 && html.trim().startsWith('{'))) {
+              try {
+                const errorData = JSON.parse(html)
+                console.error(`[SetInstructions] Locale ${locale} JSON 에러 응답:`, errorData)
+                continue
+              } catch (e) {
+                // JSON 파싱 실패 시 HTML로 처리
+              }
+            }
+            
+            // HTML이 너무 짧으면 에러일 가능성
+            if (html.length < 1000) {
+              console.warn(`[SetInstructions] Locale ${locale} HTML이 너무 짧음 (${html.length}바이트), 샘플:`, html.substring(0, 200))
+            }
 
             // window.__INITIAL_STATE__ 에서 설명서 정보 추출
             const instructionEntries = []

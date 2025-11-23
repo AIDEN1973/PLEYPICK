@@ -25,31 +25,56 @@ export default async function handler(req, res) {
     
     console.log(`📄 LEGO 설명서 프록시 요청: ${targetUrl}`)
 
-    const response = await fetch(targetUrl, {
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Referer': 'https://www.lego.com/'
-      },
-      timeout: 10000
-    })
+    // 타임아웃 설정 (AbortController 사용)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-    if (!response.ok) {
-      console.error(`❌ LEGO 설명서 프록시 호출 실패: ${response.status} ${response.statusText}`)
-      return res.status(response.status).json({
-        error: `LEGO API Error: ${response.status} ${response.statusText}`
+    try {
+      const response = await fetch(targetUrl, {
+        headers: {
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Referer': 'https://www.lego.com/'
+        },
+        signal: controller.signal
       })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        clearTimeout(timeoutId)
+        console.error(`❌ LEGO 설명서 프록시 호출 실패: ${response.status} ${response.statusText}`)
+        return res.status(response.status).json({
+          error: `LEGO API Error: ${response.status} ${response.statusText}`
+        })
+      }
+
+      const html = await response.text()
+      
+      // HTML이 너무 짧으면 에러 페이지일 가능성
+      if (html.length < 1000) {
+        console.warn(`⚠️ LEGO 설명서 프록시 응답이 너무 짧음 (${html.length}바이트)`)
+        console.warn(`응답 샘플:`, html.substring(0, 500))
+      }
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      res.setHeader('Cache-Control', 'public, max-age=300')
+
+      console.log(`✅ LEGO 설명서 프록시 성공: ${response.status}, HTML 길이: ${html.length}바이트`)
+      return res.status(200).send(html)
+    } catch (fetchError) {
+      clearTimeout(timeoutId)
+      if (fetchError.name === 'AbortError') {
+        console.error('❌ LEGO 설명서 프록시 타임아웃')
+        return res.status(504).json({
+          error: 'Request timeout',
+          details: 'LEGO.com 서버 응답 시간 초과'
+        })
+      }
+      throw fetchError
     }
-
-    const html = await response.text()
-
-    res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.setHeader('Cache-Control', 'public, max-age=300')
-
-    console.log(`✅ LEGO 설명서 프록시 성공: ${response.status}`)
-    return res.status(200).send(html)
 
   } catch (error) {
     console.error('❌ LEGO 설명서 프록시 오류:', error)
