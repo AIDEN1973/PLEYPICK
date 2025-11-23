@@ -275,6 +275,65 @@ app.options('/api/rebrickable/*', (req, res) => {
   res.sendStatus(204)
 })
 
+// LEGO 설명서 프록시 엔드포인트
+app.get('/api/lego-instructions/*', async (req, res) => {
+  try {
+    const instructionPath = req.params[0]
+    const queryString = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''
+    const targetUrl = `https://www.lego.com/${instructionPath}${queryString}`
+
+    console.log(`📄 LEGO 설명서 프록시 요청: ${targetUrl}`)
+
+    const response = await fetch(targetUrl, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Referer': 'https://www.lego.com/'
+      },
+      timeout: 10000
+    })
+
+    if (!response.ok) {
+      console.error(`❌ LEGO 설명서 프록시 호출 실패: ${response.status} ${response.statusText}`)
+      return res.status(response.status).json({
+        error: `LEGO API Error: ${response.status} ${response.statusText}`
+      })
+    }
+
+    const html = await response.text()
+
+    res.set({
+      'Content-Type': 'text/html; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Cache-Control': 'public, max-age=300'
+    })
+
+    console.log(`✅ LEGO 설명서 프록시 성공: ${response.status}`)
+    res.send(html)
+
+  } catch (error) {
+    console.error('❌ LEGO 설명서 프록시 오류:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      details: error.message
+    })
+  }
+})
+
+app.options('/api/lego-instructions/*', (req, res) => {
+  res.set({
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400'
+  })
+  res.sendStatus(204)
+})
+
 // 헬스 체크 엔드포인트
 app.get('/health', (req, res) => {
   res.json({ 

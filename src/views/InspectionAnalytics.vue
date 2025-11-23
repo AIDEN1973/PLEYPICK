@@ -472,10 +472,12 @@ export default {
     })
 
     const averageDuration = computed(() => {
-      const completed = sessions.value.filter(s => s.status === 'completed' && s.duration_seconds)
+      const completed = sessions.value.filter(s => s.status === 'completed' && s.duration_seconds && s.duration_seconds > 0)
       if (completed.length === 0) return 0
       const sum = completed.reduce((acc, s) => acc + (s.duration_seconds || 0), 0)
-      return Math.floor(sum / completed.length)
+      const avg = Math.floor(sum / completed.length)
+      console.log('[검색] 평균 소요시간 계산:', { completedCount: completed.length, sum, avg })
+      return avg
     })
 
     const averageDurationLabel = computed(() => {
@@ -598,14 +600,23 @@ export default {
           console.log('[검색] selectedSetId 없음, 전체 조회')
         }
 
+        // 날짜 필터는 last_saved_at 기준으로 적용 (검수 중인 세션도 포함)
         if (dateFrom.value) {
-          query = query.gte('started_at', new Date(dateFrom.value).toISOString())
+          const fromDate = new Date(dateFrom.value)
+          fromDate.setHours(0, 0, 0, 0)
+          console.log('[검색] 날짜 필터 적용 (from):', dateFrom.value, '->', fromDate.toISOString())
+          query = query.gte('last_saved_at', fromDate.toISOString())
+        } else {
+          console.log('[검색] 날짜 필터 없음 (from)')
         }
 
         if (dateTo.value) {
           const endDate = new Date(dateTo.value)
           endDate.setHours(23, 59, 59, 999)
-          query = query.lte('started_at', endDate.toISOString())
+          console.log('[검색] 날짜 필터 적용 (to):', dateTo.value, '->', endDate.toISOString())
+          query = query.lte('last_saved_at', endDate.toISOString())
+        } else {
+          console.log('[검색] 날짜 필터 없음 (to)')
         }
 
         const { data: sessionsData, error: sessionsError } = await query
@@ -955,6 +966,7 @@ export default {
     }
 
     const initializeDateRange = () => {
+      // 최근 7일을 기본값으로 설정
       const today = new Date()
       const lastWeek = new Date(today)
       lastWeek.setDate(lastWeek.getDate() - 7)
@@ -1078,13 +1090,45 @@ export default {
       }
     }
 
-    onMounted(async () => {
-      // 로그인 상태일 때만 데이터 로드
-      if (user.value) {
+    // 사용자 상태 감지
+    watch(user, async (newUser, oldUser) => {
+      console.log('[검색] watch(user) 변경 감지:', { hasNewUser: !!newUser, hasOldUser: !!oldUser })
+      if (newUser && !userLoading.value) {
+        console.log('[검색] 로그인 상태, 데이터 로드 시작')
         await checkAdminRole()
         await loadAvailableSets()
         initializeDateRange()
+        console.log('[검색] 날짜 필터 초기화 완료:', { dateFrom: dateFrom.value, dateTo: dateTo.value })
         loadAnalytics()
+      }
+    }, { immediate: false })
+
+    // 사용자 로딩 완료 감지
+    watch(userLoading, async (loading, oldLoading) => {
+      console.log('[검색] watch(userLoading) 변경 감지:', { loading, oldLoading, hasUser: !!user.value })
+      if (!loading && user.value) {
+        console.log('[검색] 사용자 로딩 완료, 데이터 로드 시작')
+        await checkAdminRole()
+        await loadAvailableSets()
+        initializeDateRange()
+        console.log('[검색] 날짜 필터 초기화 완료:', { dateFrom: dateFrom.value, dateTo: dateTo.value })
+        loadAnalytics()
+      }
+    }, { immediate: true })
+
+    onMounted(async () => {
+      console.log('[검색] onMounted 실행:', { userLoading: userLoading.value, hasUser: !!user.value })
+      // 사용자 로딩이 완료되고 사용자가 있으면 즉시 실행
+      await nextTick()
+      if (!userLoading.value && user.value) {
+        console.log('[검색] onMounted에서 즉시 데이터 로드')
+        await checkAdminRole()
+        await loadAvailableSets()
+        initializeDateRange()
+        console.log('[검색] 날짜 필터 초기화 완료:', { dateFrom: dateFrom.value, dateTo: dateTo.value })
+        loadAnalytics()
+      } else {
+        console.log('[검색] onMounted에서 데이터 로드 안 함 (로딩 중이거나 사용자 없음)')
       }
     })
 

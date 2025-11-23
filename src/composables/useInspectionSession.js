@@ -805,6 +805,121 @@ export function useInspectionSession() {
     }
   }
 
+  const findLastSessions = async (userId = null, limit = 10) => {
+    try {
+      const targetUserId = userId || user.value?.id
+
+      if (!targetUserId) {
+        return []
+      }
+
+      const currentSessionId = session.id
+
+      let query = supabase
+        .from('inspection_sessions')
+        .select(`
+          id,
+          set_id,
+          status,
+          progress,
+          started_at,
+          last_saved_at,
+          completed_at,
+          lego_sets:set_id (
+            name,
+            set_num,
+            num_parts,
+            webp_image_url,
+            set_img_url
+          )
+        `)
+        .eq('user_id', targetUserId)
+        .in('status', ['in_progress', 'paused'])
+        .order('last_saved_at', { ascending: false })
+        .limit(limit)
+
+      if (currentSessionId) {
+        query = query.neq('id', currentSessionId)
+      }
+
+      const { data: serverSessions, error: serverError } = await query
+
+      if (serverError) {
+        console.warn('[findLastSessions] 서버 쿼리 오류', serverError)
+        return []
+      }
+
+      if (!serverSessions || serverSessions.length === 0) {
+        return []
+      }
+
+      const sessionIds = serverSessions.map(s => s.id)
+      
+      // inspection_items 조회하여 누락 부품 수 계산
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('inspection_items')
+        .select('session_id, part_id, color_id, status, total_count, checked_count')
+        .in('session_id', sessionIds)
+
+      const itemsBySession = new Map()
+      if (!itemsError && itemsData) {
+        itemsData.forEach(item => {
+          if (!itemsBySession.has(item.session_id)) {
+            itemsBySession.set(item.session_id, [])
+          }
+          itemsBySession.get(item.session_id).push(item)
+        })
+      }
+
+      const sessionsData = await Promise.all(
+        serverSessions.map(async (serverSession) => {
+          const sessionItems = itemsBySession.get(serverSession.id) || []
+          const missingItems = sessionItems.filter(item => item.status === 'missing')
+          
+          // 누락 부품 분류 수 (고유한 part_id + color_id 조합)
+          const missingPartTypes = new Set()
+          let missingTotalCount = 0
+          
+          missingItems.forEach(item => {
+            const partTypeKey = `${item.part_id}_${item.color_id}`
+            missingPartTypes.add(partTypeKey)
+            const missingCount = Math.max(0, (item.total_count || 0) - (item.checked_count || 0))
+            missingTotalCount += missingCount
+          })
+          
+          const missingPartsTypesCount = missingPartTypes.size
+          const totalParts = serverSession.lego_sets?.num_parts || 0
+
+          const sessionData = {
+            id: serverSession.id,
+            set_id: serverSession.set_id,
+            set_name: serverSession.lego_sets?.name || '세트명 없음',
+            set_num: serverSession.lego_sets?.set_num || null,
+            webp_image_url: serverSession.lego_sets?.webp_image_url || null,
+            set_img_url: serverSession.lego_sets?.set_img_url || null,
+            user_id: targetUserId,
+            status: serverSession.status,
+            progress: serverSession.progress || 0,
+            started_at: serverSession.started_at,
+            last_saved_at: serverSession.last_saved_at,
+            completed_at: serverSession.completed_at,
+            updated_at: serverSession.last_saved_at || serverSession.started_at,
+            total_parts: totalParts,
+            missing_parts_types_count: missingPartsTypesCount,
+            missing_parts_total_count: missingTotalCount
+          }
+          await hydrateSessionSetMetadata(supabase, sessionData)
+          return sessionData
+        })
+      )
+
+      return sessionsData
+    } catch (err) {
+      console.error('진행 중 세션 목록 찾기 실패:', err)
+      return []
+    }
+  }
+
   const progress = computed(() => session.progress)
   const missingCount = computed(() => 
     items.value.filter(i => i.status === 'missing').length
@@ -896,6 +1011,7 @@ export function useInspectionSession() {
     deleteSetNote,
     resetSessionState,
     findLastSession,
+    findLastSessions,
     completeSessionById,
     syncToServer,
     syncInProgress,

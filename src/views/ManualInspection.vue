@@ -298,36 +298,54 @@
             </div>
           </div>
 
-          <div v-if="!session.id && lastSession" class="session-setup" style="margin-top: 1.5rem;">
-            <div class="setup-card resume-card">
-              <div class="card-header">
-                <h3>진행 중 검수</h3>
-                <p>진행 중이던 검수를 이어서 진행할 수 있습니다</p>
-              </div>
-              <div class="card-body">
-                <div class="resume-info">
-                  <div class="info-row">
-                    <span class="info-label">세트명</span>
-                    <span class="info-value">{{ lastSessionDisplayName || '알 수 없음' }}</span>
+          <div v-if="!session.id && lastSessions.length > 0" class="resume-sessions-section" style="margin-top: 1.5rem;">
+            <div class="result-header">
+              <h3>진행 중 검수</h3>
+              <span class="result-count">(총 {{ lastSessions.length }}개)</span>
+            </div>
+            <div class="sets-grid">
+                  <div
+                    v-for="sessionItem in lastSessions"
+                    :key="sessionItem.id"
+                    class="set-card"
+                  >
+                    <div class="set-image">
+                      <img
+                        v-if="sessionItem.webp_image_url || sessionItem.set_img_url"
+                        :src="sessionItem.webp_image_url || sessionItem.set_img_url"
+                        :alt="formatSessionDisplayName(sessionItem)"
+                        @error="handleResumeSessionImageError"
+                      />
+                      <div v-else class="no-image">이미지 없음</div>
+                      <div class="progress-badge">
+                        {{ sessionItem.progress || 0 }}%
+                      </div>
+                    </div>
+                    <div class="set-info">
+                      <div class="set-name-container">
+                        <span class="set-number-badge">{{ formatSetNumber(sessionItem.set_num) || '세트번호 없음' }}</span>
+                        <div class="set-name-wrapper">
+                          <span v-if="sessionItem.set_theme_name" class="set-theme-name">{{ sessionItem.set_theme_name }}</span>
+                          <span v-if="sessionItem.set_theme_name && sessionItem.set_name" class="set-name-divider">|</span>
+                          <span v-if="sessionItem.set_name" class="set-name-text">{{ sessionItem.set_name }}</span>
+                        </div>
+                      </div>
+                      <div class="set-stats">
+                        <div class="set-stats-row">
+                          <span class="set-quantity">부품수: {{ sessionItem.total_parts || 0 }}개</span>
+                        </div>
+                        <span v-if="sessionItem?.last_saved_at" class="last-inspection-date">마지막 검수: {{ formatDate(sessionItem.last_saved_at) }}</span>
+                      </div>
+                      <div class="resume-session-actions">
+                        <button @click.stop="resumeSessionById(sessionItem.id)" class="btn-primary btn-resume">
+                          이어하기
+                          <span v-if="sessionItem.missing_parts_types_count !== undefined && sessionItem.missing_parts_types_count > 0" class="btn-missing-badge">
+                            누락 {{ sessionItem.missing_parts_types_count }}개 분류, 총 {{ sessionItem.missing_parts_total_count || 0 }}개
+                          </span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div class="info-row">
-                    <span class="info-label">진행률</span>
-                    <span class="info-value progress-text">
-                      {{ lastSession?.progress || 0 }}%
-                      <span v-if="lastSessionProgressInfo && lastSessionProgressInfo.total > 0" class="progress-detail">
-                        ({{ lastSessionProgressInfo.checked }}/{{ lastSessionProgressInfo.total }})
-                      </span>
-                    </span>
-                  </div>
-                  <div class="info-row">
-                    <span class="info-label">마지막 저장</span>
-                    <span class="info-value">{{ lastSession?.last_saved_at ? formatDate(lastSession.last_saved_at) : '-' }}</span>
-                  </div>
-                </div>
-                <div class="resume-actions">
-                  <button @click="resumeSession" class="btn-primary">이어하기</button>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -838,6 +856,7 @@ export default {
       pauseSession: pauseSessionAction,
       completeSession: completeSessionAction,
       findLastSession,
+      findLastSessions,
       completeSessionById,
       syncToServer,
       syncInProgress,
@@ -851,6 +870,7 @@ export default {
     const searchResultsKey = ref(0) // 강제 리렌더링을 위한 key
     const setSearchQuery = ref('')
     const lastSession = ref(null)
+    const lastSessions = ref([])
     const showSetDropdown = ref(false)
     const partImageUrls = ref({})
     const setDropdownRef = ref(null)
@@ -2103,7 +2123,8 @@ export default {
           router.push(`/manual-inspection?session=${newSession.id}`)
         }
         // 새 세션 시작 후 다른 세션이 있는지 확인
-        lastSession.value = await findLastSession(user.value?.id)
+        lastSessions.value = await findLastSessions(user.value?.id, 10)
+        lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
         showSetDropdown.value = false
         currentItemIndex.value = 0
       } catch (err) {
@@ -2156,7 +2177,8 @@ export default {
               if (newSession && newSession.id) {
                 router.push(`/manual-inspection?session=${newSession.id}`)
               }
-              lastSession.value = await findLastSession(user.value?.id)
+              lastSessions.value = await findLastSessions(user.value?.id, 10)
+              lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
               showSetDropdown.value = false
               currentItemIndex.value = 0
             } catch (err) {
@@ -2236,10 +2258,18 @@ export default {
       }
     }
 
-    const resumeSession = async () => {
-      if (!lastSession.value) return
+    const formatSessionDisplayName = (sessionItem) => {
+      if (!sessionItem) return ''
+      const setNum = sessionItem.set_num
+      const themeName = sessionItem.set_theme_name
+      const setName = sessionItem.set_name
+      return formatSetDisplay(setNum, themeName, setName || '세트명 없음')
+    }
+
+    const resumeSessionById = async (sessionId) => {
+      if (!sessionId) return
       try {
-        await loadSession(lastSession.value.id)
+        await loadSession(sessionId)
         selectedSetId.value = session.set_id
         
         // 세트 정보 조회하여 검색창에 표시
@@ -2273,7 +2303,8 @@ export default {
         
         showSetDropdown.value = false
         // 세션 복원 후 다른 세션이 있는지 확인
-        lastSession.value = await findLastSession()
+        lastSessions.value = await findLastSessions(user.value?.id, 10)
+        lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
         
         await focusLastInspectedItem() // 🔧 수정됨
       } catch (err) {
@@ -3109,6 +3140,21 @@ export default {
       event.target.style.display = 'none'
     }
 
+    const handleResumeSessionImageError = (event) => {
+      event.target.style.display = 'none'
+      const wrapper = event.target.closest('.resume-session-image-wrapper')
+      if (wrapper) {
+        let placeholder = wrapper.querySelector('.resume-session-no-image')
+        if (!placeholder) {
+          placeholder = document.createElement('div')
+          placeholder.className = 'resume-session-no-image'
+          placeholder.textContent = '이미지 없음'
+          wrapper.appendChild(placeholder)
+        }
+        placeholder.style.display = 'flex'
+      }
+    }
+
     const handleImageLoad = (event) => {
       // 이미지 로드 성공 시 표시
       if (event && event.target) {
@@ -3238,7 +3284,8 @@ export default {
     const finalizeSessionReset = async () => {
       await resetSessionState()
       resetView()
-      lastSession.value = await findLastSession()
+      lastSessions.value = await findLastSessions(user.value?.id, 10)
+      lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
     }
 
     const getCardStatusClass = (status) => {
@@ -3607,15 +3654,17 @@ export default {
           console.log('[loadLastSessionIfNeeded] 세션 로드 결과', { loaded })
           if (!loaded) {
             // 세션 로드 실패 시 마지막 세션 찾기
-            lastSession.value = await findLastSession(user.value?.id)
-            console.log('[loadLastSessionIfNeeded] 세션 로드 실패, lastSession 찾음', lastSession.value)
+            lastSessions.value = await findLastSessions(user.value?.id, 10)
+            lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
+            console.log('[loadLastSessionIfNeeded] 세션 로드 실패, 진행 중인 세션 목록 찾음:', lastSessions.value.length, '개')
           }
-          // 세션 로드 성공 시에는 watch에서 처리 (lastSession을 null로 설정)
+          // 세션 로드 성공 시에는 watch에서 처리 (lastSessions를 빈 배열로 설정)
         } else {
-          // 세션이 없을 때 마지막 세션 찾기 (findLastSession이 현재 세션을 제외하므로 항상 호출)
-          console.log('[loadLastSessionIfNeeded] 세션 ID 없음, lastSession 찾기 시작')
-          lastSession.value = await findLastSession(user.value?.id)
-          console.log('[loadLastSessionIfNeeded] lastSession 찾기 완료', lastSession.value)
+          // 세션이 없을 때 진행 중인 모든 세션 찾기
+          console.log('[loadLastSessionIfNeeded] 세션 ID 없음, 진행 중인 세션 목록 찾기 시작')
+          lastSessions.value = await findLastSessions(user.value?.id, 10)
+          lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
+          console.log('[loadLastSessionIfNeeded] 진행 중인 세션 목록 찾기 완료:', lastSessions.value.length, '개')
         }
       } finally {
         isLoadingLastSession = false
@@ -3698,13 +3747,15 @@ export default {
       console.log('[watch session.id] 변경 감지', { newSessionId, oldSessionId })
       // 세션이 없어질 때 (종료 또는 초기화) 마지막 세션 다시 찾기
       if (!newSessionId && oldSessionId) {
-        console.log('[watch session.id] 세션 종료, lastSession 찾기')
+        console.log('[watch session.id] 세션 종료, 진행 중인 세션 목록 찾기')
         isLoadingLastSession = false
-        lastSession.value = await findLastSession(user.value?.id)
-        console.log('[watch session.id] lastSession 찾기 완료', lastSession.value)
+        lastSessions.value = await findLastSessions(user.value?.id, 10)
+        lastSession.value = lastSessions.value.length > 0 ? lastSessions.value[0] : null
+        console.log('[watch session.id] 진행 중인 세션 목록 찾기 완료:', lastSessions.value.length, '개')
       } else if (newSessionId) {
-        // 세션이 로드되었을 때는 lastSession을 null로 설정 (이전 세션 복원 섹션 숨김)
-        console.log('[watch session.id] 세션 로드, lastSession을 null로 설정')
+        // 세션이 로드되었을 때는 lastSessions를 빈 배열로 설정 (이전 세션 복원 섹션 숨김)
+        console.log('[watch session.id] 세션 로드, 진행 중인 세션 목록 초기화')
+        lastSessions.value = []
         lastSession.value = null
       }
     })
@@ -3765,7 +3816,10 @@ export default {
       lastSession,
       handleStartNewSession,
       startNewSession,
-      resumeSession,
+      resumeSessionById,
+      formatSessionDisplayName,
+      lastSessions,
+      handleResumeSessionImageError,
       showExistingSessionModal,
       existingSessionInfo,
       closeExistingSessionModal,
@@ -4103,6 +4157,14 @@ export default {
   width: 100%;
   box-sizing: border-box;
   padding: 0;
+}
+
+.resume-sessions-section {
+  margin-bottom: 3rem;
+  width: 100%;
+  max-width: 1400px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .setup-card {
@@ -4565,8 +4627,252 @@ export default {
   background: #eff6ff;
 }
 
+.result-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.result-header h3 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.result-count {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.sets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: 1.5rem;
+  max-width: 100%;
+}
+
+@media (min-width: 1400px) {
+  .sets-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 900px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+}
+
+@media (max-width: 900px) and (min-width: 600px) {
+  .sets-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .sets-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+.set-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.set-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.set-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-badge {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background-color: #1f2937;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.set-image img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+}
+
+.no-image {
+  color: #9ca3af;
+  font-size: 0.875rem;
+}
+
+.set-info {
+  padding: 1rem;
+}
+
+.set-name-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.set-number-badge {
+  display: inline-block;
+  padding: 0.375rem 0.75rem;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 20px;
+  width: fit-content;
+  line-height: 1.2;
+}
+
+.set-name-wrapper {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.set-theme-name {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #6b7280;
+  line-height: 1.4;
+}
+
+.set-name-divider {
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: 0.875rem;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+.set-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.4;
+}
+
+.set-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.set-stats-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.set-quantity {
+  font-size: 0.875rem;
+  color: #3b82f6;
+  font-weight: 500;
+  margin: 0;
+}
+
+.inventory-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #10b981;
+  color: #ffffff;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.btn-missing-badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  background-color: #dbeafe;
+  color: #1e40af;
+  white-space: nowrap;
+  margin-left: 0.5rem;
+  border: none;
+  box-shadow: none;
+}
+
+.last-inspection-date {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.resume-session-actions {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #f3f4f6;
+}
+
+.btn-resume {
+  width: 100%;
+  justify-content: center;
+  padding: 1rem 1.5rem;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  height: 48px;
+}
+
 .resume-info {
   margin-bottom: 1.5rem;
+}
+
+.resume-info-separator {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
 }
 
 .info-row {

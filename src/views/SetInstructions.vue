@@ -306,35 +306,34 @@ export default {
       }
 
       const locale = 'en-au'
-      const legoUrl = `https://www.lego.com/${locale}/service/buildinginstructions/${setNum}`
+      const legoPath = `${locale}/service/buildinginstructions/${setNum}`
       
-      // 타임아웃 설정 (5초)
+      // 타임아웃 설정 (10초)
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 5000)
+      const timeoutId = setTimeout(() => controller.abort(), 10000)
 
       try {
-        // 직접 fetch 시도 (더 빠름)
-        let response
-        try {
-          response = await fetch(legoUrl, {
-            headers: {
-              'Accept': 'text/html,application/xhtml+xml',
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            signal: controller.signal
-          })
-        } catch (directErr) {
-          // CORS 문제로 직접 fetch 실패 시 프록시 사용
-          console.log('[SetInstructions] 직접 fetch 실패, 프록시 사용:', directErr.message)
-          const proxyUrl = `https://r.jina.ai/${legoUrl}`
-          response = await fetch(proxyUrl, {
-            headers: {
-              'Accept': 'text/html,application/xhtml+xml',
-              'User-Agent': 'Mozilla/5.0'
-            },
-            signal: controller.signal
-          })
+        // 프로덕션/개발 모드에 따라 프록시 URL 결정
+        const isDev = import.meta.env.DEV
+        let proxyUrl
+        
+        if (isDev) {
+          // 개발 모드: 로컬 프록시 서버 사용 (Vite 프록시)
+          proxyUrl = `/api/lego-instructions/${legoPath}`
+        } else {
+          // 프로덕션 모드: Vercel 서버리스 함수 사용
+          proxyUrl = `/api/lego-instructions/${legoPath}`
         }
+        
+        console.log('[SetInstructions] 프록시 URL:', proxyUrl)
+        
+        const response = await fetch(proxyUrl, {
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          },
+          signal: controller.signal
+        })
 
         clearTimeout(timeoutId)
 
