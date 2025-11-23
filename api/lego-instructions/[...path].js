@@ -1,4 +1,11 @@
 export default async function handler(req, res) {
+  console.log(`[LEGO Instructions API] 요청 수신:`, {
+    method: req.method,
+    url: req.url,
+    query: req.query,
+    path: req.query.path
+  })
+  
   // CORS 헤더 설정
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
@@ -17,7 +24,10 @@ export default async function handler(req, res) {
     const path = req.query.path || []
     const pathString = Array.isArray(path) ? path.join('/') : path
     
+    console.log(`[LEGO Instructions API] 경로 파싱:`, { path, pathString })
+    
     if (!pathString) {
+      console.error(`[LEGO Instructions API] 경로가 없음`)
       return res.status(400).json({ error: 'Path is required' })
     }
     
