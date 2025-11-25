@@ -6,7 +6,7 @@
   "trailingSlash": false,
   "rewrites": [
     {
-      "source": "/((?!api|_next|.*\\..*).*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ],

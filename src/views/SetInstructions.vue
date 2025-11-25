@@ -1,7 +1,20 @@
 <template>
   <div class="set-instructions-page">
     <div class="page-header">
-      <h1>세트 설명서</h1>
+      <div class="page-title-with-toggle">
+        <h1>레고 설명서</h1>
+        <label class="toggle-switch" :class="{ 'disabled': !user }">
+          <input
+            type="checkbox"
+            v-model="searchInStoreOnly"
+            @change="handleSearchOptionChange"
+            :disabled="!user"
+          />
+          <span class="toggle-slider" :class="{ 'store-only': searchInStoreOnly, 'all-sets': !searchInStoreOnly }">
+            <span class="toggle-text">{{ searchInStoreOnly ? '우리 매장' : '전체 레고' }}</span>
+          </span>
+        </label>
+      </div>
       <p>레고번호를 입력하여 해당 세트의 공식 설명서를 확인할 수 있습니다.</p>
     </div>
 
@@ -248,7 +261,7 @@
 </template>
 
 <script>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useSupabasePleyon } from '../composables/useSupabasePleyon'
 import { formatSetNumber } from '../utils/setDisplay'
@@ -256,7 +269,7 @@ import { formatSetNumber } from '../utils/setDisplay'
 export default {
   name: 'SetInstructions',
   setup() {
-    const { supabase, user } = useSupabase()
+    const { supabase, user, loading: supabaseAuthLoading } = useSupabase()
     const { getStoreInfoByEmail, getStoreInventory } = useSupabasePleyon()
 
     const loading = ref(false)
@@ -274,14 +287,400 @@ export default {
 
     const storeInventory = ref([])
     const storeInfo = ref(null)
-    const storeSets = ref([])
-    const storeSetsCount = computed(() => storeSets.value.length) // 🔧 수정됨
+    const paginatedStoreSetsData = ref([]) // 현재 페이지 데이터
+    const storeInventorySetsCache = ref([]) // 플레이온 계정용 전체 세트 캐시 // 🔧 수정됨
+    let storeInventoryCachePromise = null // 🔧 수정됨
+    const storeInventoryCacheReady = ref(false) // 🔧 수정됨
+    const storeSetsCountValue = ref(0)
     const currentPage = ref(1)
     const itemsPerPage = 40
+    
+    // 일반회원용 레고 세트 (user_lego_sets)
+    const userLegoSets = ref([])
+    const isPleyonUser = ref(false)
+    
+    // 중복 로드 방지
+    const isLoadingStoreSets = ref(false)
+    const activeInstructionStoreLoad = ref(null)
+    
+    // 검색 옵션: true = 해당 매장에서 보유한 레고에서 검색, false = 전체 레고에서 검색
+    // 로그아웃 상태에서는 "전체 레고"가 기본값
+    const searchInStoreOnly = ref(user.value ? true : false)
+    
+    // 토글 스위치에 따라 필터링된 레고 세트
+    const storeSets = computed(() => paginatedStoreSetsData.value)
+    const storeSetsCount = computed(() => storeSetsCountValue.value) // 🔧 수정됨
+    
+    // 매장 인벤토리 세트 번호 Set (필터링용)
+    const inventorySetNumbers = computed(() => {
+      try {
+        const setNumbers = new Set()
+        
+        // 일반회원인 경우: user_lego_sets의 세트 번호 사용
+        if (!isPleyonUser.value && userLegoSets.value && userLegoSets.value.length > 0) {
+          userLegoSets.value.forEach(item => {
+            const setNum = item.set_num
+            if (setNum) {
+              setNumbers.add(setNum)
+              // 하이픈 제거한 버전도 추가
+              const normalized = setNum.replace(/-.*$/, '')
+              if (normalized !== setNum) {
+                setNumbers.add(normalized)
+              }
+            }
+          })
+          console.log('[SetInstructions] 일반회원 레고 세트 번호 생성 완료:', setNumbers.size, '개')
+          return setNumbers
+        }
+        
+        // 플레이온 동기화 계정인 경우: 플레이온 인벤토리 사용
+        console.log('[SetInstructions] inventorySetNumbers computed 실행:', { 
+          storeInventoryLength: storeInventory.value?.length || 0,
+          isArray: Array.isArray(storeInventory.value)
+        })
+        if (storeInventory.value && Array.isArray(storeInventory.value) && storeInventory.value.length > 0) {
+          storeInventory.value.forEach(item => {
+            // getStoreInventory는 lego_sets.number를 반환함
+            const setNum = item.lego_sets?.number || item.set_num
+            if (setNum) {
+              setNumbers.add(setNum)
+              // 하이픈 제거한 버전도 추가
+              const normalized = setNum.replace(/-.*$/, '')
+              if (normalized !== setNum) {
+                setNumbers.add(normalized)
+              }
+            }
+          })
+          console.log('[SetInstructions] inventorySetNumbers 생성 완료:', setNumbers.size, '개')
+        } else {
+          console.log('[SetInstructions] inventorySetNumbers: storeInventory가 비어있음')
+        }
+        return setNumbers
+      } catch (error) {
+        console.error('[SetInstructions] inventorySetNumbers computed error:', error)
+        return new Set()
+      }
+    })
+
+    const inventorySetNumbersList = computed(() => {
+      if (!storeInventory.value || !Array.isArray(storeInventory.value)) {
+        return []
+      }
+      const seen = new Set()
+      const list = []
+      storeInventory.value.forEach(item => {
+        const setNum = item?.lego_sets?.number || item?.set_num
+        if (setNum && !seen.has(setNum)) {
+          seen.add(setNum)
+          list.push(setNum)
+        }
+      })
+      return list
+    })
+
+    const GENERAL_LIST_CACHE_KEY = 'brickbox:set-instructions:general-list-cache:v1' // 🔧 수정됨
+    const GENERAL_LIST_CACHE_TTL = 2 * 60 * 1000 // 2분 // 🔧 수정됨
+
+    const loadGeneralListCache = () => { // 🔧 수정됨
+      try {
+        const raw = sessionStorage.getItem(GENERAL_LIST_CACHE_KEY)
+        if (!raw) return null
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object') return null
+        if (Date.now() - (parsed.timestamp || 0) > GENERAL_LIST_CACHE_TTL) {
+          sessionStorage.removeItem(GENERAL_LIST_CACHE_KEY)
+          return null
+        }
+        return parsed
+      } catch {
+        return null
+      }
+    }
+
+    const cacheGeneralList = (payload) => { // 🔧 수정됨
+      try {
+        sessionStorage.setItem(
+          GENERAL_LIST_CACHE_KEY,
+          JSON.stringify({
+            timestamp: Date.now(),
+            data: payload.data || [],
+            count: payload.count || 0
+          })
+        )
+      } catch {}
+    }
+
+    const applyGeneralListCache = () => { // 🔧 수정됨
+      const cached = loadGeneralListCache()
+      if (!cached || !Array.isArray(cached.data)) {
+        return false
+      }
+      storeSetsCountValue.value = cached.count || cached.data.length
+      paginatedStoreSetsData.value = cached.data
+      loading.value = false
+      return true
+    }
+
+    const waitForAuthReady = () => {
+      if (!supabaseAuthLoading.value) {
+        return Promise.resolve()
+      }
+      return new Promise((resolve) => {
+        const stop = watch(
+          supabaseAuthLoading,
+          (isLoading) => {
+            if (!isLoading) {
+              stop()
+              resolve()
+            }
+          },
+          { immediate: false }
+        )
+      })
+    }
+
+    // 매장 세트 번호 정규화 유틸 // 🔧 수정됨
+    const sanitizeSetNum = (value) => {
+      if (value === null || value === undefined) return ''
+      return String(value).trim()
+    }
+
+    const stripVariantSuffix = (value) => {
+      const sanitized = sanitizeSetNum(value)
+      return sanitized ? sanitized.replace(/-.*$/, '') : ''
+    }
+
+    const buildSetNumFilterClauses = (setNums = []) => {
+      const unique = [...new Set((setNums || []).map(sanitizeSetNum).filter(Boolean))]
+      if (unique.length === 0) return ''
+      return unique
+        .map((num) => (num.includes('-') ? `set_num.eq.${num}` : `set_num.ilike.${num}-%`))
+        .join(',')
+    }
+
+    const buildSetLookupMaps = (sets = []) => {
+      const exactMap = new Map()
+      const normalizedMap = new Map()
+      ;(sets || []).forEach((set) => {
+        const key = sanitizeSetNum(set?.set_num)
+        if (!key) return
+        exactMap.set(key, set)
+        const normalized = stripVariantSuffix(key)
+        if (normalized && !normalizedMap.has(normalized)) {
+          normalizedMap.set(normalized, set)
+        }
+      })
+      return { exactMap, normalizedMap }
+    }
+
+    const resolveInventorySetRecord = (setNum, maps) => {
+      const key = sanitizeSetNum(setNum)
+      if (!key) return null
+      if (maps?.exactMap?.has(key)) {
+        return maps.exactMap.get(key)
+      }
+      const normalized = stripVariantSuffix(key)
+      if (normalized && maps?.normalizedMap?.has(normalized)) {
+        return maps.normalizedMap.get(normalized)
+      }
+      return null
+    }
+
+    const rebuildStoreInventoryCache = async () => { // 🔧 수정됨
+      if (storeInventoryCachePromise) { // 🔧 수정됨
+        await storeInventoryCachePromise // 🔧 수정됨
+        return // 🔧 수정됨
+      } // 🔧 수정됨
+      storeInventoryCachePromise = (async () => { // 🔧 수정됨
+        if (!isPleyonUser.value) { // 🔧 수정됨
+          storeInventorySetsCache.value = [] // 🔧 수정됨
+          storeInventoryCacheReady.value = false // 🔧 수정됨
+          return // 🔧 수정됨
+        } // 🔧 수정됨
+        const inventoryList = inventorySetNumbersList.value // 🔧 수정됨
+        if (!inventoryList || inventoryList.length === 0) { // 🔧 수정됨
+          storeInventorySetsCache.value = [] // 🔧 수정됨
+          storeInventoryCacheReady.value = true // 🔧 수정됨
+          return // 🔧 수정됨
+        } // 🔧 수정됨
+        storeInventoryCacheReady.value = false // 🔧 수정됨
+        const filterClauses = buildSetNumFilterClauses(inventoryList) // 🔧 수정됨
+        if (!filterClauses) { // 🔧 수정됨
+          storeInventorySetsCache.value = [] // 🔧 수정됨
+          storeInventoryCacheReady.value = true // 🔧 수정됨
+          return // 🔧 수정됨
+        } // 🔧 수정됨
+        try { // 🔧 수정됨
+          const { data, error } = await supabase // 🔧 수정됨
+            .from('lego_sets') // 🔧 수정됨
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, lego_themes(name)') // 🔧 수정됨
+            .or(filterClauses) // 🔧 수정됨
+          if (error) throw error // 🔧 수정됨
+          const enriched = await attachThemeNamesToSets(data || []) // 🔧 수정됨
+          const setMaps = buildSetLookupMaps(enriched) // 🔧 수정됨
+          storeInventorySetsCache.value = inventoryList // 🔧 수정됨
+            .map(setNum => { // 🔧 수정됨
+              const matched = resolveInventorySetRecord(setNum, setMaps) // 🔧 수정됨
+              return matched ? mapSetRecord(matched) : null // 🔧 수정됨
+            }) // 🔧 수정됨
+            .filter(Boolean) // 🔧 수정됨
+          storeInventoryCacheReady.value = true // 🔧 수정됨
+        } catch (cacheError) { // 🔧 수정됨
+          console.error('[SetInstructions] 매장 세트 캐시 생성 실패:', cacheError) // 🔧 수정됨
+          storeInventorySetsCache.value = [] // 🔧 수정됨
+          storeInventoryCacheReady.value = true // 🔧 수정됨
+        } // 🔧 수정됨
+      })() // 🔧 수정됨
+      try { // 🔧 수정됨
+        await storeInventoryCachePromise // 🔧 수정됨
+      } finally { // 🔧 수정됨
+        storeInventoryCachePromise = null // 🔧 수정됨
+      } // 🔧 수정됨
+    } // 🔧 수정됨
+
+    const hasUserRegisteredSets = computed(() => (userLegoSets.value?.length || 0) > 0)
 
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
 
     const DEFAULT_THUMBNAIL = 'https://www.lego.com/cdn/product-assets/product.bi.core.img/6602638.png?format=webply&fit=crop&quality=75&width=230&height=230&dpr=1'
+
+    const attachThemeNamesToSets = async (sets) => {
+      if (!sets || sets.length === 0) return []
+      const normalizedSets = sets.map(set => {
+        if (set.theme_name) return set
+        if (set.lego_themes && set.lego_themes.name) {
+          const { lego_themes, ...rest } = set
+          return {
+            ...rest,
+            theme_name: lego_themes.name
+          }
+        }
+        return set
+      })
+      const themeIds = [...new Set(normalizedSets.filter(set => !set.theme_name).map(set => set.theme_id).filter(Boolean))]
+      if (themeIds.length === 0) {
+        return normalizedSets.map(set => ({ ...set, theme_name: set.theme_name || null }))
+      }
+      const { data: themesData, error: themesError } = await supabase
+        .from('lego_themes')
+        .select('theme_id, name')
+        .in('theme_id', themeIds)
+      if (themesError || !themesData) {
+        return normalizedSets.map(set => ({ ...set, theme_name: set.theme_name || null }))
+      }
+      const themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
+      return normalizedSets.map(set => ({
+        ...set,
+        theme_name: set.theme_id ? (themeMap.get(set.theme_id) || set.theme_name || null) : (set.theme_name || null)
+      }))
+    }
+
+    const mapSetRecord = (set) => {
+      if (!set) return null
+      let imageUrl = null
+      if (set.webp_image_url && !set.webp_image_url.includes('cdn.rebrickable.com')) {
+        imageUrl = set.webp_image_url
+      } else if (set.set_img_url && !set.set_img_url.includes('cdn.rebrickable.com')) {
+        imageUrl = set.set_img_url
+      } else if (set.image_url) {
+        imageUrl = set.image_url
+      }
+      return {
+        id: set.id,
+        set_num: set.set_num,
+        name: set.name,
+        theme_name: set.theme_name || null,
+        image_url: imageUrl,
+        webp_image_url: set.webp_image_url || null,
+        set_img_url: set.set_img_url || null,
+        num_parts: set.num_parts || 0,
+        part_count: set.part_count || set.num_parts || 0,
+        quantity: set.quantity || 0
+      }
+    }
+
+    const loadPaginatedStoreSets = async () => {
+      if (activeInstructionStoreLoad.value) {
+        await activeInstructionStoreLoad.value
+      }
+
+      const start = (currentPage.value - 1) * itemsPerPage
+      const end = start + itemsPerPage - 1
+
+      const loadTask = (async () => {
+        isLoadingStoreSets.value = true
+        loading.value = true
+
+        try {
+          if (searchInStoreOnly.value) {
+            if (!user.value) {
+              paginatedStoreSetsData.value = []
+              storeSetsCountValue.value = 0
+              return
+            }
+
+            if (hasUserRegisteredSets.value) {
+              storeSetsCountValue.value = userLegoSets.value.length
+              paginatedStoreSetsData.value = userLegoSets.value
+                .slice(start, start + itemsPerPage)
+                .map(mapSetRecord)
+                .filter(Boolean)
+              return
+            }
+
+            if (!isPleyonUser.value) {
+              storeSetsCountValue.value = 0
+              paginatedStoreSetsData.value = []
+              return
+            }
+
+            await rebuildStoreInventoryCache() // 🔧 수정됨
+            storeSetsCountValue.value = storeInventorySetsCache.value.length // 🔧 수정됨
+            paginatedStoreSetsData.value = storeInventorySetsCache.value // 🔧 수정됨
+              .slice(start, start + itemsPerPage) // 🔧 수정됨
+            return
+          }
+
+          let cacheApplied = false
+          if (currentPage.value === 1) {
+            cacheApplied = applyGeneralListCache()
+          }
+
+          const { data, error, count } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, lego_themes(name)', { count: 'exact' })
+            .order('created_at', { ascending: false })
+            .range(start, end)
+
+          if (error) throw error
+
+          const enriched = await attachThemeNamesToSets(data || [])
+          const mapped = enriched.map(mapSetRecord).filter(Boolean)
+          paginatedStoreSetsData.value = mapped
+          storeSetsCountValue.value = count || 0
+
+          if (currentPage.value === 1) {
+            cacheGeneralList({ data: mapped, count: storeSetsCountValue.value })
+          }
+        } catch (err) {
+          console.error('[SetInstructions] 레고 세트 로드 실패:', err)
+          paginatedStoreSetsData.value = []
+          if (!searchInStoreOnly.value) {
+            storeSetsCountValue.value = 0
+          }
+        } finally {
+          loading.value = false
+          isLoadingStoreSets.value = false
+        }
+      })()
+
+      activeInstructionStoreLoad.value = loadTask
+      try {
+        await loadTask
+      } finally {
+        activeInstructionStoreLoad.value = null
+      }
+    }
 
     const deriveThumbnailFromPdfUrl = (pdfUrl) => {
       if (!pdfUrl) return null
@@ -552,101 +951,121 @@ export default {
       instructionError.value = null
     }
 
-    // 전체 레고 세트 로드 (매장 인벤토리 필터 제거)
-    const loadStoreInventory = async () => {
-      console.log('[SetInstructions] 전체 레고 세트 로드 시작')
-      // 매장 계정 필터 없이 전체 세트 로드
-      await loadStoreSets()
-    }
+    // 플레이온 계정 확인
+    const checkPleyonAccount = async () => {
+      if (!user.value) {
+        isPleyonUser.value = false
+        storeInfo.value = null
+        return
+      }
 
-    const loadStoreSets = async () => {
       try {
-        loading.value = true
-        
-        // 전체 레고 세트 조회 (페이지네이션으로 처리)
-        const batchSize = 1000
-        let allSetsData = []
-        let offset = 0
-        let hasMore = true
-        
-        while (hasMore) {
-          const { data, error } = await supabase
-            .from('lego_sets')
-            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, created_at')
-            .order('created_at', { ascending: false })
-            .range(offset, offset + batchSize - 1)
-          
-          if (error) {
-            console.error('[SetInstructions] lego_sets 조회 오류:', error)
-            throw error
-          }
-          
-          if (data && data.length > 0) {
-            allSetsData.push(...data)
-            offset += batchSize
-            hasMore = data.length === batchSize
-          } else {
-            hasMore = false
-          }
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        if (storeData && storeData.store) {
+          isPleyonUser.value = true
+          storeInfo.value = storeData
+        } else {
+          isPleyonUser.value = false
+          storeInfo.value = null
         }
-
-        if (!allSetsData.length) {
-          storeSets.value = []
-          loading.value = false
-          return
-        }
-
-        const themeIds = [...new Set(allSetsData.map(s => s.theme_id).filter(Boolean))]
-        let themeMap = new Map()
-        if (themeIds.length) {
-          const { data: themesData, error: themesError } = await supabase
-            .from('lego_themes')
-            .select('theme_id, name')
-            .in('theme_id', themeIds)
-
-          if (!themesError && themesData) {
-            themeMap = new Map(themesData.map(t => [t.theme_id, t.name]))
-          }
-        }
-
-        storeSets.value = allSetsData
-          .map(set => {
-            const normalizedImage =
-              set.webp_image_url ||
-              set.set_img_url ||
-              null
-            return {
-              id: set.id,
-              set_num: set.set_num,
-              name: set.name,
-              theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
-              image_url: normalizedImage,
-              webp_image_url: set.webp_image_url || null,
-              set_img_url: set.set_img_url || null,
-              num_parts: set.num_parts || null,
-              part_count: resolvePartCount(set),
-              quantity: 0
-            }
-          })
-          // 최근 등록 순으로 정렬 (created_at 기준, 이미 DB에서 정렬됨)
-          // 추가 정렬 불필요
-
-        currentPage.value = 1
-        loading.value = false
-        console.log('[SetInstructions] 전체 레고 세트 로드 완료:', storeSets.value.length, '개')
       } catch (err) {
-        console.error('[SetInstructions] 전체 레고 세트 로드 실패:', err)
-        storeSets.value = []
-        loading.value = false
+        console.error('[SetInstructions] 플레이온 계정 확인 실패:', err)
+        isPleyonUser.value = false
+        storeInfo.value = null
       }
     }
 
-    const totalPages = computed(() => Math.ceil(storeSets.value.length / itemsPerPage) || 0)
+    // 일반회원용 레고 세트 로드
+    const loadUserLegoSets = async () => {
+      if (!user.value) {
+        userLegoSets.value = []
+        return
+      }
 
-    const paginatedStoreSets = computed(() => {
-      const start = (currentPage.value - 1) * itemsPerPage
-      return storeSets.value.slice(start, start + itemsPerPage)
-    })
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('user_lego_sets')
+          .select('*')
+          .eq('user_id', user.value.id)
+          .order('created_at', { ascending: false })
+
+        if (fetchError) {
+          console.error('[SetInstructions] 일반회원 레고 세트 로드 실패:', fetchError)
+          userLegoSets.value = []
+          return
+        }
+
+        userLegoSets.value = data || []
+        console.log('[SetInstructions] 일반회원 레고 세트 로드 완료:', userLegoSets.value.length, '개')
+      } catch (err) {
+        console.error('[SetInstructions] 일반회원 레고 세트 로드 오류:', err)
+        userLegoSets.value = []
+      }
+    }
+
+    // 매장 인벤토리 로드
+    const loadStoreInventoryData = async () => {
+      console.log('[SetInstructions] loadStoreInventoryData 시작:', { 
+        hasUser: !!user.value, 
+        email: user.value?.email 
+      })
+      if (!user.value || !user.value.email) {
+        console.log('[SetInstructions] 사용자가 없어서 인벤토리 로드 스킵')
+        storeInfo.value = null
+        storeInventory.value = []
+        return
+      }
+
+      try {
+        console.log('[SetInstructions] getStoreInfoByEmail 호출:', user.value.email)
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        console.log('[SetInstructions] getStoreInfoByEmail 결과:', { 
+          hasStoreData: !!storeData, 
+          hasStore: !!storeData?.store,
+          storeId: storeData?.store?.id 
+        })
+        if (storeData && storeData.store) {
+          isPleyonUser.value = true
+          storeInfo.value = storeData
+          console.log('[SetInstructions] getStoreInventory 호출:', storeData.store.id)
+          const inventoryData = await getStoreInventory(storeData.store.id)
+          console.log('[SetInstructions] getStoreInventory 결과:', { 
+            inventoryLength: inventoryData?.length || 0 
+          })
+          storeInventory.value = inventoryData || []
+          console.log('[SetInstructions] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
+          await rebuildStoreInventoryCache() // 🔧 수정됨
+        } else {
+          console.log('[SetInstructions] 매장 정보가 없음 - 일반회원')
+          isPleyonUser.value = false
+          storeInfo.value = null
+          storeInventory.value = []
+          storeInventorySetsCache.value = [] // 🔧 수정됨
+          storeInventoryCacheReady.value = false // 🔧 수정됨
+          // 일반회원인 경우 user_lego_sets 로드
+          await loadUserLegoSets()
+        }
+      } catch (err) {
+        console.error('[SetInstructions] 매장 인벤토리 로드 실패:', err)
+        isPleyonUser.value = false
+        storeInfo.value = null
+        storeInventory.value = []
+        storeInventorySetsCache.value = [] // 🔧 수정됨
+        storeInventoryCacheReady.value = false // 🔧 수정됨
+        // 일반회원인 경우 user_lego_sets 로드
+        await loadUserLegoSets()
+      }
+    }
+    
+    const loadStoreInventory = async () => {
+      console.log('[SetInstructions] 레고 세트 로드 시작')
+      await loadStoreInventoryData()
+      await loadPaginatedStoreSets()
+    }
+
+    const totalPages = computed(() => Math.max(1, Math.ceil(storeSetsCount.value / itemsPerPage)))
+
+    const paginatedStoreSets = computed(() => storeSets.value)
 
     const visiblePages = computed(() => {
       const pages = []
@@ -811,6 +1230,17 @@ export default {
           }
         }
 
+        // 검색 옵션에 따라 필터링
+        if (searchInStoreOnly.value && user.value && inventorySetNumbers.value && inventorySetNumbers.value.size > 0) {
+          results = results.filter(set => {
+            if (!set || !set.set_num) return false
+            const setNum = set.set_num
+            const normalizedSetNum = setNum.replace(/-.*$/, '')
+            return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
+          })
+          console.log(`[SetInstructions] 매장 보유 세트 필터링: ${results.length}개`)
+        }
+        
         if (results.length > 0) {
           const themeIds = [...new Set(results.map(set => set.theme_id).filter(Boolean))]
           if (themeIds.length > 0) {
@@ -981,11 +1411,92 @@ export default {
     const handleThumbnailError = (event) => { // 🔧 수정됨
       event.target.style.display = 'none'
     }
+    
+    const handleSearchOptionChange = async () => {
+      currentPage.value = 1
+      await loadPaginatedStoreSets()
+    }
 
-    watch(user, async (newUser) => {
-      // 로그인 상태와 관계없이 전체 레고 세트 로드
+    // 초기 로드 플래그
+    const isInitialLoad = ref(true)
+    
+    watch(user, async (newUser, oldUser) => {
+      // 초기 로드는 onMounted에서 처리
+      if (isInitialLoad.value) {
+        isInitialLoad.value = false
+        return
+      }
+      
+      // 로그인 시에는 "우리 매장"이 기본값, 로그아웃 시에는 "전체 레고"가 기본값
+      if (newUser) {
+        searchInStoreOnly.value = true
+        // 플레이온 계정 확인 및 일반회원 레고 세트 로드
+        await checkPleyonAccount()
+        if (!isPleyonUser.value) {
+          await loadUserLegoSets()
+        } else {
+          // 플레이온 계정인 경우 인벤토리만 다시 로드 (전체 세트는 이미 로드됨)
+          await loadStoreInventoryData()
+        }
+      } else {
+        searchInStoreOnly.value = false
+        isPleyonUser.value = false
+        userLegoSets.value = []
+        storeInventory.value = []
+        storeInfo.value = null
+        storeInventorySetsCache.value = [] // 🔧 수정됨
+        storeInventoryCacheReady.value = false // 🔧 수정됨
+      }
+      await loadPaginatedStoreSets()
+    })
+    
+    // 초기 로드
+    onMounted(async () => {
+      console.log('[SetInstructions] onMounted 시작')
+      await waitForAuthReady()
+      console.log('[SetInstructions] 인증 상태 동기화 완료:', { hasUser: !!user.value })
+      if (user.value) {
+        searchInStoreOnly.value = true
+        await checkPleyonAccount()
+        if (!isPleyonUser.value) {
+          await loadUserLegoSets()
+        }
+      } else {
+        searchInStoreOnly.value = false
+      }
       await loadStoreInventory()
-    }, { immediate: true })
+      isInitialLoad.value = false
+    })
+
+    watch(searchInStoreOnly, async () => {
+      currentPage.value = 1
+      if (searchInStoreOnly.value && isPleyonUser.value) { // 🔧 수정됨
+        await rebuildStoreInventoryCache() // 🔧 수정됨
+      } // 🔧 수정됨
+      await loadPaginatedStoreSets()
+    })
+
+    watch(currentPage, async (newPage, oldPage) => {
+      if (newPage === oldPage) return
+      await loadPaginatedStoreSets()
+    })
+
+    watch(inventorySetNumbersList, async () => { // 🔧 수정됨
+      if (searchInStoreOnly.value && isPleyonUser.value) { // 🔧 수정됨
+        storeInventoryCacheReady.value = false // 🔧 수정됨
+        storeInventorySetsCache.value = [] // 🔧 수정됨
+        currentPage.value = 1 // 🔧 수정됨
+        await rebuildStoreInventoryCache() // 🔧 수정됨
+        await loadPaginatedStoreSets() // 🔧 수정됨
+      } // 🔧 수정됨
+    }) // 🔧 수정됨
+
+    watch(userLegoSets, async () => {
+      if (searchInStoreOnly.value && !isPleyonUser.value) {
+        currentPage.value = 1
+        await loadPaginatedStoreSets()
+      }
+    })
 
     return {
       loading,
@@ -1018,7 +1529,11 @@ export default {
       currentPage,
       goToPage,
       showStoreSetsSection,
-      viewInstructionsFromStore
+      viewInstructionsFromStore,
+      searchInStoreOnly,
+      handleSearchOptionChange,
+      user,
+      inventorySetNumbers
     }
   }
 }
@@ -1081,8 +1596,7 @@ export default {
   font-size: 2rem;
   font-weight: 700;
   color: #111827;
-  margin: 0 0 0.5rem 0;
-  text-align: center;
+  margin: 0;
 }
 
 .page-header p {
@@ -1090,6 +1604,14 @@ export default {
   color: #6b7280;
   margin: 0;
   text-align: center;
+}
+
+.page-title-with-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .set-instructions-content {
@@ -1910,6 +2432,14 @@ export default {
   .page-header p {
     font-size: 0.875rem;
   }
+  
+  .page-title-with-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
+  }
 
   .search-section {
     margin-bottom: 1.5rem;
@@ -1934,6 +2464,130 @@ export default {
 
   .instruction-card {
     padding: 1rem;
+  }
+}
+
+/* 토글 스위치 스타일 */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 100px;
+  height: 32px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #d1d5db;
+  transition: 0.3s;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.toggle-text {
+  position: absolute;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+  transition: 0.3s;
+  white-space: nowrap;
+  z-index: 1;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.toggle-switch input:checked + .toggle-slider .toggle-text {
+  left: 12px;
+  right: auto;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+  right: 12px;
+  left: auto;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  z-index: 2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #ff3600;
+}
+
+.toggle-switch input:checked + .toggle-slider .toggle-text {
+  color: white;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider.all-sets {
+  background-color: #1f2937;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+  color: white;
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(68px);
+}
+
+.toggle-switch input:focus + .toggle-slider {
+  box-shadow: 0 0 1px #ff3600;
+}
+
+.toggle-switch.disabled .toggle-slider {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .toggle-switch {
+    width: 90px;
+    height: 28px;
+  }
+  
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(58px);
+  }
+  
+  .toggle-switch input:checked + .toggle-slider .toggle-text {
+    left: 10px;
+  }
+  
+  .toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+    right: 10px;
+  }
+  
+  .toggle-text {
+    font-size: 0.8125rem;
   }
 }
 </style>

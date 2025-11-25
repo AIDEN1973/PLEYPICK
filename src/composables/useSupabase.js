@@ -1,8 +1,28 @@
 import { createClient } from '@supabase/supabase-js'
 import { ref } from 'vue'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const baseSupabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
+const supabaseUrl = baseSupabaseUrl
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk'
+
+const devProxyPath = import.meta.env.VITE_SUPABASE_PROXY_PATH || ''
+const shouldProxyRest = import.meta.env.DEV && !!devProxyPath
+
+const proxyFetch = async (input, init) => {
+  const resolveUrl = (resource) => (typeof resource === 'string' ? resource : resource.url)
+  const originalUrl = resolveUrl(input)
+
+  if (shouldProxyRest && originalUrl?.startsWith(`${baseSupabaseUrl}/rest/v1`)) {
+    const rewrittenUrl = originalUrl.replace(baseSupabaseUrl, devProxyPath)
+    if (typeof input === 'string') {
+      return fetch(rewrittenUrl, init)
+    }
+    const clonedRequest = new Request(rewrittenUrl, input)
+    return fetch(clonedRequest, init)
+  }
+
+  return fetch(input, init)
+}
 
 // CORS 및 Storage 접근을 위한 추가 옵션
 const supabaseOptions = {
@@ -12,10 +32,9 @@ const supabaseOptions = {
   },
   global: {
     headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
-    }
+      // 필요 시 사용자 정의 헤더를 추가하되, CORS 응답 헤더는 요청에 포함하지 않는다. // 🔧 수정됨
+    },
+    fetch: shouldProxyRest ? proxyFetch : undefined
   }
 }
 

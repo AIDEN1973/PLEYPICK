@@ -35,6 +35,7 @@ import MissingParts from './views/MissingParts.vue'
 import SetParts from './views/SetParts.vue'
 import SetInstructions from './views/SetInstructions.vue'
 import PartManager from './views/PartManager.vue'
+import UserLegoRegistration from './views/UserLegoRegistration.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: SetParts },
@@ -69,7 +70,8 @@ const routes = [
   { path: '/missing-parts', name: 'MissingParts', component: MissingParts },
   { path: '/set-parts', name: 'SetParts', component: SetParts },
   { path: '/set-instructions', name: 'SetInstructions', component: SetInstructions },
-  { path: '/parts', name: 'PartManager', component: PartManager }
+  { path: '/parts', name: 'PartManager', component: PartManager },
+  { path: '/user-lego-registration', name: 'UserLegoRegistration', component: UserLegoRegistration }
 ]
 
 const router = createRouter({

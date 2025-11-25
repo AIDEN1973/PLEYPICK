@@ -3547,12 +3547,12 @@ export default {
 
 
     const focusLastInspectedItem = async () => { // 🔧 수정됨
-      if (inspectionMode.value !== 'single') return // 🔧 수정됨
       if (!Array.isArray(items.value) || items.value.length === 0) return // 🔧 수정됨
 
       statusFilter.value = 'all' // 🔧 수정됨
       await nextTick() // 🔧 수정됨
 
+      // 완료된 세션의 경우 첫 번째 항목부터 표시
       const sorted = [...items.value].sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0)) // 🔧 수정됨
       const targetItem = sorted.find(candidate => candidate?.status !== 'checked') || sorted[0] || null // 🔧 수정됨
 
@@ -3565,6 +3565,11 @@ export default {
       const targetIndex = sorted.findIndex(item => item?.id === targetItem.id) // 🔧 수정됨
       currentItemIndex.value = targetIndex >= 0 ? targetIndex : 0 // 🔧 수정됨
       session.last_active_item_id = targetItem.id // 🔧 수정됨
+      
+      // 검수 모드를 single로 설정하여 부품이 표시되도록 함
+      if (inspectionMode.value !== 'single') {
+        inspectionMode.value = 'single'
+      }
     }
 
     // URL 쿼리 파라미터에서 세션 로드하는 함수

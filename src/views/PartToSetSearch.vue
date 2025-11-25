@@ -2,7 +2,20 @@
   <div class="part-to-set-search-page">
     <div class="layout-container">
       <div class="page-header">
-        <h1>부품으로 레고 찾기</h1>
+        <div class="page-title-with-toggle">
+          <h1>부품으로 레고 찾기</h1>
+          <label class="toggle-switch" :class="{ 'disabled': !user }">
+            <input
+              type="checkbox"
+              v-model="searchInStoreOnly"
+              @change="handleSearchOptionChange"
+              :disabled="!user"
+            />
+            <span class="toggle-slider" :class="{ 'store-only': searchInStoreOnly, 'all-sets': !searchInStoreOnly }">
+              <span class="toggle-text">{{ searchInStoreOnly ? '우리 매장' : '전체 레고' }}</span>
+            </span>
+          </label>
+        </div>
         <p>부품번호를 입력하여 해당 부품이 포함된 레고를 찾을 수 있습니다</p>
       </div>
 
@@ -231,7 +244,7 @@
           </div>
         </div>
         <div v-else class="empty-result">
-          <p>해당 부품이 포함된 세트를 찾을 수 없습니다.</p>
+          <p>우리 매장에는 해당 부품이 포함된 레고 세트가 없습니다.</p>
         </div>
 
         <div v-if="searchResult.alternatives && searchResult.alternatives.length > 0 && searchResult.alternatives[0].colors && searchResult.alternatives[0].colors.length > 0" class="alternatives-section">
@@ -463,6 +476,11 @@ export default {
     const lastQuerySignature = ref('') // 🔧 수정됨
     const searchResult = ref(null)
     
+    // 검색 옵션: true = 해당 매장에서 보유한 레고에서 검색 (기본값), false = 전체 레고에서 검색
+    // 검색 옵션: true = 해당 매장에서 보유한 레고에서 검색, false = 전체 레고에서 검색
+    // 로그아웃 상태에서는 "전체 레고"가 기본값
+    const searchInStoreOnly = ref(user.value ? true : false)
+    
     // 최근 등록 부품 관련
     const recentParts = ref([])
     const recentPartsCurrentPage = ref(1)
@@ -493,6 +511,62 @@ export default {
     const storeInventory = ref([])
     const storeInfo = ref(null)
     
+    // 일반회원용 레고 세트 (user_lego_sets)
+    const userLegoSets = ref([])
+    const isPleyonUser = ref(false)
+    
+    // 플레이온 계정 확인
+    const checkPleyonAccount = async () => {
+      if (!user.value) {
+        isPleyonUser.value = false
+        storeInfo.value = null
+        return
+      }
+
+      try {
+        const storeData = await getStoreInfoByEmail(user.value.email)
+        if (storeData && storeData.store) {
+          isPleyonUser.value = true
+          storeInfo.value = storeData
+        } else {
+          isPleyonUser.value = false
+          storeInfo.value = null
+        }
+      } catch (err) {
+        console.error('[PartToSetSearch] 플레이온 계정 확인 실패:', err)
+        isPleyonUser.value = false
+        storeInfo.value = null
+      }
+    }
+
+    // 일반회원용 레고 세트 로드
+    const loadUserLegoSets = async () => {
+      if (!user.value) {
+        userLegoSets.value = []
+        return
+      }
+
+      try {
+        const { data, error: fetchError } = await supabase
+          .from('user_lego_sets')
+          .select('*')
+          .eq('user_id', user.value.id)
+          .order('created_at', { ascending: false })
+
+        if (fetchError) {
+          console.error('[PartToSetSearch] 일반회원 레고 세트 로드 실패:', fetchError)
+          userLegoSets.value = []
+          return
+        }
+
+        userLegoSets.value = data || []
+        console.log('[PartToSetSearch] 일반회원 레고 세트 로드 완료:', userLegoSets.value.length, '개')
+      } catch (err) {
+        console.error('[PartToSetSearch] 일반회원 레고 세트 로드 오류:', err)
+        userLegoSets.value = []
+      }
+    }
+    
     // 매장 인벤토리 로드
     const loadStoreInventory = async () => {
       if (!user.value || !user.value.email) {
@@ -504,18 +578,26 @@ export default {
       try {
         const storeData = await getStoreInfoByEmail(user.value.email)
         if (storeData && storeData.store) {
+          isPleyonUser.value = true
           storeInfo.value = storeData
           const inventoryData = await getStoreInventory(storeData.store.id)
           storeInventory.value = inventoryData || []
           console.log('[PartToSetSearch] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
         } else {
+          console.log('[PartToSetSearch] 매장 정보가 없음 - 일반회원')
+          isPleyonUser.value = false
           storeInfo.value = null
           storeInventory.value = []
+          // 일반회원인 경우 user_lego_sets 로드
+          await loadUserLegoSets()
         }
       } catch (err) {
         console.error('[PartToSetSearch] 매장 인벤토리 로드 실패:', err)
+        isPleyonUser.value = false
         storeInfo.value = null
         storeInventory.value = []
+        // 일반회원인 경우 user_lego_sets 로드
+        await loadUserLegoSets()
       }
     }
     
@@ -550,25 +632,61 @@ export default {
     
     // 매장 인벤토리의 세트 번호 목록 추출
     const inventorySetNumbers = computed(() => {
-      if (storeInventory.value.length === 0) {
+      try {
+        const setNumbers = new Set()
+        
+        // 일반회원인 경우: user_lego_sets의 세트 번호 사용
+        if (!isPleyonUser.value && userLegoSets.value && userLegoSets.value.length > 0) {
+          userLegoSets.value.forEach(item => {
+            const setNum = item.set_num
+            if (setNum) {
+              setNumbers.add(setNum)
+              // 하이픈 제거한 버전도 추가
+              const normalized = setNum.replace(/-.*$/, '')
+              if (normalized !== setNum) {
+                setNumbers.add(normalized)
+              }
+            }
+          })
+          console.log('[PartToSetSearch] 일반회원 레고 세트 번호 생성 완료:', setNumbers.size, '개')
+          return setNumbers
+        }
+        
+        // 플레이온 동기화 계정인 경우: 플레이온 인벤토리 사용
+        if (storeInventory.value.length === 0) {
+          return new Set()
+        }
+        
+        const inventorySetNums = new Set(
+          storeInventory.value
+            .map(item => {
+              const legoSet = item.lego_sets
+              if (!legoSet) return null
+              if (Array.isArray(legoSet) && legoSet.length > 0) {
+                return legoSet[0].number
+              }
+              if (!Array.isArray(legoSet)) {
+                return legoSet.number
+              }
+              return null
+            })
+            .filter(Boolean)
+        )
+        
+        // 하이픈 제거한 버전도 추가
+        inventorySetNums.forEach(setNum => {
+          const normalized = setNum.replace(/-.*$/, '')
+          if (normalized !== setNum) {
+            inventorySetNums.add(normalized)
+          }
+        })
+        
+        console.log('[PartToSetSearch] 플레이온 인벤토리 세트 번호 생성 완료:', inventorySetNums.size, '개')
+        return inventorySetNums
+      } catch (error) {
+        console.error('[PartToSetSearch] inventorySetNumbers computed error:', error)
         return new Set()
       }
-      
-      return new Set(
-        storeInventory.value
-          .map(item => {
-            const legoSet = item.lego_sets
-            if (!legoSet) return null
-            if (Array.isArray(legoSet) && legoSet.length > 0) {
-              return legoSet[0].number
-            }
-            if (!Array.isArray(legoSet)) {
-              return legoSet.number
-            }
-            return null
-          })
-          .filter(Boolean)
-      )
     })
 
     const searchTooltip = ref('')
@@ -585,7 +703,7 @@ export default {
       }, 3000)
     }
 
-    const searchByElementId = async () => {
+    const searchByElementId = async (keepResult = false) => {
       if (!elementIdInput.value.trim()) {
         showSearchTooltip('검색어를 입력해주세요.')
         return
@@ -593,7 +711,9 @@ export default {
 
       try {
         error.value = null
-        searchResult.value = null
+        if (!keepResult) {
+          searchResult.value = null
+        }
 
         // element_id로 set_parts에서 part_id와 color_id 조회
         const { data: setPart, error: setPartError } = await supabase
@@ -799,18 +919,22 @@ export default {
         const allSets = await findSetsByPart(setPart.part_id, setPart.color_id)
         let sets = allSets
         
-        // 로그인 상태일 때만 매장 보유 세트만 필터링
-        if (user.value && inventorySetNumbers.value.size > 0) {
+        // 검색 옵션에 따라 필터링
+        if (searchInStoreOnly.value && user.value && inventorySetNumbers.value.size > 0) {
           sets = allSets.filter(set => {
             const setNum = set.set_num
             // 세트 번호 정규화 (하이픈 제거하여 비교)
             const normalizedSetNum = setNum.replace(/-.*$/, '')
             return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
           })
-          console.log(`[PartToSetSearch] 매장 보유 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개)`)
+          if (isPleyonUser.value) {
+            console.log(`[PartToSetSearch] 플레이온 매장 보유 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개)`)
+          } else {
+            console.log(`[PartToSetSearch] 일반회원 등록 레고 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개, 등록된 레고: ${userLegoSets.value.length}개)`)
+          }
         } else {
-          // 로그아웃 상태: 전체 레고 세트에서 검색
-          console.log('[PartToSetSearch] 로그아웃 상태 - 전체 레고 세트에서 검색')
+          // 전체 레고 세트에서 검색
+          console.log('[PartToSetSearch] 전체 레고 세트에서 검색')
         }
         
         // 기본 검색 결과 먼저 표시 (세트 목록)
@@ -1412,6 +1536,15 @@ export default {
       return rgbStr || null
     }
 
+    const handleSearchOptionChange = async () => {
+      // 검색 옵션이 변경되면 현재 검색어로 다시 검색
+      // searchResult가 있을 때만 재검색하여 최근 부품 리스트가 표시되지 않도록 함
+      if (elementIdInput.value.trim() && searchResult.value) {
+        // searchResult를 유지한 채로 재검색 (keepResult = true)
+        await searchByElementId(true)
+      }
+    }
+    
     const getColorTextColor = (rgb) => {
       if (!rgb) return '#ffffff'
       let rgbStr = String(rgb).trim()
@@ -1620,15 +1753,20 @@ export default {
       try {
         const allPartSets = await findSetsByPart(part.part_id, part.color_id)
         
-        // 로그인 상태일 때만 매장 보유 세트만 필터링
-        if (user.value && inventorySetNumbers.value.size > 0) {
+        // 검색 옵션에 따라 필터링
+        if (searchInStoreOnly.value && user.value && inventorySetNumbers.value.size > 0) {
           partSets.value = allPartSets.filter(set => {
             const setNum = set.set_num
             const normalizedSetNum = setNum.replace(/-.*$/, '')
             return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
           })
+          if (isPleyonUser.value) {
+            console.log(`[PartToSetSearch] 플레이온 매장 보유 세트 필터링 (부품 정보): ${partSets.value.length}개 (전체: ${allPartSets.length}개)`)
+          } else {
+            console.log(`[PartToSetSearch] 일반회원 등록 레고 세트 필터링 (부품 정보): ${partSets.value.length}개 (전체: ${allPartSets.length}개, 등록된 레고: ${userLegoSets.value.length}개)`)
+          }
         } else {
-          // 로그아웃 상태: 전체 레고 세트
+          // 전체 레고 세트
           partSets.value = allPartSets
         }
       } catch (err) {
@@ -1903,25 +2041,54 @@ export default {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
+    // 초기 로드 플래그
+    const isInitialLoad = ref(true)
+    
     // 사용자 변경 시 매장 인벤토리 로드
-    watch(user, async (newUser) => {
+    watch(user, async (newUser, oldUser) => {
+      // 초기 로드는 onMounted에서 처리
+      if (isInitialLoad.value) {
+        isInitialLoad.value = false
+        return
+      }
+      
+      // 로그인 시에는 "우리 매장"이 기본값, 로그아웃 시에는 "전체 레고"가 기본값
       if (newUser) {
-        await loadStoreInventory()
+        searchInStoreOnly.value = true
+        // 플레이온 계정 확인 및 일반회원 레고 세트 로드
+        await checkPleyonAccount()
+        if (!isPleyonUser.value) {
+          await loadUserLegoSets()
+        } else {
+          await loadStoreInventory()
+        }
       } else {
+        searchInStoreOnly.value = false
+        isPleyonUser.value = false
+        userLegoSets.value = []
         storeInfo.value = null
         storeInventory.value = []
       }
-    }, { immediate: true })
+    })
     
     watch(() => route.query, () => { // 🔧 수정됨
       searchByQueryParams() // 🔧 수정됨
     }, { immediate: true }) // 🔧 수정됨
     
     onMounted(async () => {
+      console.log('[PartToSetSearch] onMounted 시작')
       if (user.value) {
-        await loadStoreInventory()
+        searchInStoreOnly.value = true
+        // 플레이온 계정 확인 및 일반회원 레고 세트 로드
+        await checkPleyonAccount()
+        if (!isPleyonUser.value) {
+          await loadUserLegoSets()
+        } else {
+          await loadStoreInventory()
+        }
       }
       await loadRecentParts()
+      isInitialLoad.value = false
     })
 
     return {
@@ -1950,6 +2117,9 @@ export default {
       handleImageError,
       getColorRgb,
       getColorTextColor,
+      searchInStoreOnly,
+      handleSearchOptionChange,
+      user,
       getContrastColor,
       formatColorLabel,
       handlePartImageError,
@@ -2009,12 +2179,19 @@ export default {
   width: 100%;
 }
 
+.page-title-with-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
 .page-header h1 {
   font-size: 2rem;
   font-weight: 700;
   color: #111827;
-  margin: 0 0 0.5rem 0;
-  text-align: center;
+  margin: 0;
 }
 
 .page-header p {
@@ -2223,11 +2400,9 @@ export default {
 
 .result-header {
   margin-bottom: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   position: relative;
 }
+
 
 .result-header h3 {
   margin: 0;
@@ -3553,6 +3728,108 @@ export default {
   font-weight: 600;
 }
 
+/* 검색 옵션 스타일 */
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 100px;
+  height: 32px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #d1d5db;
+  transition: 0.3s;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.toggle-text {
+  position: absolute;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: white;
+  transition: 0.3s;
+  white-space: nowrap;
+  z-index: 1;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.toggle-switch input:checked + .toggle-slider .toggle-text {
+  left: 12px;
+  right: auto;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+  right: 12px;
+  left: auto;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.3s;
+  border-radius: 50%;
+  z-index: 2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #ff3600;
+}
+
+.toggle-switch input:checked + .toggle-slider .toggle-text {
+  color: white;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider.all-sets {
+  background-color: #1f2937;
+}
+
+.toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+  color: white;
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(68px);
+}
+
+.toggle-switch input:focus + .toggle-slider {
+  box-shadow: 0 0 1px #ff3600;
+}
+
+.toggle-switch.disabled .toggle-slider {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 @media (max-width: 768px) {
   .modal-overlay {
     padding: 1rem;
@@ -3565,6 +3842,27 @@ export default {
 
   .parts-grid {
     grid-template-columns: 1fr;
+  }
+  
+  .toggle-switch {
+    width: 90px;
+    height: 28px;
+  }
+  
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(58px);
+  }
+  
+  .toggle-switch input:checked + .toggle-slider .toggle-text {
+    left: 10px;
+  }
+  
+  .toggle-switch input:not(:checked) + .toggle-slider .toggle-text {
+    right: 10px;
+  }
+  
+  .toggle-text {
+    font-size: 0.8125rem;
   }
 }
 </style>

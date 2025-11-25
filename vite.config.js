@@ -109,6 +109,12 @@ export default defineConfig(({ mode }) => {
     })
   }
   
+  const supabaseProxyTarget = process.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co' // 🔧 수정됨
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wZmVyYnh1eG9jYmZuZmJwY256Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk0NzQ5ODUsImV4cCI6MjA3NTA1MDk4NX0.eqKQh_o1k2VmP-_v__gUMHVOgvdIzml-zDhZyzfxUmk' // 🔧 수정됨
+  const supabaseProxyPath = process.env.VITE_SUPABASE_PROXY_PATH || '' // 🔧 수정됨
+  const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') // 🔧 수정됨
+  const supabaseProxyRewrite = supabaseProxyPath ? new RegExp(`^${escapeRegex(supabaseProxyPath)}`) : null // 🔧 수정됨
+
   return {
     plugins: [vue()],
     resolve: {
@@ -224,6 +230,23 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           configure: createProxyLogger('ProxyImage')
         },
+        ...(supabaseProxyPath
+          ? {
+              [supabaseProxyPath]: {
+                target: supabaseProxyTarget,
+                changeOrigin: true,
+                secure: true,
+                rewrite: (path) => (supabaseProxyRewrite ? path.replace(supabaseProxyRewrite, '') : path),
+                headers: supabaseAnonKey
+                  ? {
+                      apikey: supabaseAnonKey,
+                      Authorization: `Bearer ${supabaseAnonKey}`,
+                    }
+                  : undefined,
+                configure: createProxyLogger('SupabaseREST'),
+              }
+            }
+          : {}),
                '/api/semantic-vector': {
                  target: `http://localhost:${portConfig.semanticVectorApi || 3022}`,
                  changeOrigin: true,

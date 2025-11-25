@@ -3,13 +3,13 @@
     <!-- 메인 컨텐츠 영역 -->
     <div class="w-full">
       <!-- 상단 헤더 -->
-      <header class="bg-white sticky top-0 z-50" style="border-bottom: 1px solid #e5e7eb;">
+      <header class="bg-white sticky top-0 z-50" style="border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12">
           <div class="flex items-center h-16 lg:h-20">
             <!-- 왼쪽: 로고 -->
             <div class="flex items-center flex-1 justify-start">
               <router-link to="/" class="nav-logo flex items-center mr-2 sm:mr-4">
-                <span class="text-xl sm:text-2xl font-bold text-gray-800">BrickBox</span>
+                <img src="/database/pley_logo.jpg" alt="Pleyon" style="height: 48px; max-height: 48px;" class="object-contain lg:!h-16 lg:!max-h-16" />
               </router-link>
             </div>
 
@@ -44,13 +44,13 @@
                   >
                     검수노트
                   </router-link>
-                  <div class="h-6 w-px bg-gray-300 mx-1"></div>
+                  <div class="nav-menu-divider"></div>
                   <router-link 
                     to="/set-parts" 
                     class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
                     active-class="nav-menu-active"
                   >
-                    레고리스트
+                    레고 리스트
                   </router-link>
                   <router-link 
                     to="/part-to-set-search" 
@@ -65,6 +65,13 @@
                     active-class="nav-menu-active"
                   >
                     설명서
+                  </router-link>
+                  <router-link 
+                    to="/user-lego-registration" 
+                    class="nav-menu-link text-base xl:text-lg font-bold text-gray-800 hover:text-blue-600 transition-colors flex items-center gap-1 focus:outline-none whitespace-nowrap"
+                    active-class="nav-menu-active"
+                  >
+                    레고등록
                   </router-link>
 
                   <!-- 관리 드롭다운 -->
@@ -1135,7 +1142,7 @@ body {
 }
 
 .hover\:text-blue-600:hover {
-  color: #2563eb;
+  color: #ff3600;
 }
 
 .transition-colors {
@@ -1150,7 +1157,7 @@ body {
 }
 
 .text-blue-600 {
-  color: #2563eb;
+  color: #ff3600;
 }
 
 .border-b-4 {
@@ -1166,12 +1173,53 @@ body {
   text-decoration: none;
 }
 
+.nav-logo img {
+  height: 48px;
+  max-height: 48px;
+  width: auto;
+  object-fit: contain;
+}
+
+@media (min-width: 1024px) {
+  .nav-logo img {
+    height: 64px;
+    max-height: 64px;
+  }
+}
+
 .nav-menu-link {
   text-decoration: none;
+  position: relative;
+  padding-bottom: 4px;
+}
+
+.nav-menu-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background-color: transparent;
+  transition: background-color 0.2s;
+}
+
+.nav-menu-link.nav-menu-active::after {
+  background-color: #ff3600;
+}
+
+.nav-menu-divider {
+  width: 1px;
+  height: 16px;
+  background-color: #d1d5db;
+  margin: 0 0.5rem;
+  flex-shrink: 0;
+  transform: translateY(-2px);
 }
 
 .nav-menu-link.nav-menu-active {
-  color: #2563eb;
+  color: #ff3600;
+  transform: translateY(-2px);
 }
 
 .no-underline {
@@ -1318,7 +1366,7 @@ body {
 }
 
 .text-blue-600 {
-  color: #2563eb;
+  color: #ff3600;
 }
 
 .hover\:text-blue-700:hover {
@@ -1859,11 +1907,11 @@ main {
 
 .mobile-dropdown-item:hover {
   background-color: #f3f4f6;
-  color: #2563eb;
+  color: #ff3600;
 }
 
 .mobile-dropdown-item-active {
-  color: #2563eb;
+  color: #ff3600;
   background-color: #f9fafb;
 }
 
@@ -1873,7 +1921,7 @@ main {
 }
 
 .mobile-dropdown-item-sub:hover {
-  color: #2563eb;
+  color: #ff3600;
 }
 
 .mobile-dropdown-divider {
@@ -2107,7 +2155,7 @@ main {
 
 .login-badge-btn {
   padding: 0.5rem 0.875rem;
-  background: #2563eb;
+  background: #ff3600;
   color: #ffffff;
   border: none;
   border-radius: 9999px;
@@ -2119,7 +2167,7 @@ main {
 }
 
 .login-badge-btn:hover {
-  background: #1d4ed8;
+  background: #e63000;
   transform: translateY(-1px);
 }
 

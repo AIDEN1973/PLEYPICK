@@ -69,6 +69,12 @@ export function useRebrickable() {
       }
 
       if (!response.ok) {
+        // 404 에러는 특별히 처리 (조용히)
+        if (response.status === 404) {
+          const error = new Error(`API Error: 404 세트를 찾을 수 없습니다`)
+          error.is404 = true
+          throw error
+        }
         throw new Error(`API Error: ${response.status} ${response.statusText}`)
       }
 
@@ -107,12 +113,23 @@ export function useRebrickable() {
 
   // 특정 세트 정보 조회 (여러 변형 시도)
   const getSet = async (setNum) => {
-    const normalized = normalizeSetNum(setNum)
-    const variants = [normalized]
+    // 원본 번호를 먼저 시도 (하이픈이 없는 경우)
+    const variants = []
     
-    // 원본 번호도 시도 (하이픈이 있는 경우)
-    if (normalized !== setNum) {
-      variants.unshift(setNum)
+    // 원본 번호 먼저 추가 (하이픈이 없는 경우)
+    if (!String(setNum).trim().includes('-')) {
+      variants.push(String(setNum).trim())
+    }
+    
+    // 정규화된 번호 추가 (-1 접미사)
+    const normalized = normalizeSetNum(setNum)
+    if (normalized !== setNum || !variants.includes(normalized)) {
+      variants.push(normalized)
+    }
+    
+    // 원본 번호가 하이픈이 있는 경우도 추가
+    if (String(setNum).trim().includes('-') && !variants.includes(String(setNum).trim())) {
+      variants.unshift(String(setNum).trim())
     }
     
     // 여러 변형 시도
@@ -124,11 +141,18 @@ export function useRebrickable() {
         }
       } catch (err) {
         // 404가 아니면 즉시 throw
-        if (!err.message || !err.message.includes('404')) {
+        const is404 = err.is404 || (err.message && (
+          err.message.includes('404') || 
+          err.message.includes('Not Found') ||
+          err.message.includes('세트를 찾을 수 없습니다')
+        ))
+        
+        if (!is404) {
           throw err
         }
-        // 404면 다음 변형 시도
-        console.log(`[Rebrickable] 세트 ${variant} 없음, 다음 변형 시도`)
+        // 404면 다음 변형 시도 (조용히 처리, 콘솔 에러 표시 안 함)
+        // 마지막 변형이 아니면 계속 진행
+        continue
       }
     }
     
