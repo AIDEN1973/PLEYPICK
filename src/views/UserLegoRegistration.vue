@@ -20,7 +20,7 @@
                       v-model="setSearchQuery"
                       @keyup.enter="handleSearchEnter"
                       @blur="handleSearchBlur"
-                      placeholder="예 : 76917 또는 76917, 76918, 76919 또는 76917 76918 76919"
+                      placeholder="예 : 76917 또는 76917, 76918, 76919 또는 76917 76918"
                       class="set-search-input"
                       :disabled="loading || isPleyonUser"
                     />
