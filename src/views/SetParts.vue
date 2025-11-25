@@ -826,57 +826,97 @@ export default {
       return null
     }
 
-    const rebuildStoreInventoryCache = async () => { // 🔧 수정됨
-      if (storeInventoryCachePromise) { // 🔧 수정됨
-        await storeInventoryCachePromise // 🔧 수정됨
-        return // 🔧 수정됨
-      } // 🔧 수정됨
-      storeInventoryCachePromise = (async () => { // 🔧 수정됨
-        if (!isPleyonUser.value) { // 🔧 수정됨
-          storeInventorySetsCache.value = [] // 🔧 수정됨
-          storeInventoryCacheReady.value = false // 🔧 수정됨
-          return // 🔧 수정됨
-        } // 🔧 수정됨
-        const inventoryList = inventorySetNumbersList.value // 🔧 수정됨
-        if (!inventoryList || inventoryList.length === 0) { // 🔧 수정됨
-          storeInventorySetsCache.value = [] // 🔧 수정됨
-          storeInventoryCacheReady.value = true // 🔧 수정됨
-          return // 🔧 수정됨
-        } // 🔧 수정됨
-        storeInventoryCacheReady.value = false // 🔧 수정됨
-        const filterClauses = buildSetNumFilterClauses(inventoryList) // 🔧 수정됨
-        if (!filterClauses) { // 🔧 수정됨
-          storeInventorySetsCache.value = [] // 🔧 수정됨
-          storeInventoryCacheReady.value = true // 🔧 수정됨
-          return // 🔧 수정됨
-        } // 🔧 수정됨
-        try { // 🔧 수정됨
-          const { data, error } = await supabase // 🔧 수정됨
-            .from('lego_sets') // 🔧 수정됨
-            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url') // 🔧 수정됨
-            .or(filterClauses) // 🔧 수정됨
-          if (error) throw error // 🔧 수정됨
-          const enriched = await attachThemeNamesToSets(data || []) // 🔧 수정됨
-          const setMaps = buildSetLookupMaps(enriched) // 🔧 수정됨
-          storeInventorySetsCache.value = inventoryList // 🔧 수정됨
-            .map(setNum => { // 🔧 수정됨
-              const matched = resolveInventorySetRecord(setNum, setMaps) // 🔧 수정됨
-              return matched ? mapSetRecord(matched) : null // 🔧 수정됨
-            }) // 🔧 수정됨
-            .filter(Boolean) // 🔧 수정됨
-          storeInventoryCacheReady.value = true // 🔧 수정됨
-        } catch (cacheError) { // 🔧 수정됨
-          console.error('[SetParts] 매장 세트 캐시 생성 실패:', cacheError) // 🔧 수정됨
-          storeInventorySetsCache.value = [] // 🔧 수정됨
-          storeInventoryCacheReady.value = true // 🔧 수정됨
-        } // 🔧 수정됨
-      })() // 🔧 수정됨
-      try { // 🔧 수정됨
-        await storeInventoryCachePromise // 🔧 수정됨
-      } finally { // 🔧 수정됨
-        storeInventoryCachePromise = null // 🔧 수정됨
-      } // 🔧 수정됨
-    } // 🔧 수정됨
+    // 테마 정보 전역 캐시 (재사용)
+    const themeCache = new Map()
+    
+    const rebuildStoreInventoryCache = async () => {
+      // 캐시가 이미 있고 유효하면 재사용
+      if (storeInventoryCacheReady.value && storeInventorySetsCache.value.length > 0) {
+        return
+      }
+      
+      if (storeInventoryCachePromise) {
+        await storeInventoryCachePromise
+        return
+      }
+      
+      storeInventoryCachePromise = (async () => {
+        if (!isPleyonUser.value) {
+          storeInventorySetsCache.value = []
+          storeInventoryCacheReady.value = false
+          return
+        }
+        
+        const inventoryList = inventorySetNumbersList.value
+        if (!inventoryList || inventoryList.length === 0) {
+          storeInventorySetsCache.value = []
+          storeInventoryCacheReady.value = true
+          return
+        }
+        
+        storeInventoryCacheReady.value = false
+        const filterClauses = buildSetNumFilterClauses(inventoryList)
+        if (!filterClauses) {
+          storeInventorySetsCache.value = []
+          storeInventoryCacheReady.value = true
+          return
+        }
+        
+        try {
+          // 세트 조회
+          const { data, error } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .or(filterClauses)
+          
+          if (error) throw error
+          
+          // 테마 정보는 캐시에서 먼저 확인하고, 없으면 배치로 조회
+          const themeIds = [...new Set((data || []).map(set => set.theme_id).filter(Boolean))]
+          const missingThemeIds = themeIds.filter(id => !themeCache.has(id))
+          
+          if (missingThemeIds.length > 0) {
+            const { data: themesData } = await supabase
+              .from('lego_themes')
+              .select('theme_id, name')
+              .in('theme_id', missingThemeIds)
+            
+            if (themesData) {
+              themesData.forEach(theme => {
+                themeCache.set(theme.theme_id, theme.name)
+              })
+            }
+          }
+          
+          // 캐시된 테마 정보로 세트 데이터 보강
+          const enriched = (data || []).map(set => ({
+            ...set,
+            theme_name: set.theme_id ? (themeCache.get(set.theme_id) || null) : null
+          }))
+          
+          const setMaps = buildSetLookupMaps(enriched)
+          
+          storeInventorySetsCache.value = inventoryList
+            .map(setNum => {
+              const matched = resolveInventorySetRecord(setNum, setMaps)
+              return matched ? mapSetRecord(matched) : null
+            })
+            .filter(Boolean)
+          
+          storeInventoryCacheReady.value = true
+        } catch (cacheError) {
+          console.error('[SetParts] 매장 세트 캐시 생성 실패:', cacheError)
+          storeInventorySetsCache.value = []
+          storeInventoryCacheReady.value = true
+        }
+      })()
+      
+      try {
+        await storeInventoryCachePromise
+      } finally {
+        storeInventoryCachePromise = null
+      }
+    }
 
     const hasUserRegisteredSets = computed(() => (userLegoSets.value?.length || 0) > 0)
     
@@ -2410,7 +2450,7 @@ export default {
       registeredPartsCount.value = 0
     }
 
-    // 플레이온 계정 확인
+    // 플레이온 계정 확인 (loadStoreInventoryData와 통합하여 중복 호출 방지)
     const checkPleyonAccount = async () => {
       if (!user.value) {
         isPleyonUser.value = false
@@ -2418,20 +2458,21 @@ export default {
         return
       }
 
-      try {
-        const storeData = await getStoreInfoByEmail(user.value.email)
-        if (storeData && storeData.store) {
-          isPleyonUser.value = true
-          storeInfo.value = storeData
-        } else {
-          isPleyonUser.value = false
-          storeInfo.value = null
-        }
-      } catch (err) {
-        console.error('[SetParts] 플레이온 계정 확인 실패:', err)
-        isPleyonUser.value = false
-        storeInfo.value = null
+      // loadStoreInventoryData가 이미 호출되었거나 호출 중이면 그 결과 사용
+      if (loadStoreInventoryDataPromise) {
+        await loadStoreInventoryDataPromise
+        isPleyonUser.value = !!storeInfo.value
+        return
       }
+      
+      if (storeInfo.value && lastLoadedEmail === user.value.email) {
+        isPleyonUser.value = true
+        return
+      }
+
+      // loadStoreInventoryData 호출하여 매장 정보와 인벤토리 동시에 로드
+      await loadStoreInventoryData()
+      isPleyonUser.value = !!storeInfo.value
     }
 
     // 일반회원용 레고 세트 로드
@@ -2462,62 +2503,67 @@ export default {
       }
     }
 
-    // 매장 인벤토리 로드
+    // 매장 인벤토리 로드 (중복 호출 방지)
+    let loadStoreInventoryDataPromise = null
+    let lastLoadedEmail = null
+    
     const loadStoreInventoryData = async () => {
-      console.log('[SetParts] loadStoreInventoryData 시작:', { 
-        hasUser: !!user.value, 
-        email: user.value?.email 
-      })
+      // 중복 호출 방지: 같은 이메일로 이미 로딩 중이면 대기
+      if (loadStoreInventoryDataPromise) {
+        await loadStoreInventoryDataPromise
+        return
+      }
+      
+      // 이미 로드된 데이터가 있고 이메일이 같으면 스킵
+      if (storeInfo.value && lastLoadedEmail === user.value?.email) {
+        return
+      }
+      
       if (!user.value || !user.value.email) {
-        console.log('[SetParts] 사용자가 없어서 인벤토리 로드 스킵')
         storeInfo.value = null
         storeInventory.value = []
+        lastLoadedEmail = null
         return
       }
 
-      try {
-        console.log('[SetParts] getStoreInfoByEmail 호출:', user.value.email)
-        const storeData = await getStoreInfoByEmail(user.value.email)
-        console.log('[SetParts] getStoreInfoByEmail 결과:', { 
-          hasStoreData: !!storeData, 
-          hasStore: !!storeData?.store,
-          storeId: storeData?.store?.id 
-        })
-        if (storeData && storeData.store) {
-          isPleyonUser.value = true
-          storeInfo.value = storeData
-          console.log('[SetParts] getStoreInventory 호출:', storeData.store.id)
-          const inventoryData = await getStoreInventory(storeData.store.id)
-          console.log('[SetParts] getStoreInventory 결과:', { 
-            inventoryLength: inventoryData?.length || 0 
-          })
-          storeInventory.value = inventoryData || []
-          console.log('[SetParts] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
-          await rebuildStoreInventoryCache() // 🔧 수정됨
-        } else {
-          console.log('[SetParts] 매장 정보가 없음 - 일반회원')
+      loadStoreInventoryDataPromise = (async () => {
+        try {
+          const storeData = await getStoreInfoByEmail(user.value.email)
+          lastLoadedEmail = user.value.email
+          
+          if (storeData && storeData.store) {
+            isPleyonUser.value = true
+            storeInfo.value = storeData
+            const inventoryData = await getStoreInventory(storeData.store.id)
+            storeInventory.value = inventoryData || []
+          } else {
+            isPleyonUser.value = false
+            storeInfo.value = null
+            storeInventory.value = []
+            storeInventorySetsCache.value = []
+            storeInventoryCacheReady.value = false
+            await loadUserLegoSets()
+          }
+        } catch (err) {
+          console.error('[SetParts] 매장 인벤토리 로드 실패:', err)
           isPleyonUser.value = false
           storeInfo.value = null
           storeInventory.value = []
-          storeInventorySetsCache.value = [] // 🔧 수정됨
-          storeInventoryCacheReady.value = false // 🔧 수정됨
-          // 일반회원인 경우 user_lego_sets 로드
+          storeInventorySetsCache.value = []
+          storeInventoryCacheReady.value = false
           await loadUserLegoSets()
+        } finally {
+          loadStoreInventoryDataPromise = null
         }
-      } catch (err) {
-        console.error('[SetParts] 매장 인벤토리 로드 실패:', err)
-        isPleyonUser.value = false
-        storeInfo.value = null
-        storeInventory.value = []
-        storeInventorySetsCache.value = [] // 🔧 수정됨
-        storeInventoryCacheReady.value = false // 🔧 수정됨
-        // 일반회원인 경우 user_lego_sets 로드
-        await loadUserLegoSets()
-      }
+      })()
+      
+      await loadStoreInventoryDataPromise
     }
 
     const attachThemeNamesToSets = async (sets) => {
       if (!sets || sets.length === 0) return []
+      
+      // 이미 theme_name이 있거나 lego_themes가 있으면 그대로 반환
       const normalizedSets = sets.map(set => {
         if (set.theme_name) return set
         if (set.lego_themes && set.lego_themes.name) {
@@ -2529,21 +2575,33 @@ export default {
         }
         return set
       })
+      
+      // 캐시에서 먼저 확인
       const themeIds = [...new Set(normalizedSets.filter(set => !set.theme_name).map(set => set.theme_id).filter(Boolean))]
       if (themeIds.length === 0) {
         return normalizedSets.map(set => ({ ...set, theme_name: set.theme_name || null }))
       }
-      const { data: themesData, error: themesError } = await supabase
-        .from('lego_themes')
-        .select('theme_id, name')
-        .in('theme_id', themeIds)
-      if (themesError || !themesData) {
-        return normalizedSets.map(set => ({ ...set, theme_name: set.theme_name || null }))
+      
+      // 캐시에 없는 테마만 조회
+      const missingThemeIds = themeIds.filter(id => !themeCache.has(id))
+      
+      if (missingThemeIds.length > 0) {
+        const { data: themesData, error: themesError } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .in('theme_id', missingThemeIds)
+        
+        if (!themesError && themesData) {
+          themesData.forEach(theme => {
+            themeCache.set(theme.theme_id, theme.name)
+          })
+        }
       }
-      const themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
+      
+      // 캐시된 테마 정보로 보강
       return normalizedSets.map(set => ({
         ...set,
-        theme_name: set.theme_id ? (themeMap.get(set.theme_id) || set.theme_name || null) : (set.theme_name || null)
+        theme_name: set.theme_id ? (themeCache.get(set.theme_id) || set.theme_name || null) : (set.theme_name || null)
       }))
     }
 
@@ -2571,7 +2629,7 @@ export default {
       if (!searchInStoreOnly.value) {
         const { data, error } = await supabase
           .from('lego_sets')
-          .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, lego_themes(name)')
+          .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
           .order('created_at', { ascending: false })
         if (error) throw error
         const enriched = await attachThemeNamesToSets(data || [])
@@ -2598,7 +2656,7 @@ export default {
 
       const { data, error } = await supabase
         .from('lego_sets')
-        .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, lego_themes(name)')
+        .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
         .or(filterClauses)
 
       if (error) throw error
@@ -2614,7 +2672,6 @@ export default {
     }
     
     const loadStoreInventory = async () => {
-      console.log('[SetParts] 레고 세트 로드 시작')
       await loadStoreInventoryData()
       await loadPaginatedStoreSets()
     }
@@ -2656,10 +2713,11 @@ export default {
               return
             }
 
-            await rebuildStoreInventoryCache() // 🔧 수정됨
-            storeSetsCountValue.value = storeInventorySetsCache.value.length // 🔧 수정됨
-            paginatedStoreSetsData.value = storeInventorySetsCache.value // 🔧 수정됨
-              .slice(start, start + itemsPerPage) // 🔧 수정됨
+            // 캐시 사용: 전체 데이터를 한 번만 로드하고 클라이언트에서 페이지네이션
+            await rebuildStoreInventoryCache()
+            storeSetsCountValue.value = storeInventorySetsCache.value.length
+            paginatedStoreSetsData.value = storeInventorySetsCache.value
+              .slice(start, start + itemsPerPage)
             return
           }
 
@@ -2670,7 +2728,7 @@ export default {
 
           const { data, error, count } = await supabase
             .from('lego_sets')
-            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url, lego_themes(name)', { count: 'exact' })
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url', { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(start, end)
 
@@ -3177,11 +3235,10 @@ export default {
     
     // 초기 로드
     onMounted(async () => {
-      console.log('[SetParts] onMounted 시작')
       await waitForAuthReady()
-      console.log('[SetParts] 인증 상태 동기화 완료:', { hasUser: !!user.value })
       if (user.value) {
         searchInStoreOnly.value = true
+        // checkPleyonAccount가 loadStoreInventoryData를 내부적으로 호출
         await checkPleyonAccount()
         if (!isPleyonUser.value) {
           await loadUserLegoSets()
@@ -3189,16 +3246,18 @@ export default {
       } else {
         searchInStoreOnly.value = false
       }
-      console.log('[SetParts] 전체 레고 세트 로드 시작')
-      await loadStoreInventory()
+      await loadPaginatedStoreSets()
       isInitialLoad.value = false
     })
 
     watch(searchInStoreOnly, async () => {
       currentPage.value = 1
-      if (searchInStoreOnly.value && isPleyonUser.value) { // 🔧 수정됨
-        await rebuildStoreInventoryCache() // 🔧 수정됨
-      } // 🔧 수정됨
+      if (searchInStoreOnly.value && isPleyonUser.value) {
+        // 캐시가 없을 때만 재빌드
+        if (!storeInventoryCacheReady.value || storeInventorySetsCache.value.length === 0) {
+          await rebuildStoreInventoryCache()
+        }
+      }
       await loadPaginatedStoreSets()
     })
 
