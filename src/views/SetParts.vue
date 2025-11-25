@@ -863,13 +863,62 @@ export default {
         }
         
         try {
-          // 세트 조회
-          const { data, error } = await supabase
-            .from('lego_sets')
-            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-            .or(filterClauses)
+          // 세트 조회: OR 조건이 많을 경우 배치로 나누어 처리
+          const unique = [...new Set(inventoryList.map(sanitizeSetNum).filter(Boolean))]
+          if (unique.length === 0) {
+            storeInventorySetsCache.value = []
+            storeInventoryCacheReady.value = true
+            return
+          }
           
-          if (error) throw error
+          // 정확한 매칭과 패턴 매칭을 분리
+          const exactMatches = unique.filter(num => num.includes('-'))
+          const patternMatches = unique.filter(num => !num.includes('-'))
+          
+          const allResults = []
+          const BATCH_SIZE = 50 // Supabase OR 조건 제한을 고려한 배치 크기
+          
+          // 정확한 매칭 처리
+          if (exactMatches.length > 0) {
+            for (let i = 0; i < exactMatches.length; i += BATCH_SIZE) {
+              const batch = exactMatches.slice(i, i + BATCH_SIZE)
+              const batchClauses = batch.map(num => `set_num.eq.${num}`).join(',')
+              const { data: batchData, error: batchError } = await supabase
+                .from('lego_sets')
+                .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+                .or(batchClauses)
+              
+              if (batchError) throw batchError
+              if (batchData) allResults.push(...batchData)
+            }
+          }
+          
+          // 패턴 매칭 처리
+          if (patternMatches.length > 0) {
+            for (let i = 0; i < patternMatches.length; i += BATCH_SIZE) {
+              const batch = patternMatches.slice(i, i + BATCH_SIZE)
+              const batchClauses = batch.map(num => `set_num.ilike.${num}-%`).join(',')
+              const { data: batchData, error: batchError } = await supabase
+                .from('lego_sets')
+                .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+                .or(batchClauses)
+              
+              if (batchError) throw batchError
+              if (batchData) allResults.push(...batchData)
+            }
+          }
+          
+          // 중복 제거
+          const dataMap = new Map()
+          allResults.forEach(set => {
+            if (set && set.set_num) {
+              const key = sanitizeSetNum(set.set_num)
+              if (key && !dataMap.has(key)) {
+                dataMap.set(key, set)
+              }
+            }
+          })
+          const data = Array.from(dataMap.values())
           
           // 테마 정보는 캐시에서 먼저 확인하고, 없으면 배치로 조회
           const themeIds = [...new Set((data || []).map(set => set.theme_id).filter(Boolean))]
@@ -2649,17 +2698,60 @@ export default {
         return []
       }
 
-      const filterClauses = buildSetNumFilterClauses(inventoryList) // 🔧 수정됨
-      if (!filterClauses) {
+      // OR 조건이 많을 경우 배치로 나누어 처리
+      const unique = [...new Set(inventoryList.map(sanitizeSetNum).filter(Boolean))]
+      if (unique.length === 0) {
         return []
       }
-
-      const { data, error } = await supabase
-        .from('lego_sets')
-        .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-        .or(filterClauses)
-
-      if (error) throw error
+      
+      // 정확한 매칭과 패턴 매칭을 분리
+      const exactMatches = unique.filter(num => num.includes('-'))
+      const patternMatches = unique.filter(num => !num.includes('-'))
+      
+      const allResults = []
+      const BATCH_SIZE = 50
+      
+      // 정확한 매칭 처리
+      if (exactMatches.length > 0) {
+        for (let i = 0; i < exactMatches.length; i += BATCH_SIZE) {
+          const batch = exactMatches.slice(i, i + BATCH_SIZE)
+          const batchClauses = batch.map(num => `set_num.eq.${num}`).join(',')
+          const { data: batchData, error: batchError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .or(batchClauses)
+          
+          if (batchError) throw batchError
+          if (batchData) allResults.push(...batchData)
+        }
+      }
+      
+      // 패턴 매칭 처리
+      if (patternMatches.length > 0) {
+        for (let i = 0; i < patternMatches.length; i += BATCH_SIZE) {
+          const batch = patternMatches.slice(i, i + BATCH_SIZE)
+          const batchClauses = batch.map(num => `set_num.ilike.${num}-%`).join(',')
+          const { data: batchData, error: batchError } = await supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .or(batchClauses)
+          
+          if (batchError) throw batchError
+          if (batchData) allResults.push(...batchData)
+        }
+      }
+      
+      // 중복 제거
+      const dataMap = new Map()
+      allResults.forEach(set => {
+        if (set && set.set_num) {
+          const key = sanitizeSetNum(set.set_num)
+          if (key && !dataMap.has(key)) {
+            dataMap.set(key, set)
+          }
+        }
+      })
+      const data = Array.from(dataMap.values())
 
       const enriched = await attachThemeNamesToSets(data || [])
       const setMaps = buildSetLookupMaps(enriched)
