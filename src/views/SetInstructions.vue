@@ -995,12 +995,31 @@ export default {
             return null
           }
           
+          console.log(`[SetInstructions] fetchLocale 시작:`, {
+            locale,
+            setNum,
+            proxyUrl,
+            fullUrl: window.location.origin + proxyUrl,
+            isDev: import.meta.env.DEV,
+            isProd: import.meta.env.PROD,
+            mode: import.meta.env.MODE
+          })
+          
           const response = await fetch(proxyUrl, {
             headers: {
               'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
             signal: controller.signal
+          })
+          
+          console.log(`[SetInstructions] fetchLocale 응답:`, {
+            locale,
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok,
+            url: response.url,
+            headers: Object.fromEntries(response.headers.entries())
           })
           
           // 응답 받은 후에도 취소 확인
@@ -1011,6 +1030,14 @@ export default {
 
             if (!response.ok) {
               clearTimeout(timeoutId)
+              const errorText = await response.text().catch(() => '응답 본문 읽기 실패')
+              console.error(`[SetInstructions] fetchLocale 실패:`, {
+                locale,
+                status: response.status,
+                statusText: response.statusText,
+                errorText: errorText.substring(0, 500),
+                url: response.url
+              })
               return null
             }
 

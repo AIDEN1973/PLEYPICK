@@ -1,10 +1,24 @@
 export default async function handler(req, res) {
-  console.log(`[LEGO Instructions API] 요청 수신:`, {
+  // 상세 디버깅 로그
+  const debugInfo = {
     method: req.method,
     url: req.url,
+    originalUrl: req.originalUrl,
+    pathname: req.pathname,
     query: req.query,
-    path: req.query.path
-  })
+    path: req.query.path,
+    headers: {
+      host: req.headers?.host,
+      'user-agent': req.headers?.['user-agent'],
+      referer: req.headers?.referer
+    },
+    timestamp: new Date().toISOString(),
+    environment: process.env.VERCEL_ENV || 'development'
+  }
+  
+  console.log(`[LEGO Instructions API] ========== 요청 수신 ==========`)
+  console.log(JSON.stringify(debugInfo, null, 2))
+  console.log(`[LEGO Instructions API] =============================`)
   
   // CORS 헤더 설정
   res.setHeader('Access-Control-Allow-Origin', '*')
