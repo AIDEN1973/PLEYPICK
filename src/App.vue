@@ -9,7 +9,7 @@
             <!-- 왼쪽: 로고 -->
             <div class="flex items-center flex-1 justify-start">
               <router-link to="/" class="nav-logo flex items-center mr-2 sm:mr-4">
-                <img src="/database/pley_logo.jpg" alt="Pleyon" style="height: 48px; max-height: 48px;" class="object-contain lg:!h-16 lg:!max-h-16" />
+                <img :src="pleyLogo" alt="Pleyon" style="height: 48px; max-height: 48px;" class="object-contain lg:!h-16 lg:!max-h-16" />
               </router-link>
             </div>
 
@@ -583,6 +583,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSupabase } from './composables/useSupabase'
 import { useSupabasePleyon } from './composables/useSupabasePleyon'
+import pleyLogo from './assets/pley_logo.jpg'
 
 export default {
   name: 'App',
@@ -991,6 +992,7 @@ export default {
     }
 
     return {
+      pleyLogo,
       user,
       isAdmin,
       isStoreUser,
