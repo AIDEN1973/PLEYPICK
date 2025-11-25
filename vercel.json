@@ -7,7 +7,7 @@
   "rewrites": [
     {
       "source": "/((?!api|.*\\..*).*)",
-      "destination": "/index.html" // 🔧 수정됨: 정적파일·API 제외하고 SPA 폴백
+      "destination": "/index.html"
     }
   ],
   "headers": [
