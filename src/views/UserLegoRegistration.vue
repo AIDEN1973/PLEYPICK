@@ -44,7 +44,7 @@
         </div>
       </div>
 
-      <!-- 등록된 레고 리스트 -->
+      <!-- 등록된 레고리스트 -->
       <div v-if="!loading && registeredSets.length > 0" class="registered-sets-section">
         <div class="result-header">
           <h3>등록된 레고 리스트</h3>
