@@ -1,19 +1,14 @@
-# Exclude most Serverless Functions to stay under Hobby plan limit
-api/**
-
-# Whitelist essential APIs
-!api/openai/v1/chat/completions.js
-!api/openai/v1/embeddings.js
-!api/upload/proxy-image.js
-!api/ai/inference.js
-!api/system/metrics.js
-!api/training/status.js
-!api/synthetic/validate.js
-!api/proxy/
-!api/lego-instructions/
+# Exclude specific Serverless Functions to stay under Hobby plan limit
+api/dataset/
+api/inspection/
+api/parts/
+api/sets/
+api/supabase/
 
 # Exclude conflicting files
 api/lego-instructions.js
+api/proxy-image.js
+api/port-management.js
 
-# Keep everything else by default
+# Keep essential APIs deployed
 
