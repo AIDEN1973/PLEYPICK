@@ -6,7 +6,6 @@ api/sets/
 api/supabase/
 
 # Exclude conflicting files
-api/lego-instructions.js
 api/proxy-image.js
 api/port-management.js
 

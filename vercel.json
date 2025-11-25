@@ -34,7 +34,7 @@
     }
   ],
   "functions": {
-    "api/lego-instructions/[...path].js": {
+    "api/lego-instructions.js": {
       "maxDuration": 30
     }
   }
