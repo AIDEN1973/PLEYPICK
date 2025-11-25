@@ -90,7 +90,7 @@
                           <span class="option-set-title">{{ [set.theme_name, set.name].filter(Boolean).join(' ') || (set.name || '') }}</span>
                           <span class="option-set-parts">부품수 : {{ resolvePartCount(set) }}개</span>
                           <span v-if="selectedSetId === set.id && uniquePartsCount > 0" class="option-set-registered">
-                            부품수 {{ uniquePartsCount }}종, 실제 등록 부품수 {{ registeredPartsCount }}종
+                            부품수 {{ totalPartsTypeCount }}종, 실제 등록 부품수 {{ uniquePartsCount }}종
                           </span>
                         </div>
                       </div>
@@ -125,7 +125,7 @@
                         <span class="selected-set-parts">부품수 : {{ resolvePartCount(selectedSet) }}개</span>
                         <span v-if="uniquePartsCount > 0" class="selected-set-parts-divider">|</span>
                         <span v-if="uniquePartsCount > 0" class="selected-set-registered">
-                          부품수 {{ uniquePartsCount }}종, 실제 등록 부품수 {{ registeredPartsCount }}종
+                          부품수 {{ totalPartsTypeCount }}종, 실제 등록 부품수 {{ uniquePartsCount }}종
                         </span>
                       </div>
                     </div>
@@ -615,6 +615,7 @@ export default {
     // 부품수 통계
     const registeredPartsCount = ref(0) // 실제 등록된 부품의 종수 (예비부품 제외)
     const uniquePartsCount = ref(0) // 부품 종류 수 (예비부품 제외)
+    const totalPartsTypeCount = ref(0) // 세트의 실제 부품 종수 (예비부품 포함, 중복 없는 종류 수)
     
     // 동기화 모달 관련
     const showSyncModal = ref(false)
@@ -1749,11 +1750,25 @@ export default {
         // 예비부품 제외한 부품수 계산 (nonSpareParts는 이미 위에서 선언됨)
         uniquePartsCount.value = new Set(nonSpareParts.map(p => `${p.part_id}_${p.color_id}`)).size
         registeredPartsCount.value = uniquePartsCount.value // 실제 등록된 부품의 종수
+        
+        // 세트의 실제 부품 종수 계산 (예비부품 포함, element_id 기준으로 중복 없는 종류 수)
+        const elementIdSet = new Set()
+        const partColorSet = new Set()
+        partsData.forEach(p => {
+          if (p.element_id) {
+            elementIdSet.add(String(p.element_id))
+          } else if (p.part_id && p.color_id !== null && p.color_id !== undefined) {
+            // element_id가 없는 경우 part_id + color_id 조합 사용
+            partColorSet.add(`${p.part_id}_${p.color_id}`)
+          }
+        })
+        totalPartsTypeCount.value = elementIdSet.size + partColorSet.size
       } catch (err) {
         console.error('세트 부품 로드 실패:', err)
         error.value = '세트 부품을 불러오는데 실패했습니다'
         uniquePartsCount.value = 0
         registeredPartsCount.value = 0
+        totalPartsTypeCount.value = 0
       } finally {
         loading.value = false
       }
@@ -3633,7 +3648,10 @@ export default {
       loadingStoreSetsParts,
       loadingStoreSetsProgress,
       convertingStoreSets,
-      convertStoreSetsProgress
+      convertStoreSetsProgress,
+      uniquePartsCount,
+      registeredPartsCount,
+      totalPartsTypeCount
     }
   }
 }
