@@ -486,6 +486,125 @@ export default {
       return null
     }
 
+    // 첫 페이지 우선 로드 함수
+    const loadFirstPageStoreSets = async (start, end) => {
+      if (!isPleyonUser.value) {
+        return null
+      }
+      
+      const inventoryList = inventorySetNumbersList.value
+      if (!inventoryList || inventoryList.length === 0) {
+        return { items: [], totalCount: 0 }
+      }
+      
+      const unique = [...new Set(inventoryList.map(sanitizeSetNum).filter(Boolean))]
+      if (unique.length === 0) {
+        return { items: [], totalCount: 0 }
+      }
+      
+      // 정확한 매칭과 패턴 매칭을 분리
+      const exactMatches = unique.filter(num => num.includes('-'))
+      const patternMatches = unique.filter(num => !num.includes('-'))
+      
+      // 첫 페이지에 필요한 만큼만 조회 (정확한 매칭 우선, 여유분 증가로 매칭 성공률 향상)
+      const neededCount = Math.min((end - start) * 2, unique.length) // 더 많은 여유분
+      const firstBatchExact = exactMatches.slice(0, Math.min(neededCount, exactMatches.length))
+      const firstBatchPattern = patternMatches.slice(0, Math.min(neededCount - firstBatchExact.length, patternMatches.length))
+      
+      const allResults = []
+      
+      // 병렬 처리: 정확한 매칭과 패턴 매칭을 동시에 실행
+      const promises = []
+      
+      if (firstBatchExact.length > 0) {
+        const batchClauses = firstBatchExact.map(num => `set_num.eq.${num}`).join(',')
+        promises.push(
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .or(batchClauses)
+        )
+      }
+      
+      if (firstBatchPattern.length > 0) {
+        const batchClauses = firstBatchPattern.map(num => `set_num.ilike.${num}-%`).join(',')
+        promises.push(
+          supabase
+            .from('lego_sets')
+            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+            .or(batchClauses)
+        )
+      }
+      
+      if (promises.length > 0) {
+        const results = await Promise.all(promises)
+        results.forEach(result => {
+          if (!result.error && result.data) {
+            allResults.push(...result.data)
+          }
+        })
+      }
+      
+      // 중복 제거
+      const dataMap = new Map()
+      allResults.forEach(set => {
+        if (set && set.set_num) {
+          const key = sanitizeSetNum(set.set_num)
+          if (key && !dataMap.has(key)) {
+            dataMap.set(key, set)
+          }
+        }
+      })
+      const data = Array.from(dataMap.values())
+      
+      // 테마 정보는 필요한 만큼만 조회
+      const themeIds = [...new Set(data.map(set => set.theme_id).filter(Boolean))]
+      const missingThemeIds = themeIds.filter(id => !themeCache.has(id))
+      
+      if (missingThemeIds.length > 0) {
+        const { data: themesData } = await supabase
+          .from('lego_themes')
+          .select('theme_id, name')
+          .in('theme_id', missingThemeIds)
+        
+        if (themesData) {
+          themesData.forEach(theme => {
+            themeCache.set(theme.theme_id, theme.name)
+          })
+        }
+      }
+      
+      // 캐시된 테마 정보로 세트 데이터 보강
+      const enriched = data.map(set => ({
+        ...set,
+        theme_name: set.theme_id ? (themeCache.get(set.theme_id) || null) : null
+      }))
+      
+      // 빠른 매칭: Map 기반 O(1) 조회로 최적화
+      const setMaps = buildSetLookupMaps(enriched)
+      const matchedSetsMap = new Map()
+      
+      // 인벤토리 리스트를 순회하면서 매칭 (필요한 만큼만, 중복 제거)
+      for (let i = 0; i < inventoryList.length && matchedSetsMap.size < end; i++) {
+        const setNum = inventoryList[i]
+        const matched = resolveInventorySetRecord(setNum, setMaps)
+        if (matched) {
+          const key = sanitizeSetNum(setNum)
+          if (key && !matchedSetsMap.has(key)) {
+            matchedSetsMap.set(key, mapSetRecord(matched))
+          }
+        }
+      }
+      
+      const matchedSets = Array.from(matchedSetsMap.values())
+      
+      // 전체 개수는 인벤토리 리스트 길이로 설정 (정확한 개수는 백그라운드에서 계산)
+      return {
+        items: matchedSets.slice(start, end),
+        totalCount: inventoryList.length
+      }
+    }
+    
     const rebuildStoreInventoryCache = async () => {
       // 캐시가 이미 있고 유효하면 재사용
       if (storeInventoryCacheReady.value && storeInventorySetsCache.value.length > 0) {
@@ -535,34 +654,47 @@ export default {
           const allResults = []
           const BATCH_SIZE = 50 // Supabase OR 조건 제한을 고려한 배치 크기
           
-          // 정확한 매칭 처리
+          // 병렬 처리: 모든 배치를 동시에 실행
+          const allPromises = []
+          
+          // 정확한 매칭 처리 (병렬)
           if (exactMatches.length > 0) {
             for (let i = 0; i < exactMatches.length; i += BATCH_SIZE) {
               const batch = exactMatches.slice(i, i + BATCH_SIZE)
               const batchClauses = batch.map(num => `set_num.eq.${num}`).join(',')
-              const { data: batchData, error: batchError } = await supabase
-                .from('lego_sets')
-                .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-                .or(batchClauses)
-              
-              if (batchError) throw batchError
-              if (batchData) allResults.push(...batchData)
+              allPromises.push(
+                supabase
+                  .from('lego_sets')
+                  .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+                  .or(batchClauses)
+              )
             }
           }
           
-          // 패턴 매칭 처리
+          // 패턴 매칭 처리 (병렬)
           if (patternMatches.length > 0) {
             for (let i = 0; i < patternMatches.length; i += BATCH_SIZE) {
               const batch = patternMatches.slice(i, i + BATCH_SIZE)
               const batchClauses = batch.map(num => `set_num.ilike.${num}-%`).join(',')
-              const { data: batchData, error: batchError } = await supabase
-                .from('lego_sets')
-                .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
-                .or(batchClauses)
-              
-              if (batchError) throw batchError
-              if (batchData) allResults.push(...batchData)
+              allPromises.push(
+                supabase
+                  .from('lego_sets')
+                  .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+                  .or(batchClauses)
+              )
             }
+          }
+          
+          // 모든 배치를 병렬로 실행
+          if (allPromises.length > 0) {
+            const results = await Promise.all(allPromises)
+            results.forEach(result => {
+              if (!result.error && result.data) {
+                allResults.push(...result.data)
+              } else if (result.error) {
+                throw result.error
+              }
+            })
           }
           
           // 중복 제거
@@ -737,31 +869,57 @@ export default {
               return
             }
 
-            // 캐시 사용: 전체 데이터를 한 번만 로드하고 클라이언트에서 페이지네이션
-            await rebuildStoreInventoryCache()
-            storeSetsCountValue.value = storeInventorySetsCache.value.length
-            paginatedStoreSetsData.value = storeInventorySetsCache.value
-              .slice(start, start + itemsPerPage)
+            // 캐시가 이미 있으면 즉시 사용
+            if (storeInventoryCacheReady.value && storeInventorySetsCache.value.length > 0) {
+              storeSetsCountValue.value = storeInventorySetsCache.value.length
+              paginatedStoreSetsData.value = storeInventorySetsCache.value
+                .slice(start, start + itemsPerPage)
+              return
+            }
+            
+            // 첫 페이지 우선 로드: 필요한 페이지만 먼저 조회하고 즉시 표시
+            const firstPageData = await loadFirstPageStoreSets(start, start + itemsPerPage)
+            if (firstPageData) {
+              paginatedStoreSetsData.value = firstPageData.items
+              storeSetsCountValue.value = firstPageData.totalCount
+            }
+            
+            // 나머지 데이터는 백그라운드에서 캐시 빌드 (이미 진행 중이면 스킵)
+            if (!storeInventoryCachePromise) {
+              rebuildStoreInventoryCache().catch(err => {
+                console.error('[SetInstructions] 백그라운드 캐시 빌드 실패:', err)
+              })
+            }
             return
           }
 
-          let cacheApplied = false
+          // 첫 페이지는 캐시 우선 확인
           if (currentPage.value === 1) {
-            cacheApplied = applyGeneralListCache()
+            const cacheApplied = applyGeneralListCache()
+            if (cacheApplied) {
+              return
+            }
           }
 
-          const { data, error, count } = await supabase
-            .from('lego_sets')
-            .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url', { count: 'exact' })
-            .order('created_at', { ascending: false })
-            .range(start, end)
+          // 데이터와 카운트를 병렬로 조회
+          const [dataResult, countResult] = await Promise.all([
+            supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id, num_parts, webp_image_url, set_img_url')
+              .order('created_at', { ascending: false })
+              .range(start, end),
+            supabase
+              .from('lego_sets')
+              .select('*', { count: 'exact', head: true })
+          ])
 
-          if (error) throw error
+          if (dataResult.error) throw dataResult.error
+          if (countResult.error) throw countResult.error
 
-          const enriched = await attachThemeNamesToSets(data || [])
+          const enriched = await attachThemeNamesToSets(dataResult.data || [])
           const mapped = enriched.map(mapSetRecord).filter(Boolean)
           paginatedStoreSetsData.value = mapped
-          storeSetsCountValue.value = count || 0
+          storeSetsCountValue.value = countResult.count || 0
 
           if (currentPage.value === 1) {
             cacheGeneralList({ data: mapped, count: storeSetsCountValue.value })
@@ -1560,15 +1718,19 @@ export default {
       await waitForAuthReady()
       if (user.value) {
         searchInStoreOnly.value = true
-        // checkPleyonAccount가 loadStoreInventoryData를 내부적으로 호출
-        await checkPleyonAccount()
+        // checkPleyonAccount와 첫 페이지 로드를 병렬로 시작
+        const accountCheck = checkPleyonAccount()
         if (!isPleyonUser.value) {
+          await accountCheck
           await loadUserLegoSets()
         }
+        // 계정 확인과 동시에 첫 페이지 로드 시작 (계정 확인 완료 후 자동으로 처리됨)
+        await loadPaginatedStoreSets()
       } else {
         searchInStoreOnly.value = false
+        // 사용자 없을 때는 즉시 로드
+        await loadPaginatedStoreSets()
       }
-      await loadPaginatedStoreSets()
       isInitialLoad.value = false
     })
 
@@ -1588,7 +1750,14 @@ export default {
       await loadPaginatedStoreSets()
     })
 
-    watch(inventorySetNumbersList, async () => { // 🔧 수정됨
+    let lastInventoryListLength = 0
+    watch(inventorySetNumbersList, async (newList) => { // 🔧 수정됨
+      // 리스트 길이가 변경되지 않았으면 스킵 (깊은 비교는 비용이 크므로 길이만 확인)
+      if (newList?.length === lastInventoryListLength) {
+        return
+      }
+      lastInventoryListLength = newList?.length || 0
+      
       if (searchInStoreOnly.value && isPleyonUser.value) { // 🔧 수정됨
         storeInventoryCacheReady.value = false // 🔧 수정됨
         storeInventorySetsCache.value = [] // 🔧 수정됨
