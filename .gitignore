@@ -120,7 +120,6 @@ ecosystem.config.js
 pytest.ini
 railway.json
 netlify.toml
-vercel.json
 
 # 데이터베이스 스크립트 (개발용)
 *.sql
