@@ -71,7 +71,6 @@
         </div>
 
         <div class="note-type-filter">
-          <label>노트유형</label>
           <div class="filter-buttons">
             <button
               v-for="type in noteTypes"
@@ -278,20 +277,34 @@
 
             <div class="form-row">
               <label for="form-type">유형</label>
-              <select
-                id="form-type"
-                v-model="noteForm.note_type"
-                required
-                class="form-select"
-              >
-                <option
-                  v-for="type in noteTypes"
-                  :key="type.value"
-                  :value="type.value"
+              <div class="custom-type-select-wrapper" ref="noteTypeDropdownRef">
+                <button
+                  type="button"
+                  id="form-type"
+                  @click="showNoteTypeDropdown = !showNoteTypeDropdown"
+                  class="custom-type-select-button"
+                  :class="{ 'active': showNoteTypeDropdown }"
                 >
-                  {{ type.label }}
-                </option>
-              </select>
+                  <span>{{ noteTypeLabel(noteForm.note_type) }}</span>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" class="dropdown-arrow" :class="{ 'open': showNoteTypeDropdown }">
+                    <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
+                <transition name="select-fade">
+                  <div v-if="showNoteTypeDropdown" class="custom-type-select-dropdown">
+                    <button
+                      v-for="type in noteTypes"
+                      :key="type.value"
+                      type="button"
+                      class="custom-type-select-option"
+                      :class="{ 'active': noteForm.note_type === type.value }"
+                      @click="handleSelectNoteType(type.value)"
+                    >
+                      {{ type.label }}
+                    </button>
+                  </div>
+                </transition>
+              </div>
             </div>
 
             <div class="form-row">
@@ -473,7 +486,7 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, onUnmounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import { useInspectionSession } from '../composables/useInspectionSession'
 import { formatSetDisplay, fetchSetMetadata } from '../utils/setDisplay'
@@ -513,6 +526,10 @@ export default {
     const noteFormSearchTooltip = ref('')
     const noteFormSelectedSet = ref(null)
     let noteFormSearchTooltipTimer = null
+
+    // 노트 유형 드롭다운 관련
+    const showNoteTypeDropdown = ref(false)
+    const noteTypeDropdownRef = ref(null)
 
     const noteTypes = [
       { value: 'general', label: '일반' },
@@ -1108,6 +1125,11 @@ export default {
       return noteTypes.find(nt => nt.value === type)?.label || '일반'
     }
 
+    const handleSelectNoteType = (type) => {
+      noteForm.value.note_type = type
+      showNoteTypeDropdown.value = false
+    }
+
     const submitNote = async () => {
       // 세트 선택 검증
       if (!noteForm.value.set_id) {
@@ -1415,6 +1437,9 @@ export default {
       cancelEdit,
       deleteNote,
       formatDate,
+      showNoteTypeDropdown,
+      noteTypeDropdownRef,
+      handleSelectNoteType,
       formatUserId,
       formatSetDisplay,
       showLoginModal,
@@ -1509,7 +1534,7 @@ export default {
 .note-type-filter {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: calc(0.75rem - 5px);
   flex: 1;
   min-width: 200px;
   overflow: visible;
@@ -1520,18 +1545,22 @@ export default {
   font-size: 0.875rem;
   font-weight: 500;
   color: #374151;
+  margin-bottom: 0;
+  margin-top: 0px;
 }
 
 .filter-label {
   font-size: 0.875rem;
   font-weight: 500;
   color: #374151;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
+  margin-top: 0px;
 }
 
 .set-search-field {
   position: relative;
   overflow: visible;
+  margin-bottom: -1px;
 }
 
 .set-search-wrapper {
@@ -1558,7 +1587,7 @@ export default {
 
 .set-search-input {
   width: 100%;
-  padding: 0.75rem 1rem 0.75rem 2.5rem;
+  padding: calc(0.75rem - 1px) 1rem calc(0.75rem - 1px) 2.5rem;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   background: #ffffff;
@@ -2082,6 +2111,92 @@ export default {
   min-height: 120px;
 }
 
+.custom-type-select-wrapper {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+.custom-type-select-button {
+  width: 100%;
+  padding: calc(0.75rem - 1px) 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  text-align: left;
+}
+
+.custom-type-select-button:hover {
+  border-color: #9ca3af;
+}
+
+.custom-type-select-button.active,
+.custom-type-select-button:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.dropdown-arrow {
+  flex-shrink: 0;
+  color: #6b7280;
+  transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.dropdown-arrow.open {
+  transform: rotate(180deg);
+}
+
+.custom-type-select-button.active .dropdown-arrow {
+  color: #2563eb;
+}
+
+.custom-type-select-dropdown {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  right: 0;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 18px 36px -12px rgba(15, 23, 42, 0.25);
+  z-index: 20;
+}
+
+.custom-type-select-option {
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border: none;
+  background: transparent;
+  color: #374151;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.custom-type-select-option:hover {
+  background: #eff6ff;
+}
+
+.custom-type-select-option.active {
+  background: #dbeafe;
+  color: #1e40af;
+  font-weight: 500;
+}
+
 .form-actions {
   display: flex;
   gap: 0.75rem;
@@ -2488,20 +2603,23 @@ export default {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
-  background: transparent;
+  background: #ffffff;
   border: none;
   color: #6b7280;
   cursor: pointer;
-  padding: 0.25rem;
+  padding: 0;
+  width: 23px;
+  height: 23px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 50%;
   transition: background-color 0.2s ease, color 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .close-result-button:hover {
-  background: #e5e7eb;
+  background: #f3f4f6;
   color: #111827;
 }
 
@@ -2516,7 +2634,7 @@ export default {
   height: 60px;
   min-width: 60px;
   min-height: 60px;
-  background: #f9fafb;
+  background: #ffffff;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   display: flex;

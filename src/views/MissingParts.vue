@@ -1209,40 +1209,44 @@ export default {
       }
 
       try {
-        console.log('[MissingParts] 관리자 여부 확인 중...', { email: user.value.email })
-        // 관리자 여부 확인
-        const { data: adminData } = await supabase
+        // 관리자 여부 확인과 세션 조회를 병렬로 처리 (세션 조회는 두 가지 쿼리 준비)
+        const adminQuery = supabase
           .from('admin_users')
           .select('id, role, is_active')
           .eq('email', user.value.email)
           .eq('is_active', true)
           .maybeSingle()
         
-        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
-        console.log('[MissingParts] 관리자 여부:', isAdmin, { adminData })
-
-        // 모든 검수 중인 세션 조회
-        let allSessionsQuery = supabase
+        const allSessionsQuery = supabase
           .from('inspection_sessions')
           .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
           .in('status', ['in_progress', 'paused', 'completed'])
+        
+        const userSessionsQuery = supabase
+          .from('inspection_sessions')
+          .select('id, set_id, status, completed_at, last_saved_at, started_at, progress')
+          .in('status', ['in_progress', 'paused', 'completed'])
+          .eq('user_id', user.value.id)
 
-        if (!isAdmin) {
-          allSessionsQuery = allSessionsQuery.eq('user_id', user.value.id)
-          console.log('[MissingParts] 일반 사용자 필터 적용:', user.value.id)
-        }
+        // 관리자 확인과 세션 조회를 병렬로 실행
+        const [adminResult, allSessionsResult, userSessionsResult] = await Promise.all([
+          adminQuery,
+          allSessionsQuery,
+          userSessionsQuery
+        ])
 
-        console.log('[MissingParts] 세션 조회 시작...')
-        const { data: allSessions, error: allSessionsError } = await allSessionsQuery
+        const { data: adminData } = adminResult
+        const isAdmin = adminData && (adminData.role === 'admin' || adminData.role === 'super_admin')
+        
+        // 관리자 여부에 따라 적절한 세션 결과 선택
+        const { data: allSessions, error: allSessionsError } = isAdmin ? allSessionsResult : userSessionsResult
+        
         if (allSessionsError) {
           console.error('[MissingParts] 세션 조회 오류:', allSessionsError)
           throw allSessionsError
         }
 
-        console.log('[MissingParts] 조회된 세션 수:', allSessions?.length || 0, { allSessions })
-
         if (!allSessions || allSessions.length === 0) {
-          console.log('[MissingParts] 세션 없음, inspectionSets 초기화')
           inspectionSets.value = []
           return
         }
@@ -1267,16 +1271,13 @@ export default {
 
         const latestSessions = Array.from(latestSessionsBySet.values())
         const setIds = [...new Set(latestSessions.map(s => s.set_id).filter(Boolean))]
-        console.log('[MissingParts] 최신 세션 수:', latestSessions.length, { latestSessions })
-        console.log('[MissingParts] 세트 ID 목록:', setIds)
 
         if (setIds.length === 0) {
-          console.log('[MissingParts] 세트 ID 없음, inspectionSets 초기화')
           inspectionSets.value = []
           return
         }
 
-        // 세트 정보 조회와 inspection_items 조회를 병렬로 처리
+        // 세트 정보와 inspection_items를 병렬로 조회
         const sessionIds = latestSessions.map(s => s.id)
         
         const [setsResult, itemsResult] = await Promise.all([
@@ -1288,6 +1289,7 @@ export default {
             .from('inspection_items')
             .select('session_id, part_id, color_id, total_count, checked_count, status')
             .in('session_id', sessionIds)
+            .eq('status', 'missing')
         ])
 
         const { data: setsData, error: setsError } = setsResult
@@ -1298,7 +1300,7 @@ export default {
 
         const { data: allItems } = itemsResult
 
-        // 테마 정보 조회 (세트 정보 조회 후 즉시 병렬 처리)
+        // 테마 정보 조회 (세트 정보에서 theme_id 추출 후 병렬 처리)
         const themeIds = [...new Set((setsData || []).map(s => s.theme_id).filter(Boolean))]
         const themeMap = new Map()
         if (themeIds.length > 0) {
@@ -1328,12 +1330,10 @@ export default {
           }
         })
 
-        // 누락 부품 계산 (한 번의 순회로 처리)
+        // 누락 부품 계산 (한 번의 순회로 처리, 이미 status='missing'으로 필터링됨)
         const setMissingInfoMap = new Map()
         if (allItems && allItems.length > 0) {
           for (const item of allItems) {
-            if (item.status !== 'missing') continue
-            
             const setId = sessionSetMap.get(item.session_id)
             if (!setId) continue
 
@@ -2561,11 +2561,12 @@ export default {
     watch(user, async (newUser) => {
       if (newUser) {
         console.log('[MissingParts] watch user - 사용자 로드됨', { userId: newUser.id, email: newUser.email })
-        await loadStoreInventory()
-        // 사용자가 로드된 후 검수 중인 세트 목록 로드
-        console.log('[MissingParts] watch user - loadInspectionSets 호출')
-        await loadInspectionSets()
-        console.log('[MissingParts] watch user - loadInspectionSets 완료, inspectionSets:', inspectionSets.value?.length || 0)
+        // loadStoreInventory와 loadInspectionSets를 병렬로 처리
+        await Promise.all([
+          loadStoreInventory(),
+          loadInspectionSets()
+        ])
+        console.log('[MissingParts] watch user - 로드 완료, inspectionSets:', inspectionSets.value?.length || 0)
       } else {
         storeInfo.value = null
         storeInventory.value = []
@@ -2576,11 +2577,12 @@ export default {
     onMounted(async () => {
       console.log('[MissingParts] onMounted 시작', { hasUser: !!user.value, user: user.value })
       if (user.value) {
-        await loadStoreInventory()
-        // 검수 중인 세트 목록 먼저 로드
-        console.log('[MissingParts] onMounted - loadInspectionSets 호출')
-        await loadInspectionSets()
-        console.log('[MissingParts] onMounted - loadInspectionSets 완료, inspectionSets:', inspectionSets.value?.length || 0)
+        // loadStoreInventory와 loadInspectionSets를 병렬로 처리
+        await Promise.all([
+          loadStoreInventory(),
+          loadInspectionSets()
+        ])
+        console.log('[MissingParts] onMounted - 로드 완료, inspectionSets:', inspectionSets.value?.length || 0)
       }
       console.log('[MissingParts] onMounted - loadMissingParts 호출')
       await loadMissingParts()

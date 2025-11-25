@@ -966,74 +966,82 @@ export default {
         return cached.data
       }
 
-      const locales = ['en-au', 'en-us', 'en-gb', 'ko-kr']
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 15000)
-
-      try {
-        for (const locale of locales) {
-          const legoPath = `${locale}/service/buildinginstructions/${setNum}`
-          
-          // 프로덕션/개발 모드에 따라 프록시 URL 결정
-          const isDev = import.meta.env.DEV
-          let proxyUrl
-          
-          if (isDev) {
-            // 개발 모드: 로컬 프록시 서버 사용 (Vite 프록시)
-            proxyUrl = `/api/lego-instructions/${legoPath}`
-          } else {
-            // 프로덕션 모드: Vercel 서버리스 함수 사용
-            proxyUrl = `/api/lego-instructions/${legoPath}`
+      // 한국 사용자를 위해 ko-kr을 우선 시도
+      const locales = ['ko-kr', 'en-au', 'en-us', 'en-gb']
+      
+      // 모든 요청을 취소하기 위한 AbortController
+      const globalController = new AbortController()
+      let firstSuccess = null
+      
+      // 각 로케일별 fetch 함수 정의
+      const fetchLocale = async (locale) => {
+        if (firstSuccess) return null // 이미 성공한 경우 즉시 종료
+        
+        const legoPath = `${locale}/service/buildinginstructions/${setNum}`
+        const proxyUrl = `/api/lego-instructions/${legoPath}`
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 4000) // 타임아웃 4초로 단축
+        
+        try {
+          // 이미 성공한 경우 요청 취소
+          if (firstSuccess || globalController.signal.aborted) {
+            clearTimeout(timeoutId)
+            return null
           }
           
-          console.log('[SetInstructions] 프록시 URL 시도:', proxyUrl, `(locale: ${locale})`)
+          // globalController가 취소되었는지 확인
+          if (globalController.signal.aborted) {
+            clearTimeout(timeoutId)
+            return null
+          }
           
-            try {
-            const response = await fetch(proxyUrl, {
-              headers: {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-              },
-              signal: controller.signal
-            })
-
-            console.log(`[SetInstructions] Locale ${locale} 응답 상태:`, response.status, response.statusText)
-            console.log(`[SetInstructions] Locale ${locale} 응답 URL:`, response.url)
-            console.log(`[SetInstructions] Locale ${locale} 응답 헤더:`, Object.fromEntries(response.headers.entries()))
+          const response = await fetch(proxyUrl, {
+            headers: {
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            },
+            signal: controller.signal
+          })
+          
+          // 응답 받은 후에도 취소 확인
+          if (globalController.signal.aborted) {
+            clearTimeout(timeoutId)
+            return null
+          }
 
             if (!response.ok) {
-              console.warn(`[SetInstructions] Locale ${locale} 실패: ${response.status}`)
-              continue
+              clearTimeout(timeoutId)
+              return null
             }
 
             const contentType = response.headers.get('content-type') || ''
             const html = await response.text()
-            console.log(`[SetInstructions] Locale ${locale} HTML 길이:`, html.length, `Content-Type: ${contentType}`)
             
             // BrickBox index.html이 반환된 경우 감지
             if (html.includes('BrickBox') && html.includes('@vite/client')) {
-              console.error(`[SetInstructions] Locale ${locale} 서버리스 함수가 실행되지 않음 - index.html이 반환됨`)
-              console.error(`[SetInstructions] 프록시 URL: ${proxyUrl}`)
-              continue
+              clearTimeout(timeoutId)
+              return null
             }
             
             // JSON 에러 응답인 경우 처리
             if (contentType.includes('application/json') || (html.length < 1000 && html.trim().startsWith('{'))) {
-              try {
-                const errorData = JSON.parse(html)
-                console.error(`[SetInstructions] Locale ${locale} JSON 에러 응답:`, errorData)
-                continue
-              } catch (e) {
-                // JSON 파싱 실패 시 HTML로 처리
-              }
+              clearTimeout(timeoutId)
+              return null
             }
             
-            // HTML이 너무 짧으면 에러일 가능성
+            // HTML이 너무 짧으면 에러일 가능성 (빠른 검증)
             if (html.length < 1000) {
-              console.warn(`[SetInstructions] Locale ${locale} HTML이 너무 짧음 (${html.length}바이트), 샘플:`, html.substring(0, 200))
+              clearTimeout(timeoutId)
+              return null
+            }
+            
+            // 이미 성공한 경우 중단
+            if (firstSuccess) {
+              clearTimeout(timeoutId)
+              return null
             }
 
-            // window.__INITIAL_STATE__ 에서 설명서 정보 추출
+            // window.__INITIAL_STATE__ 에서 설명서 정보 추출 (가장 빠른 방법)
             const instructionEntries = []
             const initialStateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({.*?});/s)
             if (initialStateMatch) {
@@ -1058,74 +1066,34 @@ export default {
                   })
                 }
               } catch (err) {
-                console.warn(`[SetInstructions] Locale ${locale} 초기 상태 JSON 파싱 실패:`, err)
+                // 파싱 실패 시 무시
               }
             }
 
             if (instructionEntries.length > 0) {
               clearTimeout(timeoutId)
-              // 캐시에 저장
-              instructionCache.set(cacheKey, {
-                data: instructionEntries,
-                timestamp: Date.now()
-              })
-              console.log(`[SetInstructions] Locale ${locale}에서 설명서 찾음:`, instructionEntries.length, '개')
-              return instructionEntries
+              firstSuccess = { locale, data: instructionEntries }
+              globalController.abort() // 나머지 요청 취소
+              return firstSuccess
             }
 
-            // JSON-LD 스크립트 태그에서 설명서 데이터 추출 시도
-            const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>(.*?)<\/script>/gs)
-            for (const jsonLdMatch of jsonLdMatches) {
-              try {
-                const jsonLdData = JSON.parse(jsonLdMatch[1])
-                if (jsonLdData['@type'] === 'Product' && jsonLdData.offers) {
-                  const offers = Array.isArray(jsonLdData.offers) ? jsonLdData.offers : [jsonLdData.offers]
-                  offers.forEach((offer, index) => {
-                    if (offer.url && offer.url.includes('.pdf')) {
-                      instructionEntries.push({
-                        id: offer.url || `instruction-ld-${index}`,
-                        title: `Building Instructions ${setNum} - Part ${index + 1}`,
-                        description: null,
-                        url: offer.url,
-                        thumbnail: deriveThumbnailFromPdfUrl(offer.url) || fallbackThumbnail || DEFAULT_THUMBNAIL,
-                        source: 'LEGO.com',
-                        fileSize: null
-                      })
-                    }
-                  })
-                }
-              } catch (e) {
-                // JSON-LD 파싱 실패 시 무시
-              }
-            }
-
-            if (instructionEntries.length > 0) {
-              clearTimeout(timeoutId)
-              instructionCache.set(cacheKey, {
-                data: instructionEntries,
-                timestamp: Date.now()
-              })
-              console.log(`[SetInstructions] Locale ${locale} JSON-LD에서 설명서 찾음:`, instructionEntries.length, '개')
-              return instructionEntries
-            }
-
-            // 빠른 PDF URL 추출 (정규식만 사용)
+            // 빠른 PDF URL 추출 (정규식만 사용, 가장 빠른 대안)
             const pdfRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
-            const matches = [...html.matchAll(pdfRegex)]
-            let urls = [...new Set(matches.map(m => m[0]).filter(Boolean))]
+            const matches = html.match(pdfRegex)
+            let urls = matches ? [...new Set(matches)] : []
 
             if (urls.length === 0) {
-              // 더 넓은 패턴 시도
-              const broadRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/[^"'\\s]*\.pdf/gi
-              const broadMatches = [...html.matchAll(broadRegex)]
-              urls = [...new Set(broadMatches.map(m => m[0]).filter(Boolean))]
+              // 상대 경로 시도
+              const relativeRegex = /\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
+              const relativeMatches = html.match(relativeRegex)
+              urls = relativeMatches ? relativeMatches.map(m => `https://www.lego.com${m}`) : []
             }
 
-            // 상대 경로도 시도
             if (urls.length === 0) {
-              const relativeRegex = /\/cdn\/product-assets\/product\.bi\.core\.pdf\/\d+\.pdf/gi
-              const relativeMatches = [...html.matchAll(relativeRegex)]
-              urls = relativeMatches.map(m => `https://www.lego.com${m[0]}`)
+              // 더 넓은 패턴 시도 (마지막 수단)
+              const broadRegex = /https?:\/\/[^"'\\s]*\/cdn\/product-assets\/[^"'\\s]*\.pdf/gi
+              const broadMatches = html.match(broadRegex)
+              urls = broadMatches ? [...new Set(broadMatches)] : []
             }
 
             const uniqueUrls = [...new Set(urls)]
@@ -1144,30 +1112,65 @@ export default {
               })
 
               clearTimeout(timeoutId)
-              // 캐시에 저장
-              instructionCache.set(cacheKey, {
-                data: result,
-                timestamp: Date.now()
-              })
-              console.log(`[SetInstructions] Locale ${locale} 정규식에서 설명서 찾음:`, result.length, '개')
-              return result
+              firstSuccess = { locale, data: result }
+              globalController.abort() // 나머지 요청 취소
+              return firstSuccess
             }
+            
+            clearTimeout(timeoutId)
+            return null
           } catch (fetchErr) {
-            if (fetchErr.name === 'AbortError') {
-              throw new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')
-            }
-            console.warn(`[SetInstructions] Locale ${locale} fetch 오류:`, fetchErr)
-            continue
+            clearTimeout(timeoutId)
+            return null
+          }
+        }
+
+      try {
+        // 모든 로케일을 병렬로 시도하되, 첫 번째 성공 시 즉시 반환
+        const promises = locales.map(locale => fetchLocale(locale))
+        
+        // Promise.race로 첫 번째 완료된 결과 확인 (성공/실패 무관)
+        const raceResult = await Promise.race(promises)
+        
+        // 첫 번째 성공한 결과가 있으면 즉시 반환
+        if (firstSuccess || (raceResult && raceResult.data && raceResult.data.length > 0)) {
+          const successResult = firstSuccess || raceResult
+          // 캐시에 저장
+          instructionCache.set(cacheKey, {
+            data: successResult.data,
+            timestamp: Date.now()
+          })
+          console.log(`[SetInstructions] Locale ${successResult.locale}에서 설명서 찾음:`, successResult.data.length, '개')
+          return successResult.data
+        }
+        
+        // 첫 번째 결과가 실패했을 경우, 나머지 결과 확인 (이미 취소되었을 수 있음)
+        const results = await Promise.allSettled(promises)
+        for (const settled of results) {
+          if (settled.status === 'fulfilled' && settled.value && settled.value.data && settled.value.data.length > 0) {
+            // 캐시에 저장
+            instructionCache.set(cacheKey, {
+              data: settled.value.data,
+              timestamp: Date.now()
+            })
+            console.log(`[SetInstructions] Locale ${settled.value.locale}에서 설명서 찾음:`, settled.value.data.length, '개')
+            return settled.value.data
           }
         }
 
         // 모든 로케일에서 실패
-        clearTimeout(timeoutId)
         console.warn('[SetInstructions] 모든 로케일에서 설명서를 찾지 못함:', setNum)
         return []
       } catch (err) {
-        clearTimeout(timeoutId)
         if (err.name === 'AbortError') {
+          // AbortError는 정상적인 취소일 수 있으므로, firstSuccess 확인
+          if (firstSuccess) {
+            instructionCache.set(cacheKey, {
+              data: firstSuccess.data,
+              timestamp: Date.now()
+            })
+            return firstSuccess.data
+          }
           throw new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')
         }
         throw err
