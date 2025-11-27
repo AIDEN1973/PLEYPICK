@@ -1494,7 +1494,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
-  text-align: center;
+  padding: 0;
 }
 
 .page-header h1 {
@@ -1534,7 +1534,7 @@ export default {
 .note-type-filter {
   display: flex;
   flex-direction: column;
-  gap: calc(0.75rem - 5px);
+  gap: 0;
   flex: 1;
   min-width: 200px;
   overflow: visible;
@@ -1545,22 +1545,30 @@ export default {
   font-size: 0.875rem;
   font-weight: 500;
   color: #374151;
-  margin-bottom: 0;
-  margin-top: 0px;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
+  display: block;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
 }
 
 .filter-label {
   font-size: 0.875rem;
   font-weight: 500;
   color: #374151;
-  margin-bottom: 0;
-  margin-top: 0px;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
+  display: block;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
 }
 
 .set-search-field {
   position: relative;
   overflow: visible;
-  margin-bottom: -1px;
+  margin-bottom: 0;
 }
 
 .set-search-wrapper {
@@ -1799,12 +1807,12 @@ export default {
 }
 
 .filter-btn {
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 0.625rem;
   border-radius: 999px;
   border: 1px solid #d1d5db;
   background: #ffffff;
   color: #374151;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1845,8 +1853,8 @@ export default {
 }
 
 .section-header h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   color: #111827;
   margin: 0;
 }
@@ -2244,9 +2252,23 @@ export default {
     padding: 1rem;
   }
 
+  .page-header {
+    margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .page-header p {
+    font-size: 0.875rem !important;
+  }
+
   .notes-controls {
     flex-direction: column;
     align-items: stretch;
+    padding: 1rem;
   }
   
   .notes-main {
@@ -2283,6 +2305,7 @@ export default {
 
   .page-header {
     margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
   }
 
   .page-header h1 {
@@ -2300,8 +2323,12 @@ export default {
     overflow-wrap: break-word;
   }
 
+  .section-header {
+    margin-bottom: 1rem !important;
+  }
+
   .section-header h3 {
-    font-size: 1rem !important;
+    font-size: 1.25rem !important;
   }
 
   .notes-count {
@@ -2346,7 +2373,8 @@ export default {
   }
   
   .filter-btn {
-    font-size: 0.875rem !important;
+    padding: 0.25rem 0.625rem !important;
+    font-size: 0.75rem !important;
   }
 }
 

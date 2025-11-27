@@ -3122,9 +3122,16 @@ export default {
   }
 }
 
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .sets-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .sets-grid {
+    grid-template-columns: 1fr;
     gap: 1rem;
   }
 }
@@ -3402,7 +3409,7 @@ export default {
 }
 
 .set-title h3 {
-  font-size: 1.25rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: #111827;
   margin: 0 0 0.75rem 0;
@@ -3480,7 +3487,7 @@ export default {
 
 @media (max-width: 1200px) and (min-width: 900px) {
   .parts-grid {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -3653,11 +3660,20 @@ export default {
     grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
   }
+
+  .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
+
+  .modal-parts-grid .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .parts-grid {
     grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 }
 
@@ -3713,7 +3729,36 @@ export default {
   }
 }
 
-@media (max-width: 1200px) and (min-width: 900px) {
+@media (min-width: 769px) and (max-width: 1024px) {
+  .modal-overlay {
+    padding: 1.5rem;
+  }
+
+  .modal-container {
+    max-width: 95vw;
+    max-height: 95vh;
+    width: 100%;
+  }
+
+  .modal-header {
+    padding: 1.25rem;
+  }
+
+  .modal-header h3 {
+    font-size: 1.125rem;
+  }
+
+  .modal-body {
+    padding: 1.25rem;
+  }
+
+  .modal-parts-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 1200px) and (min-width: 1025px) {
   .modal-parts-grid {
     grid-template-columns: repeat(4, 1fr) !important;
   }
@@ -3811,16 +3856,43 @@ export default {
 
 @media (max-width: 768px) {
   .modal-overlay {
-    padding: 1rem;
+    padding: 0.5rem;
   }
 
   .modal-container {
     max-width: 100%;
     max-height: 100%;
+    width: 100%;
+    border-radius: 0;
+  }
+
+  .modal-header {
+    padding: 1rem;
+  }
+
+  .modal-header h3 {
+    font-size: 1.125rem;
+  }
+
+  .modal-close-button {
+    font-size: 1.75rem;
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .modal-body {
+    padding: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .modal-parts-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
   }
 
   .parts-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
   }
 }
 
@@ -3831,7 +3903,7 @@ export default {
 
   .page-header {
     margin-bottom: 1rem;
-    padding: 0;
+    padding: 1rem 0 0 0;
   }
 
   .page-header h1 {
@@ -3880,8 +3952,20 @@ export default {
   }
 
   .set-title h3 {
-    font-size: 1.125rem !important;
-    margin-bottom: 0.625rem;
+    font-size: 1.25rem !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  .set-group-header {
+    margin-bottom: 1rem !important;
+  }
+
+  .result-header {
+    margin-bottom: 1rem !important;
+  }
+
+  .result-header h3 {
+    font-size: 1.25rem !important;
   }
 
   .session-stats {
@@ -3898,7 +3982,11 @@ export default {
   }
 
   .part-card {
-    padding: 1rem;
+    padding: 0.875rem 1rem;
+  }
+
+  .modal-parts-grid .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
   }
 
   .part-card .card-header {
@@ -3917,10 +4005,13 @@ export default {
   }
 
   .part-card .part-name {
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     font-size: 0.875rem !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .part-card .element-id {
@@ -3934,7 +4025,7 @@ export default {
 
   .part-card .part-image-section {
     min-height: 100px;
-    padding: 0.75rem 0;
+    padding: 0.5rem 0 !important;
   }
 
   .part-card .part-image {

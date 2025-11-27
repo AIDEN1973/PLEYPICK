@@ -94,7 +94,7 @@
         </div>
       </div>
 
-      <div v-else-if="!loading && registeredSets.length === 0" class="empty-state">
+      <div v-else-if="!loading && registeredSets.length === 0 && !isPleyonUser" class="empty-state">
         <p>등록된 레고 세트가 없습니다.</p>
       </div>
     </div>
@@ -865,7 +865,7 @@ onMounted(async () => {
 .user-lego-registration-page {
   min-height: 100vh;
   background: #f9fafb;
-  padding: 2rem 1rem;
+  padding: 2rem;
 }
 
 .page-header {
@@ -1842,6 +1842,50 @@ onMounted(async () => {
   background: #9ca3af;
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+@media (max-width: 1024px) {
+  .search-section {
+    max-width: 100%;
+    margin-bottom: 1.5rem;
+  }
+
+  .result-section {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .user-lego-registration-page {
+    padding: 1rem;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
+  }
+
+  .page-header h1 {
+    font-size: 1.25rem !important;
+  }
+
+  .page-header p {
+    font-size: 0.875rem !important;
+  }
+
+  .search-section {
+    max-width: 100%;
+    margin-bottom: 1.5rem;
+    padding: 0;
+  }
+
+  .result-header {
+    margin-bottom: 1rem !important;
+  }
+
+  .result-header h3 {
+    font-size: 1.25rem !important;
+  }
 }
 </style>
 

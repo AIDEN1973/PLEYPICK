@@ -50,7 +50,7 @@
           </div>
 
           <div class="filter-group">
-            <label class="filter-label">세트</label>
+            <label class="filter-label">세트검색</label>
             <div class="set-search-field" ref="setDropdownRef">
               <div class="set-search-input-row" ref="searchInputRef">
                 <div class="set-search-input-wrapper">
@@ -1395,7 +1395,7 @@ export default {
 
 .page-header {
   margin-bottom: 2rem;
-  text-align: center;
+  padding: 0;
 }
 
 .page-header h1 {
@@ -1786,21 +1786,27 @@ td .set-name {
   flex-wrap: wrap;
   gap: 1.5rem;
   align-items: flex-end;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
 .filter-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
   flex: 1;
   min-width: 200px;
 }
 
 .filter-label {
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: 500;
   color: #374151;
+  margin-bottom: calc(0.5rem + 1px);
+  margin-top: 0;
+  display: block;
+  line-height: normal;
+  letter-spacing: normal;
+  font-family: inherit;
 }
 
 
@@ -1885,6 +1891,7 @@ td .set-name {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
+  margin-bottom: 1px;
 }
 
 .date-input-wrapper {
@@ -1944,13 +1951,13 @@ td .set-name {
 }
 
 .filter-reset-btn {
-  padding: 0.75rem 1.5rem;
-  background: #f3f4f6;
+  padding: 0.75rem 1rem;
+  background: #ffffff;
   border: 1px solid #d1d5db;
   border-radius: 10px;
   font-size: 0.875rem;
-  font-weight: 600;
-  color: #374151;
+  font-weight: 500;
+  color: #6b7280;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -1958,14 +1965,24 @@ td .set-name {
   box-sizing: border-box;
 }
 
-.filter-reset-btn:hover {
-  background: #e5e7eb;
+.filter-reset-btn:hover:not(:disabled) {
+  background: #f3f4f6;
   border-color: #9ca3af;
+}
+
+.filter-reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 @media (min-width: 769px) and (max-width: 1024px) {
   .inspection-analytics-page {
-    padding: 1rem;
+    padding: 2rem;
+  }
+
+  .page-header {
+    margin-bottom: 2rem;
+    padding: 0;
   }
 
   .metrics-grid {
@@ -2020,6 +2037,7 @@ td .set-name {
   .filters-section {
     flex-direction: column;
     align-items: stretch;
+    padding: 1rem;
   }
 
   .filter-group {
@@ -2031,18 +2049,18 @@ td .set-name {
   }
 
   .set-search-input-row {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
   }
 
   .set-search-input-wrapper {
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 1;
   }
 
   .set-search-button,
   .set-search-input-row .filter-reset-btn {
-    flex: 0 0 auto;
-    min-width: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   /* 본문 폰트 사이즈 조정 */
@@ -2098,6 +2116,11 @@ td .set-name {
     font-size: 1rem !important;
   }
 
+  .page-header {
+    margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
+  }
+
   .page-header h1 {
     font-size: 1.25rem !important;
   }
@@ -2138,7 +2161,7 @@ td .set-name {
   }
 
   .filter-label {
-    font-size: 0.8125rem !important;
+    font-size: 0.875rem !important;
   }
 
   .set-search-input {

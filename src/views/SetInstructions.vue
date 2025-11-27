@@ -2309,9 +2309,16 @@ export default {
   }
 }
 
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .sets-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .sets-grid {
+    grid-template-columns: 1fr;
     gap: 1rem;
   }
 }
@@ -2729,6 +2736,7 @@ export default {
 
   .page-header {
     margin-bottom: 1rem;
+    padding: 1rem 0 0 0;
   }
 
   .page-header h1 {
@@ -2737,6 +2745,14 @@ export default {
 
   .page-header p {
     font-size: 0.875rem;
+  }
+
+  .result-header {
+    margin-bottom: 1rem !important;
+  }
+
+  .result-header h3 {
+    font-size: 1.25rem !important;
   }
   
   .page-title-with-toggle {
@@ -2748,7 +2764,9 @@ export default {
   }
 
   .search-section {
+    max-width: 100%;
     margin-bottom: 1.5rem;
+    padding: 0;
   }
 
   .card-body {
@@ -2880,8 +2898,17 @@ export default {
     height: 28px;
   }
   
+  .toggle-slider:before {
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  
   .toggle-switch input:checked + .toggle-slider:before {
-    transform: translateX(58px);
+    transform: translateX(62px) translateY(-50%);
   }
   
   .toggle-switch input:checked + .toggle-slider .toggle-text {

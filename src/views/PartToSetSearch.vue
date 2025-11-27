@@ -2226,8 +2226,8 @@ export default {
 }
 
 .card-header h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   color: #111827;
   margin: 0 0 0.5rem 0;
 }
@@ -2579,9 +2579,16 @@ export default {
   }
 }
 
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .sets-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .sets-grid {
+    grid-template-columns: 1fr;
     gap: 1rem;
   }
 }
@@ -2969,7 +2976,7 @@ export default {
   }
 
   .card-header h3 {
-    font-size: 1rem;
+    font-size: 1.25rem;
   }
 
   .card-body {
@@ -3027,10 +3034,13 @@ export default {
   }
 
   .alternative-part-card .part-name {
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     font-size: 0.875rem !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .alternative-part-card .element-id {
@@ -3045,7 +3055,11 @@ export default {
 
   .alternative-part-card .part-image-section {
     min-height: 100px;
-    padding: 0.75rem 0;
+    padding: 0.5rem 0 !important;
+  }
+
+  .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
   }
 
   .alternative-part-card .part-image {
@@ -3061,7 +3075,7 @@ export default {
   }
 
   .card-header h3 {
-    font-size: 1rem !important;
+    font-size: 1.25rem !important;
   }
 
   .card-header p {
@@ -3087,6 +3101,10 @@ export default {
 
   .color-id-text {
     font-size: 0.75rem !important;
+  }
+
+  .result-header {
+    margin-bottom: 1rem !important;
   }
 
   .result-header h3 {
@@ -3259,11 +3277,24 @@ export default {
     grid-template-columns: repeat(2, 1fr);
     gap: 1rem;
   }
+
+  .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
+
+  .modal-parts-grid .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
+
+  .alternative-part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
   .parts-grid {
     grid-template-columns: 1fr;
+    gap: 0.75rem;
   }
 }
 
@@ -3842,6 +3873,19 @@ export default {
 
   .parts-grid {
     grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .part-card {
+    padding: 0.875rem 1rem;
+  }
+
+  .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
+  }
+
+  .modal-parts-grid .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
   }
   
   .toggle-switch {
@@ -3849,8 +3893,17 @@ export default {
     height: 28px;
   }
   
+  .toggle-slider:before {
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  
   .toggle-switch input:checked + .toggle-slider:before {
-    transform: translateX(58px);
+    transform: translateX(62px) translateY(-50%);
   }
   
   .toggle-switch input:checked + .toggle-slider .toggle-text {

@@ -3945,6 +3945,7 @@ export default {
 .layout-container {
   max-width: 1400px;
   margin: 0 auto;
+  width: 100%;
 }
 
 .main-panel {
@@ -3952,6 +3953,8 @@ export default {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
 .page-header {
@@ -4190,8 +4193,8 @@ export default {
 }
 
 .card-header h3 {
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   color: #111827;
   margin: 0;
 }
@@ -4654,7 +4657,7 @@ export default {
 
 .sets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 1.5rem;
   max-width: 100%;
 }
@@ -4665,21 +4668,28 @@ export default {
   }
 }
 
-@media (max-width: 1200px) and (min-width: 900px) {
+@media (max-width: 1399px) and (min-width: 1201px) {
   .sets-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (max-width: 900px) and (min-width: 600px) {
+@media (max-width: 1200px) and (min-width: 1025px) {
   .sets-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (max-width: 1024px) {
+@media (min-width: 769px) and (max-width: 1024px) {
   .sets-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .sets-grid {
+    grid-template-columns: 1fr;
     gap: 1rem;
   }
 }
@@ -5880,6 +5890,21 @@ export default {
   object-fit: contain;
 }
 
+/* 그리드 검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (단일검수와 동일) */
+.items-grid.grid-mode .part-card .part-image-section {
+  padding: 0.5rem 0;
+  min-height: 80px;
+  max-height: 250px;
+  overflow: hidden;
+}
+
+/* 그리드 검수 모드: 이미지 크기 제한 (단일검수와 동일) */
+.items-grid.grid-mode .part-card .part-image-section .part-image {
+  max-height: 200px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
 .cdn-badge {
   position: absolute;
   top: 8px;
@@ -5977,7 +6002,8 @@ export default {
 @media (max-width: 1024px) {
   .items-grid.single-mode {
     max-width: 100%;
-    padding: 0 1rem;
+    width: 100%;
+    padding: 0;
   }
 
   .part-card {
@@ -5987,7 +6013,8 @@ export default {
 
   .single-card-navigation {
     max-width: 100%;
-    padding: 0 1rem;
+    width: 100%;
+    padding: 0;
   }
 
   .card-counter {
@@ -6001,7 +6028,13 @@ export default {
 
   /* 단일검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (태블릿) */
   .part-card-wrapper .part-image-section {
-    padding: 0.375rem 0;
+    padding: 0.5rem 0 !important;
+    min-height: 70px;
+  }
+
+  /* 그리드 검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (태블릿) */
+  .items-grid.grid-mode .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
     min-height: 70px;
   }
 
@@ -6019,6 +6052,9 @@ export default {
 
   .panel-content {
     padding: 0;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
   }
 
   .session-setup {
@@ -6037,12 +6073,14 @@ export default {
 @media (max-width: 768px) {
   .items-grid.single-mode {
     max-width: 100%;
-    padding: 0 0.5rem;
+    width: 100%;
+    padding: 0;
   }
 
   .single-card-navigation {
     max-width: 100%;
-    padding: 0 0.5rem;
+    width: 100%;
+    padding: 0;
   }
 
   .part-card {
@@ -6053,6 +6091,12 @@ export default {
   /* 단일검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (모바일) */
   .part-card-wrapper .part-image-section {
     padding: 0.25rem 0;
+    min-height: 60px;
+  }
+
+  /* 그리드 검수 모드: 부품 이미지 출력 영역 세로 높이 축소 (모바일) */
+  .items-grid.grid-mode .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
     min-height: 60px;
   }
 
@@ -6172,9 +6216,12 @@ export default {
   }
 
   .part-card .part-name {
-    white-space: normal !important;
-    overflow: visible !important;
-    text-overflow: clip !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .part-card .element-id {
@@ -6195,7 +6242,7 @@ export default {
 
   .page-header {
     margin-bottom: 1rem;
-    padding: 0;
+    padding: 1rem 0 0 0;
   }
 
   .page-header h1 {
@@ -6256,8 +6303,16 @@ export default {
   }
 
   .card-header h3 {
-    font-size: 0.875rem !important;
+    font-size: 1.25rem !important;
     margin: 0;
+  }
+
+  .result-header {
+    margin-bottom: 1rem !important;
+  }
+
+  .result-header h3 {
+    font-size: 1.25rem !important;
   }
 
   .card-header p {
@@ -6372,8 +6427,12 @@ export default {
 
   .part-image-section {
     min-height: 100px;
-    padding: 0.75rem 0;
+    padding: 0.5rem 0 !important;
     background: transparent;
+  }
+
+  .items-grid.grid-mode .part-card .part-image-section {
+    padding: 0.5rem 0 !important;
   }
 
   .part-image {
@@ -6490,6 +6549,9 @@ export default {
 
   .panel-content {
     padding: 0;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
   }
 
   .items-container {
@@ -6506,7 +6568,7 @@ export default {
   }
 
   .card-body {
-    padding: 0.75rem;
+    padding: 1rem;
   }
 
   .error-toast {
