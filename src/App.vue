@@ -232,6 +232,35 @@
 
             <!-- 오른쪽: 계정 메뉴 (모바일/태블릿/데스크탑 모두 표시) -->
             <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end md:flex-1 flex-shrink-0 relative" style="z-index: 30;">
+              <!-- 모바일/태블릿: 아이콘 버튼 -->
+              <button 
+                v-if="!user" 
+                @click="showLoginModal = true" 
+                class="login-icon-btn"
+                aria-label="로그인"
+                style="pointer-events: auto; position: relative; z-index: 30;"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                  <polyline points="10 17 15 12 10 7"></polyline>
+                  <line x1="15" y1="12" x2="3" y2="12"></line>
+                </svg>
+              </button>
+              <button 
+                v-else 
+                @click="logout" 
+                class="login-icon-btn"
+                aria-label="로그아웃"
+                style="pointer-events: auto; position: relative; z-index: 30;"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+              </button>
+              
+              <!-- 데스크탑: 텍스트 버튼 -->
               <button 
                 v-if="!user" 
                 @click="showLoginModal = true" 
@@ -2925,12 +2954,27 @@ main {
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
-  display: inline-flex !important;
   align-items: center;
   justify-content: center;
   pointer-events: auto;
   position: relative;
   z-index: 30;
+}
+
+/* 모바일에서만 텍스트 버튼 숨김 */
+@media (max-width: 767px) {
+  .login-badge-btn {
+    display: none !important;
+  }
+}
+
+/* 태블릿 및 데스크탑에서 로그인/로그아웃 텍스트 버튼 표시 */
+@media (min-width: 768px) {
+  .login-badge-btn {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
 }
 
 .login-badge-btn:hover {
@@ -2941,18 +2985,9 @@ main {
   transform: translateY(0);
 }
 
-/* 태블릿 및 데스크탑에서 로그인/로그아웃 버튼 표시 보장 */
-@media (min-width: 768px) {
-  .login-badge-btn {
-    display: inline-flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-  }
-}
-
 /* 로그인/로그아웃 아이콘 버튼 */
 .login-icon-btn {
-  display: flex !important;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 44px;
@@ -2971,12 +3006,19 @@ main {
   z-index: 30;
 }
 
-/* 태블릿 및 데스크탑에서 로그인/로그아웃 버튼 표시 보장 */
-@media (min-width: 768px) {
+/* 모바일에서만 아이콘 버튼 표시 */
+@media (max-width: 767px) {
   .login-icon-btn {
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
+  }
+}
+
+/* 태블릿 및 데스크탑에서 아이콘 버튼 숨김 */
+@media (min-width: 768px) {
+  .login-icon-btn {
+    display: none !important;
   }
 }
 
