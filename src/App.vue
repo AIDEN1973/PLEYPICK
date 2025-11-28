@@ -4,10 +4,42 @@
     <div class="w-full">
       <!-- 상단 헤더 -->
       <header class="bg-white sticky top-0 z-50" style="border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-12">
-          <div class="flex flex-wrap lg:flex-nowrap items-center h-auto lg:h-20 py-2 lg:py-0">
-            <!-- 왼쪽: 로고 -->
-            <div class="flex items-center flex-1 justify-start">
+        <div class="max-w-7xl mx-auto px-2 sm:px-4 lg:px-12">
+          <div class="flex flex-wrap lg:flex-nowrap items-center h-auto lg:h-20 py-2 lg:py-0 relative">
+            <!-- 모바일/태블릿: 좌측 햄버거 메뉴 -->
+            <div class="lg:hidden flex items-center flex-shrink-0 relative" style="z-index: 30;">
+              <button
+                @click.stop="showMobileMenu = !showMobileMenu"
+                class="hamburger-menu-btn"
+                :class="{ 'hamburger-menu-btn-active': showMobileMenu }"
+                ref="mobileMenuButton"
+                aria-label="메뉴"
+                style="pointer-events: auto; position: relative; z-index: 30;"
+              >
+                <svg class="hamburger-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line v-if="!showMobileMenu" x1="3" y1="6" x2="21" y2="6"></line>
+                  <line v-if="!showMobileMenu" x1="3" y1="12" x2="21" y2="12"></line>
+                  <line v-if="!showMobileMenu" x1="3" y1="18" x2="21" y2="18"></line>
+                  <line v-if="showMobileMenu" x1="18" y1="6" x2="6" y2="18"></line>
+                  <line v-if="showMobileMenu" x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <!-- 모바일/태블릿: 가운데 로고 -->
+            <div class="lg:hidden flex items-center flex-1 justify-center absolute left-0 right-0" style="pointer-events: none; z-index: 35;">
+              <router-link 
+                to="/" 
+                class="nav-logo flex items-center" 
+                @click.stop="showMobileMenu = false" 
+                style="pointer-events: auto !important; position: relative; z-index: 35 !important; cursor: pointer;"
+              >
+                <img :src="pleyLogo" alt="Pleyon" class="object-contain" style="pointer-events: none;" />
+              </router-link>
+            </div>
+
+            <!-- 데스크톱: 왼쪽 로고 -->
+            <div class="hidden lg:flex items-center flex-1 justify-start">
               <router-link to="/" class="nav-logo flex items-center mr-2 sm:mr-4">
                 <img :src="pleyLogo" alt="Pleyon" class="object-contain" />
               </router-link>
@@ -198,10 +230,24 @@
                   </div>
             </nav>
 
-            <!-- 오른쪽: 계정 메뉴 -->
-            <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end md:flex-1">
-              <button v-if="!user" @click="showLoginModal = true" class="login-badge-btn login-badge-btn-mobile">로그인</button>
-              <button v-else @click="logout" class="login-badge-btn login-badge-btn-mobile">로그아웃</button>
+            <!-- 오른쪽: 계정 메뉴 (모바일/태블릿/데스크탑 모두 표시) -->
+            <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end md:flex-1 flex-shrink-0 relative" style="z-index: 30;">
+              <button 
+                v-if="!user" 
+                @click="showLoginModal = true" 
+                class="login-badge-btn"
+                style="pointer-events: auto; position: relative; z-index: 30;"
+              >
+                로그인
+              </button>
+              <button 
+                v-else 
+                @click="logout" 
+                class="login-badge-btn"
+                style="pointer-events: auto; position: relative; z-index: 30;"
+              >
+                로그아웃
+              </button>
             </div>
           </div>
         </div>
@@ -402,6 +448,267 @@
           </div>
         </div>
       </header>
+
+      <!-- 모바일/태블릿: 햄버거 메뉴 드롭다운 -->
+      <transition name="mobile-dropdown">
+        <div
+          v-if="showMobileMenu"
+          class="mobile-hamburger-dropdown"
+          ref="mobileMenuDropdown"
+          @click.self="showMobileMenu = false"
+        >
+          <div class="mobile-hamburger-dropdown-content" ref="mobileDropdownContent">
+            <!-- 드롭다운 헤더 -->
+            <div class="mobile-hamburger-header">
+              <div class="mobile-hamburger-header-title">메뉴</div>
+              <button
+                @click.stop="showMobileMenu = false"
+                class="mobile-hamburger-close-btn"
+                aria-label="메뉴 닫기"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            
+            <div class="mobile-hamburger-menu-list">
+            <router-link 
+              to="/manual-inspection" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/manual-inspection') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 11l3 3L22 4"></path>
+                  <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7"></path>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">부품검수</span>
+            </router-link>
+            <router-link 
+              to="/missing-parts" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/missing-parts') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">누락부품</span>
+            </router-link>
+            <router-link 
+              to="/inspection-history" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/inspection-history') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">검수이력</span>
+            </router-link>
+            <router-link 
+              to="/inspection-notes" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/inspection-notes') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">검수노트</span>
+            </router-link>
+            <router-link 
+              to="/set-parts" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/set-parts') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="9" y1="3" x2="9" y2="21"></line>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">레고리스트</span>
+            </router-link>
+            <router-link 
+              to="/part-to-set-search" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/part-to-set-search') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <path d="m21 21-4.35-4.35"></path>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">부품으로 레고 찾기</span>
+            </router-link>
+            <router-link 
+              to="/set-instructions" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/set-instructions') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">설명서</span>
+            </router-link>
+            <router-link 
+              to="/user-lego-registration" 
+              @click="showMobileMenu = false"
+              class="mobile-hamburger-item"
+              :class="{ 'mobile-hamburger-item-active': isActiveRoute('/user-lego-registration') }"
+            >
+              <span class="mobile-hamburger-item-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+              </span>
+              <span class="mobile-hamburger-item-text">레고등록</span>
+            </router-link>
+            <template v-if="isAdmin">
+              <div class="mobile-hamburger-divider"></div>
+              <div class="mobile-hamburger-label">관리자 메뉴</div>
+              <router-link 
+                to="/new-lego" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/new-lego') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">신규 레고 등록</span>
+              </router-link>
+              <router-link 
+                to="/saved-lego" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/saved-lego') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                    <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                    <polyline points="7 3 7 8 15 8"></polyline>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">저장된 레고</span>
+              </router-link>
+              <router-link 
+                to="/parts" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/parts') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">부품 정보</span>
+              </router-link>
+              <router-link 
+                to="/synthetic-dataset" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/synthetic-dataset') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="2" x2="12" y2="6"></line>
+                    <line x1="12" y1="18" x2="12" y2="22"></line>
+                    <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"></line>
+                    <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"></line>
+                    <line x1="2" y1="12" x2="6" y2="12"></line>
+                    <line x1="18" y1="12" x2="22" y2="12"></line>
+                    <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"></line>
+                    <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">합성 데이터셋</span>
+              </router-link>
+              <router-link 
+                to="/automated-training" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/automated-training') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">AI 학습</span>
+              </router-link>
+              <router-link 
+                to="/hybrid-detection" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/hybrid-detection') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">부품 검출</span>
+              </router-link>
+              <router-link 
+                to="/dashboard" 
+                @click="showMobileMenu = false"
+                class="mobile-hamburger-item"
+                :class="{ 'mobile-hamburger-item-active': isActiveRoute('/dashboard') }"
+              >
+                <span class="mobile-hamburger-item-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                  </svg>
+                </span>
+                <span class="mobile-hamburger-item-text">대시보드</span>
+              </router-link>
+            </template>
+            </div>
+          </div>
+        </div>
+      </transition>
 
       <!-- 콘텐츠 -->
       <main :class="['flex-1', isSystemMonitoringRoute ? 'p-0 bg-transparent' : 'p-4 sm:p-6 bg-gray-50']">
@@ -624,19 +931,16 @@ export default {
       if (userMenuDropdown.value && !userMenuDropdown.value.contains(event.target)) {
         showUserMenu.value = false
       }
-      if (mobileMenuDropdown.value) {
+      if (showMobileMenu.value && mobileMenuDropdown.value) {
         const isClickInside = mobileMenuDropdown.value.contains(event.target)
-        console.log('=== Click Outside Check ===')
-        console.log('Click target:', event.target)
-        console.log('mobileMenuDropdown element:', mobileMenuDropdown.value)
-        console.log('Is click inside mobileMenuDropdown:', isClickInside)
-        console.log('Current showMobileMenu:', showMobileMenu.value)
+        const isClickOnButton = mobileMenuButton.value && (
+          mobileMenuButton.value.contains(event.target) || 
+          mobileMenuButton.value === event.target ||
+          event.target.closest('.hamburger-menu-btn')
+        )
         
-        if (!isClickInside) {
-          console.log('Closing mobile menu due to outside click')
+        if (!isClickInside && !isClickOnButton) {
           showMobileMenu.value = false
-        } else {
-          console.log('Click is inside mobile menu, keeping it open')
         }
       }
     }
@@ -1307,6 +1611,10 @@ body {
 /* // 🔧 수정됨: 로고 및 메뉴 밑줄 스타일 */
 .nav-logo {
   text-decoration: none;
+  pointer-events: auto !important;
+  cursor: pointer;
+  position: relative;
+  z-index: 35 !important;
 }
 
 .nav-logo img {
@@ -1325,8 +1633,8 @@ body {
 
 @media (min-width: 1024px) {
   .nav-logo img {
-    height: 64px;
-    max-height: 64px;
+    height: 51px;
+    max-height: 51px;
   }
 }
 
@@ -2014,6 +2322,19 @@ main {
     flex-wrap: nowrap !important;
     flex-shrink: 0 !important;
   }
+  
+  /* 태블릿 모드: 메뉴 가운데 정렬 */
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .mobile-menu-scroll {
+      display: flex;
+      justify-content: center;
+      padding: 0;
+    }
+    
+    .mobile-menu-container {
+      margin: 0 auto;
+    }
+  }
 
   /* 모바일 메뉴 항목 패딩 줄이기 */
   .mobile-menu-container a.px-3,
@@ -2042,6 +2363,245 @@ main {
   header > div.max-w-7xl {
     overflow: visible !important;
   }
+}
+
+/* 햄버거 메뉴 버튼 스타일 */
+.hamburger-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #374151;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  flex-shrink: 0;
+  border-radius: 12px;
+  pointer-events: auto;
+  position: relative;
+  z-index: 30;
+}
+
+.hamburger-menu-btn:hover {
+  color: #ff3600;
+  background: transparent;
+}
+
+.hamburger-menu-btn:active {
+  transform: scale(0.95);
+}
+
+.hamburger-menu-btn-active {
+  color: #ff3600;
+  background: transparent;
+}
+
+.hamburger-icon {
+  width: 24px;
+  height: 24px;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 모바일 햄버거 드롭다운 메뉴 */
+.mobile-hamburger-dropdown {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 99999 !important;
+  display: flex !important;
+  align-items: flex-start;
+  justify-content: flex-start;
+  visibility: visible !important;
+  opacity: 1 !important;
+  padding: 0;
+}
+
+.mobile-hamburger-dropdown-content {
+  background: linear-gradient(to bottom, #ffffff 0%, #fafafa 100%);
+  width: 320px;
+  max-width: 85vw;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+  display: flex !important;
+  flex-direction: column;
+  visibility: visible !important;
+  opacity: 1 !important;
+  transform: translateX(0);
+  will-change: transform;
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+  border-radius: 0 16px 16px 0;
+  margin-top: 1rem;
+  margin-left: 1rem;
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.mobile-hamburger-dropdown-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mobile-hamburger-dropdown-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mobile-hamburger-dropdown-content::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.mobile-hamburger-dropdown-content::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.mobile-hamburger-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  background: #ff3600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.mobile-hamburger-header-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: white;
+  letter-spacing: -0.02em;
+}
+
+.mobile-hamburger-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.mobile-hamburger-close-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.mobile-hamburger-close-btn:active {
+  transform: scale(0.95);
+}
+
+.mobile-hamburger-menu-list {
+  padding: 0.5rem 0;
+}
+
+.mobile-hamburger-item {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem 1.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  text-decoration: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-bottom: 1px solid #f3f4f6;
+  position: relative;
+}
+
+.mobile-hamburger-item:last-child {
+  border-bottom: none;
+}
+
+.mobile-hamburger-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: #6b7280;
+  transition: all 0.2s ease;
+}
+
+.mobile-hamburger-item-text {
+  flex: 1;
+  transition: all 0.2s ease;
+}
+
+.mobile-hamburger-item:hover {
+  background: linear-gradient(to right, #fef2f2 0%, #ffffff 100%);
+  color: #ff3600;
+  padding-left: 1.75rem;
+}
+
+.mobile-hamburger-item:hover .mobile-hamburger-item-icon {
+  color: #ff3600;
+  transform: scale(1.1);
+}
+
+.mobile-hamburger-item-active {
+  color: #ff3600;
+  background: linear-gradient(to right, #fef2f2 0%, #ffffff 100%);
+  border-left: 3px solid #ff3600;
+  font-weight: 600;
+  padding-left: calc(1.5rem - 3px);
+}
+
+.mobile-hamburger-item-active .mobile-hamburger-item-icon {
+  color: #ff3600;
+}
+
+.mobile-hamburger-item-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ff3600;
+}
+
+.mobile-hamburger-divider {
+  height: 1px;
+  background: linear-gradient(to right, transparent 0%, #e5e7eb 20%, #e5e7eb 80%, transparent 100%);
+  margin: 0.5rem 1.5rem;
+}
+
+.mobile-hamburger-label {
+  padding: 0.75rem 1.5rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  background: linear-gradient(to right, #f9fafb 0%, #ffffff 100%);
+  border-top: 1px solid #f3f4f6;
+  border-bottom: 1px solid #f3f4f6;
+  margin-top: 0.25rem;
 }
 
 /* 모바일 드롭다운 메뉴 스타일 */
@@ -2123,19 +2683,36 @@ main {
 }
 
 /* 모바일 드롭다운 애니메이션 */
-.mobile-dropdown-enter-active,
+.mobile-dropdown-enter-active {
+  transition: opacity 0.2s ease-out;
+}
+
+.mobile-dropdown-enter-active .mobile-hamburger-dropdown-content {
+  transition: transform 0.3s ease-out;
+}
+
 .mobile-dropdown-leave-active {
-  transition: opacity 0.15s, transform 0.15s;
+  transition: opacity 0.2s ease-in;
+}
+
+.mobile-dropdown-leave-active .mobile-hamburger-dropdown-content {
+  transition: transform 0.3s ease-in;
 }
 
 .mobile-dropdown-enter-from {
   opacity: 0;
-  transform: translateY(-0.5rem);
+}
+
+.mobile-dropdown-enter-from .mobile-hamburger-dropdown-content {
+  transform: translateX(-100%);
 }
 
 .mobile-dropdown-leave-to {
   opacity: 0;
-  transform: translateY(-0.5rem);
+}
+
+.mobile-dropdown-leave-to .mobile-hamburger-dropdown-content {
+  transform: translateX(-100%);
 }
 
 /* 로그인 모달 스타일 */
@@ -2338,16 +2915,22 @@ main {
 }
 
 .login-badge-btn {
-  padding: 0.5rem 0.875rem;
+  padding: 0.375rem 0.75rem;
   background: #ff3600;
   color: #ffffff;
   border: none;
   border-radius: 9999px;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  position: relative;
+  z-index: 30;
 }
 
 .login-badge-btn:hover {
@@ -2358,17 +2941,57 @@ main {
   transform: translateY(0);
 }
 
-/* 모바일 로그인/로그아웃 버튼 크기 축소 */
-.login-badge-btn-mobile {
-  padding: 0.25rem 0.5rem !important;
-  font-size: 0.6875rem !important;
+/* 태블릿 및 데스크탑에서 로그인/로그아웃 버튼 표시 보장 */
+@media (min-width: 768px) {
+  .login-badge-btn {
+    display: inline-flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
 }
 
+/* 로그인/로그아웃 아이콘 버튼 */
+.login-icon-btn {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #374151;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  outline: none;
+  border-radius: 12px;
+  pointer-events: auto;
+  position: relative;
+  z-index: 30;
+}
+
+/* 태블릿 및 데스크탑에서 로그인/로그아웃 버튼 표시 보장 */
 @media (min-width: 768px) {
-  .login-badge-btn-mobile {
-    padding: 0.375rem 0.625rem !important;
-    font-size: 0.75rem !important;
+  .login-icon-btn {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
   }
+}
+
+.login-icon-btn:hover {
+  color: #ff3600;
+  background: transparent;
+}
+
+.login-icon-btn:active {
+  transform: scale(0.95);
+}
+
+.login-icon-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
 .management-badge-btn {

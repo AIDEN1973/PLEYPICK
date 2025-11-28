@@ -1884,7 +1884,7 @@ onMounted(async () => {
   }
 
   .result-header h3 {
-    font-size: 1.25rem !important;
+    font-size: 1.125rem !important;
   }
 }
 </style>

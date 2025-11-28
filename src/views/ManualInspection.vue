@@ -2993,7 +2993,7 @@ export default {
       }
     }
 
-    // 부품 이미지 URL 로드 (element_id 기반으로 정확한 이미지 매칭)
+    // 부품 이미지 URL 로드 (element_id 기반으로 정확한 이미지 매칭, 병렬 처리 최적화)
     const loadPartImageUrls = async () => {
       if (!items.value || items.value.length === 0) return
 
@@ -3002,65 +3002,96 @@ export default {
       const itemsWithoutElementId = items.value.filter(item => !item.element_id)
 
       try {
-        // 1. element_id가 있는 경우: part_images 테이블에서 element_id로 조회
-        if (itemsWithElementId.length > 0) {
-          const elementIds = [...new Set(itemsWithElementId.map(item => item.element_id).filter(Boolean))].map(id => String(id))
-          
-          const { data: partImages, error: partImagesError } = await supabase
+        const elementIds = itemsWithElementId.length > 0 
+          ? [...new Set(itemsWithElementId.map(item => item.element_id).filter(Boolean))].map(id => String(id))
+          : []
+        
+        const partKeys = itemsWithoutElementId.map(item => ({
+          id: item.id,
+          part_id: item.part_id,
+          color_id: item.color_id,
+          part_img_url: item.part_img_url
+        }))
+        const partIds = partKeys.length > 0 ? [...new Set(partKeys.map(p => p.part_id))] : []
+        const colorIds = partKeys.length > 0 ? [...new Set(partKeys.map(p => p.color_id))] : []
+
+        // 모든 DB 쿼리를 병렬로 실행 (로딩 속도 향상)
+        const queryPromises = [
+          // element_id 기반 이미지 조회 (part_images)
+          elementIds.length > 0 ? supabase
             .from('part_images')
             .select('element_id, uploaded_url')
             .in('element_id', elementIds)
-            .not('uploaded_url', 'is', null)
+            .not('uploaded_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // element_id 기반 이미지 조회 (image_metadata)
+          elementIds.length > 0 ? supabase
+            .from('image_metadata')
+            .select('element_id, supabase_url')
+            .in('element_id', elementIds)
+            .not('supabase_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // part_id + color_id 기반 이미지 조회 (part_images)
+          partIds.length > 0 && colorIds.length > 0 ? supabase
+            .from('part_images')
+            .select('part_id, color_id, uploaded_url')
+            .in('part_id', partIds)
+            .in('color_id', colorIds)
+            .not('uploaded_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // part_id + color_id 기반 이미지 조회 (image_metadata)
+          partIds.length > 0 && colorIds.length > 0 ? supabase
+            .from('image_metadata')
+            .select('part_num, color_id, supabase_url')
+            .in('part_num', partIds)
+            .in('color_id', colorIds)
+            .not('supabase_url', 'is', null) : Promise.resolve({ data: [], error: null })
+        ]
 
-          if (!partImagesError && partImages) {
-            partImages.forEach(pi => {
-              const item = itemsWithElementId.find(i => String(i.element_id) === String(pi.element_id))
-              if (item && pi.uploaded_url) {
-                imageUrlMap[item.id] = pi.uploaded_url
+        const [
+          elementImagesResult,
+          elementMetadataResult,
+          partImagesResult,
+          metadataImagesResult
+        ] = await Promise.all(queryPromises)
+
+        // element_id 기반 이미지 매핑
+        if (itemsWithElementId.length > 0) {
+          const elementImageMap = new Map()
+          
+          // part_images 결과 처리
+          if (!elementImagesResult.error && elementImagesResult.data) {
+            elementImagesResult.data.forEach(pi => {
+              if (pi.element_id && pi.uploaded_url) {
+                const elementId = String(pi.element_id)
+                const isBucketUrl = pi.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !pi.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(elementId, pi.uploaded_url)
+                }
               }
             })
           }
 
-          // 2. part_images에 없으면 Supabase Storage에서 element_id 기반 파일명으로 시도
-          for (const item of itemsWithElementId) {
-            if (!imageUrlMap[item.id] && item.element_id) {
-              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
-              const bucketName = 'lego_parts_images'
-              const fileName = `${String(item.element_id)}.webp`
-              const directUrl = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
-              try {
-                const response = await fetch(directUrl, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
-                // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
-                if (response.status === 400 || response.status === 404) {
-                  continue
+          // image_metadata 결과 처리 (part_images에 없는 것만)
+          if (!elementMetadataResult.error && elementMetadataResult.data) {
+            elementMetadataResult.data.forEach(meta => {
+              if (meta.element_id && meta.supabase_url) {
+                const elementId = String(meta.element_id)
+                if (!elementImageMap.has(elementId)) {
+                  const isBucketUrl = meta.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !meta.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    elementImageMap.set(elementId, meta.supabase_url)
+                  }
                 }
-                if (response.ok) {
-                  imageUrlMap[item.id] = directUrl
-                }
-              } catch (fetchError) {
-                // 파일이 없으면 무시
               }
-            }
+            })
           }
-          
-          // 3. Storage에도 없으면 Rebrickable API에서 element_img_url 가져오기
-          for (const item of itemsWithElementId) {
-            if (!imageUrlMap[item.id] && item.element_id) {
-              try {
-                const { getElement } = useRebrickable()
-                const elementData = await getElement(item.element_id)
-                if (elementData?.element_img_url) {
-                  imageUrlMap[item.id] = elementData.element_img_url
-                } else if (elementData?.part_img_url) {
-                  imageUrlMap[item.id] = elementData.part_img_url
-                }
-              } catch (elementErr) {
-                console.warn(`⚠️ element_id ${item.element_id} 이미지 조회 실패:`, elementErr)
-              }
+
+          // element_id 기반 이미지 매핑
+          itemsWithElementId.forEach(item => {
+            if (item.element_id && elementImageMap.has(String(item.element_id))) {
+              imageUrlMap[item.id] = elementImageMap.get(String(item.element_id))
             }
-          }
-          
-          // 4. element_id 실패 시 part_img_url 사용 (fallback)
+          })
+
+          // element_id 실패 시 part_img_url 사용 (fallback)
           itemsWithElementId.forEach(item => {
             if (!imageUrlMap[item.id] && item.part_img_url) {
               imageUrlMap[item.id] = item.part_img_url
@@ -3068,32 +3099,45 @@ export default {
           })
         }
 
-        // 4. element_id가 없는 경우: 기존 방식 (part_id + color_id) 사용
+        // part_id + color_id 기반 이미지 매핑
         if (itemsWithoutElementId.length > 0) {
-          const partKeys = itemsWithoutElementId.map(item => ({
-            id: item.id,
-            part_id: item.part_id,
-            color_id: item.color_id,
-            part_img_url: item.part_img_url
-          }))
+          const partColorImageMap = new Map()
 
-          const partIds = [...new Set(partKeys.map(p => p.part_id))]
-          const colorIds = [...new Set(partKeys.map(p => p.color_id))]
-
-          const { data: partImages, error: partImagesError } = await supabase
-            .from('part_images')
-            .select('part_id, color_id, uploaded_url')
-            .in('part_id', partIds)
-            .in('color_id', colorIds)
-
-          if (!partImagesError && partImages) {
-            partImages.forEach(pi => {
-              const item = partKeys.find(p => p.part_id === pi.part_id && p.color_id === pi.color_id)
-              if (item && pi.uploaded_url && !imageUrlMap[item.id]) {
-                imageUrlMap[item.id] = pi.uploaded_url
+          // part_images 결과 처리
+          if (!partImagesResult.error && partImagesResult.data) {
+            partImagesResult.data.forEach(pi => {
+              if (pi.part_id && pi.color_id !== null && pi.color_id !== undefined && pi.uploaded_url) {
+                const key = `${pi.part_id}_${pi.color_id}`
+                const isBucketUrl = pi.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !pi.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                  partColorImageMap.set(key, pi.uploaded_url)
+                }
               }
             })
           }
+
+          // image_metadata 결과 처리 (part_images에 없는 것만)
+          if (!metadataImagesResult.error && metadataImagesResult.data) {
+            metadataImagesResult.data.forEach(meta => {
+              if (meta.part_num && meta.color_id !== null && meta.color_id !== undefined && meta.supabase_url) {
+                const key = `${meta.part_num}_${meta.color_id}`
+                if (!partColorImageMap.has(key)) {
+                  const isBucketUrl = meta.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                  if (isBucketUrl && !meta.supabase_url.toLowerCase().endsWith('.jpg')) {
+                    partColorImageMap.set(key, meta.supabase_url)
+                  }
+                }
+              }
+            })
+          }
+
+          // part_id + color_id 기반 이미지 매핑
+          partKeys.forEach(item => {
+            const key = `${item.part_id}_${item.color_id}`
+            if (partColorImageMap.has(key)) {
+              imageUrlMap[item.id] = partColorImageMap.get(key)
+            }
+          })
 
           // Rebrickable URL 사용
           partKeys.forEach(item => {
@@ -6312,7 +6356,7 @@ export default {
   }
 
   .result-header h3 {
-    font-size: 1.25rem !important;
+    font-size: 1.125rem !important;
   }
 
   .card-header p {

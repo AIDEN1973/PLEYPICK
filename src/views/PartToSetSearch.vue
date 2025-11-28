@@ -1208,30 +1208,10 @@ export default {
         // 예비부품 제외
         const nonSpareParts = partsData.filter(p => !p.is_spare)
 
-        // 부품 정보와 색상 정보를 병렬로 조회
+        // 부품 정보와 색상 정보, element_id 목록 수집 (병렬 처리 준비)
         const partIds = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
         const colorIds = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
-
-        const [partsInfoResult, colorsInfoResult] = await Promise.all([
-          partIds.length > 0 ? supabase
-            .from('lego_parts')
-            .select('part_num, name, part_img_url')
-            .in('part_num', partIds) : Promise.resolve({ data: [], error: null }),
-          colorIds.length > 0 ? supabase
-            .from('lego_colors')
-            .select('color_id, name, rgb')
-            .in('color_id', colorIds) : Promise.resolve({ data: [], error: null })
-        ])
-
-        if (partsInfoResult.error) throw partsInfoResult.error
-        if (colorsInfoResult.error) throw colorsInfoResult.error
-
-        const partsInfo = partsInfoResult.data || []
-        const colorsInfo = colorsInfoResult.data || []
-
-        // 부품 이미지 URL 조회
-        const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
-        const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
+        const elementIds = [...new Set(partsData.map(p => p.element_id).filter(Boolean))].map(id => String(id))
 
         // 버킷 URL 생성 헬퍼 함수
         const getBucketImageUrl = (elementId, partId, colorId) => {
@@ -1267,108 +1247,121 @@ export default {
           }
         }
 
-        // element_id 목록 수집
-        const elementIds = [...new Set(partsData.map(p => p.element_id).filter(Boolean))].map(id => String(id))
-        
-        // element_id 기반 이미지 배치 조회 (병렬 처리로 최적화)
+        // 모든 DB 쿼리를 병렬로 실행 (로딩 속도 향상)
+        const queryPromises = [
+          // 부품 정보 조회
+          partIds.length > 0 ? supabase
+            .from('lego_parts')
+            .select('part_num, name, part_img_url')
+            .in('part_num', partIds) : Promise.resolve({ data: [], error: null }),
+          // 색상 정보 조회
+          colorIds.length > 0 ? supabase
+            .from('lego_colors')
+            .select('color_id, name, rgb')
+            .in('color_id', colorIds) : Promise.resolve({ data: [], error: null }),
+          // element_id 기반 이미지 조회 (part_images)
+          elementIds.length > 0 ? supabase
+            .from('part_images')
+            .select('element_id, uploaded_url')
+            .in('element_id', elementIds)
+            .not('uploaded_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // element_id 기반 이미지 조회 (image_metadata)
+          elementIds.length > 0 ? supabase
+            .from('image_metadata')
+            .select('element_id, supabase_url')
+            .in('element_id', elementIds)
+            .not('supabase_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // part_id + color_id 기반 이미지 조회 (part_images)
+          partIds.length > 0 && colorIds.length > 0 ? supabase
+            .from('part_images')
+            .select('part_id, color_id, uploaded_url')
+            .in('part_id', partIds)
+            .in('color_id', colorIds)
+            .not('uploaded_url', 'is', null) : Promise.resolve({ data: [], error: null }),
+          // part_id + color_id 기반 이미지 조회 (image_metadata)
+          partIds.length > 0 && colorIds.length > 0 ? supabase
+            .from('image_metadata')
+            .select('part_num, color_id, supabase_url')
+            .in('part_num', partIds)
+            .in('color_id', colorIds)
+            .not('supabase_url', 'is', null) : Promise.resolve({ data: [], error: null })
+        ]
+
+        const [
+          partsInfoResult,
+          colorsInfoResult,
+          elementImagesResult,
+          elementMetadataResult,
+          partImagesResult,
+          metadataImagesResult
+        ] = await Promise.all(queryPromises)
+
+        // 에러 체크
+        if (partsInfoResult.error) throw partsInfoResult.error
+        if (colorsInfoResult.error) throw colorsInfoResult.error
+
+        const partsInfo = partsInfoResult.data || []
+        const colorsInfo = colorsInfoResult.data || []
+
+        const partsInfoMap = new Map(partsInfo.map(p => [p.part_num, p]))
+        const colorsInfoMap = new Map(colorsInfo.map(c => [c.color_id, c]))
+
+        // element_id 기반 이미지 맵 구성
         const elementImageMap = new Map()
-        if (elementIds.length > 0) {
-          // part_images와 image_metadata를 병렬로 조회
-          const [elementImagesResult, elementMetadataResult] = await Promise.all([
-            supabase
-              .from('part_images')
-              .select('element_id, uploaded_url')
-              .in('element_id', elementIds)
-              .not('uploaded_url', 'is', null),
-            supabase
-              .from('image_metadata')
-              .select('element_id, supabase_url')
-              .in('element_id', elementIds)
-              .not('supabase_url', 'is', null)
-          ])
-
-          // part_images 결과 처리
-          if (!elementImagesResult.error && elementImagesResult.data) {
-            for (const img of elementImagesResult.data) {
-              if (img.element_id && img.uploaded_url) {
-                const elementId = String(img.element_id)
-                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
-                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                  elementImageMap.set(elementId, img.uploaded_url)
-                }
+        if (!elementImagesResult.error && elementImagesResult.data) {
+          for (const img of elementImagesResult.data) {
+            if (img.element_id && img.uploaded_url) {
+              const elementId = String(img.element_id)
+              const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+              if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                elementImageMap.set(elementId, img.uploaded_url)
               }
             }
           }
-
-          // image_metadata 결과 처리 (part_images에 없는 것만)
-          if (!elementMetadataResult.error && elementMetadataResult.data) {
-            for (const img of elementMetadataResult.data) {
-              if (img.element_id && img.supabase_url) {
-                const elementId = String(img.element_id)
-                if (!elementImageMap.has(elementId)) {
-                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
-                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
-                    elementImageMap.set(elementId, img.supabase_url)
-                  }
-                }
-              }
-            }
-          }
-
-          // 버킷 직접 확인은 제거 (DB에서 이미 확인했으므로)
         }
 
-        // part_id + color_id 기반 이미지 배치 조회
+        // image_metadata 결과 처리 (part_images에 없는 것만)
+        if (!elementMetadataResult.error && elementMetadataResult.data) {
+          for (const img of elementMetadataResult.data) {
+            if (img.element_id && img.supabase_url) {
+              const elementId = String(img.element_id)
+              if (!elementImageMap.has(elementId)) {
+                const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                  elementImageMap.set(elementId, img.supabase_url)
+                }
+              }
+            }
+          }
+        }
+
+        // part_id + color_id 기반 이미지 맵 구성
         const partColorImageMap = new Map()
-        const partIdsForImages = [...new Set(nonSpareParts.map(p => p.part_id).filter(Boolean))]
-        const colorIdsForImages = [...new Set(nonSpareParts.map(p => p.color_id).filter(id => id !== null && id !== undefined))]
+        if (!partImagesResult.error && partImagesResult.data) {
+          for (const img of partImagesResult.data) {
+            if (img.part_id && img.color_id !== null && img.color_id !== undefined && img.uploaded_url) {
+              const key = `${img.part_id}_${img.color_id}`
+              const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
+              if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
+                partColorImageMap.set(key, img.uploaded_url)
+              }
+            }
+          }
+        }
 
-        if (partIdsForImages.length > 0 && colorIdsForImages.length > 0) {
-          // part_images와 image_metadata를 병렬로 조회
-          const [partImagesResult, metadataImagesResult] = await Promise.all([
-            supabase
-              .from('part_images')
-              .select('part_id, color_id, uploaded_url')
-              .in('part_id', partIdsForImages)
-              .in('color_id', colorIdsForImages)
-              .not('uploaded_url', 'is', null),
-            supabase
-              .from('image_metadata')
-              .select('part_num, color_id, supabase_url')
-              .in('part_num', partIdsForImages)
-              .in('color_id', colorIdsForImages)
-              .not('supabase_url', 'is', null)
-          ])
-
-          // part_images 결과 처리
-          if (!partImagesResult.error && partImagesResult.data) {
-            for (const img of partImagesResult.data) {
-              if (img.part_id && img.color_id !== null && img.color_id !== undefined && img.uploaded_url) {
-                const key = `${img.part_id}_${img.color_id}`
-                const isBucketUrl = img.uploaded_url.includes('/storage/v1/object/public/lego_parts_images/')
-                if (isBucketUrl && !img.uploaded_url.toLowerCase().endsWith('.jpg')) {
-                  partColorImageMap.set(key, img.uploaded_url)
+        // image_metadata 결과 처리 (part_images에 없는 것만)
+        if (!metadataImagesResult.error && metadataImagesResult.data) {
+          for (const img of metadataImagesResult.data) {
+            if (img.part_num && img.color_id !== null && img.color_id !== undefined && img.supabase_url) {
+              const key = `${img.part_num}_${img.color_id}`
+              if (!partColorImageMap.has(key)) {
+                const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
+                if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
+                  partColorImageMap.set(key, img.supabase_url)
                 }
               }
             }
           }
-
-          // image_metadata 결과 처리 (part_images에 없는 것만)
-          if (!metadataImagesResult.error && metadataImagesResult.data) {
-            for (const img of metadataImagesResult.data) {
-              if (img.part_num && img.color_id !== null && img.color_id !== undefined && img.supabase_url) {
-                const key = `${img.part_num}_${img.color_id}`
-                if (!partColorImageMap.has(key)) {
-                  const isBucketUrl = img.supabase_url.includes('/storage/v1/object/public/lego_parts_images/')
-                  if (isBucketUrl && !img.supabase_url.toLowerCase().endsWith('.jpg')) {
-                    partColorImageMap.set(key, img.supabase_url)
-                  }
-                }
-              }
-            }
-          }
-
-          // 버킷 직접 확인은 제거 (DB에서 이미 확인했으므로)
         }
 
         // 부품 데이터와 이미지 URL 매핑 (동기 처리로 최적화)
@@ -3108,7 +3101,7 @@ export default {
   }
 
   .result-header h3 {
-    font-size: 1.25rem !important;
+    font-size: 1.125rem !important;
   }
 
 
