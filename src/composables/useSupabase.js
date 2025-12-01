@@ -99,8 +99,14 @@ export function useSupabase() {
   }
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut()
-    return { error }
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' })
+      return { error }
+    } catch (error) {
+      // 403 오류 등이 발생해도 에러 반환 (호출자가 처리)
+      console.warn('로그아웃 API 오류:', error)
+      return { error }
+    }
   }
 
   return {

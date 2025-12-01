@@ -231,7 +231,7 @@
             </nav>
 
             <!-- 오른쪽: 계정 메뉴 (모바일/태블릿/데스크탑 모두 표시) -->
-            <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end md:flex-1 flex-shrink-0 relative" style="z-index: 30;">
+            <div class="flex items-center gap-2 lg:gap-4 flex-1 justify-end md:flex-1 flex-shrink-0 relative account-menu-container" style="z-index: 30;">
               <!-- 모바일/태블릿: 아이콘 버튼 -->
               <button 
                 v-if="!user" 
@@ -1326,7 +1326,14 @@ export default {
 
     const logout = async () => {
       showUserMenu.value = false
-      await supabase.auth.signOut()
+      try {
+        await supabase.auth.signOut({ scope: 'local' })
+      } catch (error) {
+        // 403 오류 등이 발생해도 로그아웃 처리 계속 진행
+        console.warn('로그아웃 API 오류 (무시하고 로컬 로그아웃 진행):', error)
+      }
+      // 사용자 상태 초기화
+      user.value = null
       router.push('/')
     }
 
@@ -3034,6 +3041,13 @@ main {
 .login-icon-btn svg {
   width: 20px;
   height: 20px;
+}
+
+/* 태블릿 모드: 계정 메뉴 우측 여백 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .account-menu-container {
+    margin-right: 1rem;
+  }
 }
 
 .management-badge-btn {
