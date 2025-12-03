@@ -634,6 +634,40 @@ export default {
       }
     }
 
+    const getStoreUserIds = async (storeId) => {
+      if (!storeId) return []
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('id')
+          .eq('store_id', storeId)
+        
+        if (error) throw error
+        return (data || []).map(u => u.id)
+      } catch (err) {
+        console.error('매장 사용자 목록 조회 실패:', err)
+        return []
+      }
+    }
+
+    const getCurrentUserStoreId = async () => {
+      if (!user.value) return null
+      try {
+        const { data, error } = await supabase
+          .from('users')
+          .select('store_id, role')
+          .eq('id', user.value.id)
+          .single()
+        
+        if (error) throw error
+        // 관리자는 store_id가 null일 수 있음
+        return data?.store_id || null
+      } catch (err) {
+        console.error('사용자 매장 정보 조회 실패:', err)
+        return null
+      }
+    }
+
     const loadNotes = async () => {
       if (!selectedSetId.value) {
         await loadAllNotes()
@@ -642,7 +676,21 @@ export default {
 
       try {
         loading.value = true
-        const { data, error: err } = await supabase
+        
+        // 현재 사용자의 store_id 확인
+        const currentStoreId = await getCurrentUserStoreId()
+        let storeUserIds = []
+        
+        // 매장 사용자인 경우, 같은 매장의 사용자들만 필터링
+        if (currentStoreId) {
+          storeUserIds = await getStoreUserIds(currentStoreId)
+          if (storeUserIds.length === 0) {
+            notes.value = []
+            return
+          }
+        }
+        
+        let query = supabase
           .from('set_inspection_notes')
           .select(`
             *,
@@ -654,6 +702,14 @@ export default {
             )
           `)
           .eq('set_id', selectedSetId.value)
+        
+        // 매장 사용자인 경우 같은 매장의 사용자가 작성한 노트만 조회
+        if (currentStoreId && storeUserIds.length > 0) {
+          query = query.in('created_by', storeUserIds)
+        }
+        // 관리자(store_id가 null)인 경우 모든 노트 조회
+        
+        const { data, error: err } = await query
           .order('created_at', { ascending: false })
 
         if (err) throw err
@@ -1067,7 +1123,21 @@ export default {
 
       try {
         loading.value = true
-        const { data, error: err } = await supabase
+        
+        // 현재 사용자의 store_id 확인
+        const currentStoreId = await getCurrentUserStoreId()
+        let storeUserIds = []
+        
+        // 매장 사용자인 경우, 같은 매장의 사용자들만 필터링
+        if (currentStoreId) {
+          storeUserIds = await getStoreUserIds(currentStoreId)
+          if (storeUserIds.length === 0) {
+            notes.value = []
+            return
+          }
+        }
+        
+        let query = supabase
           .from('set_inspection_notes')
           .select(`
             *,
@@ -1078,6 +1148,14 @@ export default {
               webp_image_url
             )
           `)
+        
+        // 매장 사용자인 경우 같은 매장의 사용자가 작성한 노트만 조회
+        if (currentStoreId && storeUserIds.length > 0) {
+          query = query.in('created_by', storeUserIds)
+        }
+        // 관리자(store_id가 null)인 경우 모든 노트 조회
+        
+        const { data, error: err } = await query
           .order('created_at', { ascending: false })
           .limit(500)
 
