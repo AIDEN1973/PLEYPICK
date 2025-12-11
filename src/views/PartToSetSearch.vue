@@ -560,7 +560,6 @@ export default {
         }
 
         userLegoSets.value = data || []
-        console.log('[PartToSetSearch] 일반회원 레고 세트 로드 완료:', userLegoSets.value.length, '개')
       } catch (err) {
         console.error('[PartToSetSearch] 일반회원 레고 세트 로드 오류:', err)
         userLegoSets.value = []
@@ -582,9 +581,7 @@ export default {
           storeInfo.value = storeData
           const inventoryData = await getStoreInventory(storeData.store.id)
           storeInventory.value = inventoryData || []
-          console.log('[PartToSetSearch] 매장 인벤토리 로드 완료:', storeInventory.value.length, '개')
         } else {
-          console.log('[PartToSetSearch] 매장 정보가 없음 - 일반회원')
           isPleyonUser.value = false
           storeInfo.value = null
           storeInventory.value = []
@@ -648,7 +645,6 @@ export default {
               }
             }
           })
-          console.log('[PartToSetSearch] 일반회원 레고 세트 번호 생성 완료:', setNumbers.size, '개')
           return setNumbers
         }
         
@@ -681,7 +677,6 @@ export default {
           }
         })
         
-        console.log('[PartToSetSearch] 플레이온 인벤토리 세트 번호 생성 완료:', inventorySetNums.size, '개')
         return inventorySetNums
       } catch (error) {
         console.error('[PartToSetSearch] inventorySetNumbers computed error:', error)
@@ -715,21 +710,68 @@ export default {
           searchResult.value = null
         }
 
-        // element_id로 set_parts에서 part_id와 color_id 조회
-        const { data: setPart, error: setPartError } = await supabase
+        const rawElementId = elementIdInput.value.trim()
+        const elementId = String(rawElementId)
+
+        // element_id로 set_parts에서 part_id와 color_id 조회 (여러 방법 시도)
+        let setPart = null
+        let setPartError = null
+
+        // 방법 1: 정확 일치 (문자열)
+        const { data: exactMatch, error: exactError } = await supabase
           .from('set_parts')
-          .select('part_id, color_id')
-          .eq('element_id', String(elementIdInput.value.trim()))
+          .select('part_id, color_id, element_id')
+          .eq('element_id', elementId)
           .limit(1)
           .maybeSingle()
 
+        if (exactMatch && !exactError) {
+          setPart = exactMatch
+        } else if (exactError && exactError.code !== 'PGRST116') {
+          setPartError = exactError
+        } else {
+          // 방법 2: 숫자로 변환하여 검색 시도 (앞뒤 공백 제거된 숫자)
+          const numericElementId = rawElementId.replace(/\s/g, '')
+          if (numericElementId !== elementId && /^\d+$/.test(numericElementId)) {
+            const { data: numericMatch, error: numericError } = await supabase
+              .from('set_parts')
+              .select('part_id, color_id, element_id')
+              .eq('element_id', numericElementId)
+              .limit(1)
+              .maybeSingle()
+
+            if (numericMatch && !numericError) {
+              setPart = numericMatch
+            } else if (numericError && numericError.code !== 'PGRST116') {
+              setPartError = numericError
+            }
+          }
+        }
+
         if (setPartError) {
+          console.error('[PartToSetSearch] set_parts 조회 에러:', setPartError)
           throw new Error(`데이터베이스 조회 실패: ${setPartError.message}`)
         }
 
         if (!setPart) {
-          error.value = `엘리먼트 ID "${elementIdInput.value.trim()}"를 찾을 수 없습니다.`
-          return
+          // element_id가 정확히 일치하지 않는 경우, 부분 일치 검색 시도
+          const { data: similarData, error: similarError } = await supabase
+            .from('set_parts')
+            .select('element_id, part_id, color_id')
+            .ilike('element_id', `%${elementId}%`)
+            .limit(5)
+
+          // 유사한 결과가 있으면 첫 번째 것을 사용
+          if (similarData && similarData.length > 0) {
+            setPart = {
+              part_id: similarData[0].part_id,
+              color_id: similarData[0].color_id,
+              element_id: similarData[0].element_id
+            }
+          } else {
+            error.value = `엘리먼트 ID "${elementId}"를 찾을 수 없습니다.`
+            return
+          }
         }
 
         // 부품 정보 가져오기
@@ -756,49 +798,33 @@ export default {
 
         // 부품 이미지 URL 조회: element_id 우선, 없으면 part_id + color_id, 마지막으로 part_img_url
         let partImageUrl = null
-        const debugElementId = elementIdInput.value.trim()
-        console.log('[PartToSetSearch] 이미지 로딩 시작 - element_id:', debugElementId, 'part_id:', setPart.part_id, 'color_id:', setPart.color_id)
 
         // 버킷 URL 생성 헬퍼 함수
         const getBucketImageUrl = (elementId, partId, colorId) => {
           const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://npferbxuxocbfnfbpcnz.supabase.co'
           const bucketName = 'lego_parts_images'
           const fileName = elementId ? `${String(elementId)}.webp` : `${partId}_${colorId}.webp`
-          const url = `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
-          console.log('[PartToSetSearch] 버킷 URL 생성:', { elementId, partId, colorId, fileName, url })
-          return url
+          return `${supabaseUrl}/storage/v1/object/public/${bucketName}/images/${fileName}`
         }
 
         // Rebrickable CDN URL 생성 헬퍼 함수 (jpg 사용)
         const getRebrickableCdnUrl = (elementId, partId, colorId) => {
-          let url = null
           if (elementId) {
-            url = `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
+            return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
           } else if (partId && colorId !== null && colorId !== undefined) {
-            url = `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
+            return `https://cdn.rebrickable.com/media/parts/${partId}/${colorId}.jpg`
           } else if (partId) {
-            // partId만 있는 경우 (colorId가 0이거나 null일 수 있음)
-            url = `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
+            return `https://cdn.rebrickable.com/media/parts/${partId}/0.jpg`
           }
-          console.log('[PartToSetSearch] CDN URL 생성:', { elementId, partId, colorId, url })
-          return url
+          return null
         }
 
         // 버킷 이미지 존재 확인 헬퍼 함수
         const checkBucketImageExists = async (url) => {
           try {
-            console.log('[PartToSetSearch] 버킷 이미지 존재 확인:', url)
             const response = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(2000) })
-            // 400, 404는 파일 없음으로 처리 (콘솔 오류 방지)
-            if (response.status === 400 || response.status === 404) {
-              console.log('[PartToSetSearch] 버킷 이미지 없음 (400/404):', response.status)
-              return false
-            }
-            const exists = response.ok
-            console.log('[PartToSetSearch] 버킷 이미지 존재 여부:', exists, 'status:', response.status)
-            return exists
+            return response.ok && response.status !== 400 && response.status !== 404
           } catch (err) {
-            console.log('[PartToSetSearch] 버킷 이미지 확인 실패:', err)
             return false
           }
         }
@@ -812,38 +838,27 @@ export default {
             .eq('element_id', String(elementIdInput.value.trim()))
             .maybeSingle()
 
-          console.log('[PartToSetSearch] part_images 조회 결과:', { error: elementError, data: partImageByElement })
-
           if (!elementError && partImageByElement?.uploaded_url) {
             const uploadedUrl = partImageByElement.uploaded_url
-            console.log('[PartToSetSearch] part_images에서 uploaded_url 발견:', uploadedUrl)
             // 버킷 URL인지 확인
             const isBucketUrl = uploadedUrl.includes('/storage/v1/object/public/lego_parts_images/')
             if (isBucketUrl && !uploadedUrl.toLowerCase().endsWith('.jpg')) {
               partImageUrl = uploadedUrl
-              console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
             } else if (!isBucketUrl) {
               // CDN/API URL이면 버킷에 저장된 이미지 확인
               const bucketUrl = getBucketImageUrl(elementIdInput.value.trim(), null, null)
-              console.log('[PartToSetSearch] 버킷 직접 확인 시도:', bucketUrl)
               const exists = await checkBucketImageExists(bucketUrl)
-              console.log('[PartToSetSearch] 버킷 존재 여부:', exists)
               if (exists) {
                 partImageUrl = bucketUrl
-                console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
               } else {
                 partImageUrl = uploadedUrl
-                console.log('[PartToSetSearch] uploaded_url 사용:', partImageUrl)
               }
             }
-          } else {
-            console.log('[PartToSetSearch] part_images에서 이미지 없음')
           }
         }
 
         // element_id로 찾지 못했으면 part_id + color_id로 조회
         if (!partImageUrl) {
-          console.log('[PartToSetSearch] part_id + color_id로 조회:', setPart.part_id, setPart.color_id)
           const { data: partImage, error: partImageError } = await supabase
             .from('part_images')
             .select('uploaded_url')
@@ -851,69 +866,45 @@ export default {
             .eq('color_id', setPart.color_id)
             .maybeSingle()
 
-          console.log('[PartToSetSearch] part_id+color_id 조회 결과:', { error: partImageError, data: partImage })
-
           if (!partImageError && partImage?.uploaded_url) {
             const uploadedUrl = partImage.uploaded_url
-            console.log('[PartToSetSearch] part_id+color_id에서 uploaded_url 발견:', uploadedUrl)
             // 버킷 URL인지 확인
             const isBucketUrl = uploadedUrl.includes('/storage/v1/object/public/lego_parts_images/')
             if (isBucketUrl && !uploadedUrl.toLowerCase().endsWith('.jpg')) {
               partImageUrl = uploadedUrl
-              console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
             } else if (!isBucketUrl) {
               // CDN/API URL이면 버킷에 저장된 이미지 확인
               const bucketUrl = getBucketImageUrl(null, setPart.part_id, setPart.color_id)
-              console.log('[PartToSetSearch] 버킷 직접 확인 시도:', bucketUrl)
               const exists = await checkBucketImageExists(bucketUrl)
-              console.log('[PartToSetSearch] 버킷 존재 여부:', exists)
               if (exists) {
                 partImageUrl = bucketUrl
-                console.log('[PartToSetSearch] 버킷 URL 사용:', partImageUrl)
               } else {
                 partImageUrl = uploadedUrl
-                console.log('[PartToSetSearch] uploaded_url 사용:', partImageUrl)
               }
             }
-          } else {
-            console.log('[PartToSetSearch] part_id+color_id에서 이미지 없음')
           }
         }
 
         // part_images에 없으면 버킷 직접 확인
         if (!partImageUrl) {
-          console.log('[PartToSetSearch] part_images에 없음, 버킷 직접 확인 시작')
           const bucketUrl = elementIdInput.value.trim()
             ? getBucketImageUrl(elementIdInput.value.trim(), setPart.part_id, setPart.color_id)
             : getBucketImageUrl(null, setPart.part_id, setPart.color_id)
-          console.log('[PartToSetSearch] 버킷 직접 확인 URL:', bucketUrl)
           const exists = await checkBucketImageExists(bucketUrl)
-          console.log('[PartToSetSearch] 버킷 직접 확인 결과:', exists)
           if (exists) {
             partImageUrl = bucketUrl
-            console.log('[PartToSetSearch] 버킷 직접 확인 성공, URL 설정:', partImageUrl)
-          } else {
-            console.log('[PartToSetSearch] 버킷 직접 확인 실패')
           }
-        } else {
-          console.log('[PartToSetSearch] 이미지 URL 설정됨 (part_images):', partImageUrl)
         }
 
         // 버킷에도 없으면 Rebrickable CDN으로 폴백
         if (!partImageUrl) {
-          console.log('[PartToSetSearch] 버킷에도 없음, CDN 폴백 시작')
           const elementId = elementIdInput.value.trim() || null
-          console.log('[PartToSetSearch] CDN 폴백 파라미터:', { elementId, partId: setPart.part_id, colorId: setPart.color_id })
           partImageUrl = getRebrickableCdnUrl(elementId, setPart.part_id, setPart.color_id)
-          console.log('[PartToSetSearch] getRebrickableCdnUrl 결과:', partImageUrl)
           // CDN URL도 없으면 element_id만으로 시도
           if (!partImageUrl && elementId) {
             partImageUrl = `https://cdn.rebrickable.com/media/parts/elements/${elementId}.jpg`
-            console.log('[PartToSetSearch] element_id만으로 CDN URL 생성:', partImageUrl)
           }
         }
-
-        console.log('[PartToSetSearch] 최종 이미지 URL:', partImageUrl)
 
         // 세트 찾기
         const allSets = await findSetsByPart(setPart.part_id, setPart.color_id)
@@ -927,23 +918,9 @@ export default {
             const normalizedSetNum = setNum.replace(/-.*$/, '')
             return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
           })
-          if (isPleyonUser.value) {
-            console.log(`[PartToSetSearch] 플레이온 매장 보유 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개)`)
-          } else {
-            console.log(`[PartToSetSearch] 일반회원 등록 레고 세트 필터링: ${sets.length}개 (전체: ${allSets.length}개, 등록된 레고: ${userLegoSets.value.length}개)`)
-          }
-        } else {
-          // 전체 레고 세트에서 검색
-          console.log('[PartToSetSearch] 전체 레고 세트에서 검색')
         }
         
         // 기본 검색 결과 먼저 표시 (세트 목록)
-        console.log('[PartToSetSearch] searchResult 설정:', { 
-          element_id: elementIdInput.value.trim(), 
-          part_id: setPart.part_id, 
-          color_id: setPart.color_id,
-          part_image_url: partImageUrl 
-        })
         searchResult.value = {
           element_id: elementIdInput.value.trim(),
           part_id: setPart.part_id,
@@ -955,7 +932,6 @@ export default {
           sets: sets,
           alternatives: null // 나중에 업데이트
         }
-        console.log('[PartToSetSearch] searchResult.value 설정 완료:', searchResult.value)
         
         // 유사부품 찾기 (백그라운드에서 실행, element_id 포함)
         const alternatives = await findAlternativeParts(setPart.part_id, setPart.color_id)
@@ -1490,10 +1466,25 @@ export default {
     }
     
     const searchByQueryParams = async () => { // 🔧 수정됨
-      const { element, element_id: elementIdAlias, part, color } = route.query // 🔧 수정됨
+      const { element, element_id: elementIdAlias, part, color, ...otherParams } = route.query // 🔧 수정됨
       const signature = JSON.stringify({ element, elementIdAlias, part, color }) // 🔧 수정됨
-      if (signature === lastQuerySignature.value) return // 🔧 수정됨
+      if (signature === lastQuerySignature.value) {
+        return // 🔧 수정됨
+      }
       lastQuerySignature.value = signature // 🔧 수정됨
+      
+      // 숫자만 있는 쿼리 파라미터가 있으면 element_id로 처리
+      const numericParams = Object.entries(otherParams).filter(([key, value]) => {
+        const strValue = String(value || '').trim()
+        return /^\d+$/.test(strValue) && strValue.length >= 6
+      })
+      
+      if (numericParams.length > 0) {
+        const firstNumeric = numericParams[0][1]
+        elementIdInput.value = String(firstNumeric).trim()
+        await searchByElementId()
+        return
+      }
       
       const elementParam = element ?? elementIdAlias // 🔧 수정됨
       if (elementParam) { // 🔧 수정됨
@@ -1512,6 +1503,8 @@ export default {
         if (resolvedElementId) { // 🔧 수정됨
           elementIdInput.value = resolvedElementId // 🔧 수정됨
           await searchByElementId() // 🔧 수정됨
+        } else {
+          error.value = `부품 ID "${normalizedPartId}"에 해당하는 엘리먼트 ID를 찾을 수 없습니다.`
         }
       }
     }
@@ -1642,11 +1635,8 @@ export default {
       
       if (!partCard) {
         // 검색 결과 이미지인 경우 - Rebrickable CDN으로 폴백
-        console.log('[PartToSetSearch] 검색 결과 이미지 로드 실패, CDN 폴백 시도')
         if (searchResult.value && originalSrc) {
-          console.log('[PartToSetSearch] searchResult.value:', searchResult.value)
           const getRebrickableCdnUrl = (elementId, partId, colorId) => {
-            // elementId를 문자열로 변환하여 처리 (jpg 사용)
             if (elementId) {
               return `https://cdn.rebrickable.com/media/parts/elements/${String(elementId)}.jpg`
             } else if (partId && colorId !== null && colorId !== undefined) {
@@ -1663,26 +1653,11 @@ export default {
             searchResult.value.color_id
           )
           
-          console.log('[PartToSetSearch] CDN 폴백 URL:', { 
-            element_id: searchResult.value.element_id,
-            part_id: searchResult.value.part_id,
-            color_id: searchResult.value.color_id,
-            cdnUrl,
-            originalSrc,
-            willRetry: cdnUrl && cdnUrl !== originalSrc
-          })
-          
           if (cdnUrl && cdnUrl !== originalSrc) {
-            console.log('[PartToSetSearch] CDN URL로 재시도:', cdnUrl)
             img.src = cdnUrl
             return
-          } else {
-            console.log('[PartToSetSearch] CDN URL 재시도 불가:', { cdnUrl, originalSrc })
           }
-        } else {
-          console.log('[PartToSetSearch] searchResult.value 없음 또는 originalSrc 없음')
         }
-        console.log('[PartToSetSearch] 이미지 숨김 처리')
         img.style.display = 'none'
         return
       }
@@ -1753,11 +1728,6 @@ export default {
             const normalizedSetNum = setNum.replace(/-.*$/, '')
             return inventorySetNumbers.value.has(setNum) || inventorySetNumbers.value.has(normalizedSetNum)
           })
-          if (isPleyonUser.value) {
-            console.log(`[PartToSetSearch] 플레이온 매장 보유 세트 필터링 (부품 정보): ${partSets.value.length}개 (전체: ${allPartSets.length}개)`)
-          } else {
-            console.log(`[PartToSetSearch] 일반회원 등록 레고 세트 필터링 (부품 정보): ${partSets.value.length}개 (전체: ${allPartSets.length}개, 등록된 레고: ${userLegoSets.value.length}개)`)
-          }
         } else {
           // 전체 레고 세트
           partSets.value = allPartSets
@@ -2069,7 +2039,6 @@ export default {
     }, { immediate: true }) // 🔧 수정됨
     
     onMounted(async () => {
-      console.log('[PartToSetSearch] onMounted 시작')
       if (user.value) {
         searchInStoreOnly.value = true
         // 플레이온 계정 확인 및 일반회원 레고 세트 로드

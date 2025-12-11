@@ -12,65 +12,172 @@ export function usePartSearch() {
       loading.value = true
       error.value = null
 
-      // 1단계: set_parts에서 set_id 목록 가져오기
-      let query = supabase
-        .from('set_parts')
-        .select('set_id, quantity')
-        .eq('part_id', partId)
-
-      if (colorId !== null) {
-        query = query.eq('color_id', colorId)
-      }
-
-      const { data: setPartsData, error: setPartsError } = await query
-
-      if (setPartsError) throw setPartsError
-
-      if (!setPartsData || setPartsData.length === 0) {
+      // 입력값 검증
+      if (!partId) {
+        console.warn('[usePartSearch] partId가 없습니다')
         return []
       }
 
-      // 중복 제거
-      const uniqueSetIds = [...new Set(setPartsData.map(sp => sp.set_id))]
+      console.log('[usePartSearch] findSetsByPart 시작:', { partId, colorId })
+
+      // 1단계: set_parts에서 set_id 목록 가져오기 (최소 컬럼만 조회)
+      let query = supabase
+        .from('set_parts')
+        .select('set_id, quantity')
+        .eq('part_id', String(partId))
+
+      if (colorId !== null && colorId !== undefined) {
+        query = query.eq('color_id', colorId)
+      }
+
+      // 대량 데이터를 위한 최적화: limit 제거하여 모든 결과 조회
+      const { data: setPartsData, error: setPartsError } = await query
+
+      if (setPartsError) {
+        console.error('[usePartSearch] set_parts 조회 에러:', setPartsError)
+        throw setPartsError
+      }
+
+      if (!setPartsData || setPartsData.length === 0) {
+        console.log('[usePartSearch] set_parts 결과 없음:', { partId, colorId })
+        return []
+      }
+
+      // 중복 제거 및 유효한 set_id만 필터링
+      const uniqueSetIds = [...new Set(
+        setPartsData
+          .map(sp => sp.set_id)
+          .filter(id => id !== null && id !== undefined && id !== '')
+      )]
+
+      if (uniqueSetIds.length === 0) {
+        console.warn('[usePartSearch] 유효한 set_id가 없습니다')
+        return []
+      }
+
+      console.log('[usePartSearch] uniqueSetIds:', uniqueSetIds.length, '개')
+
       const quantityMap = new Map()
       setPartsData.forEach(sp => {
-        if (!quantityMap.has(sp.set_id)) {
-          quantityMap.set(sp.set_id, sp.quantity)
+        if (sp.set_id && !quantityMap.has(sp.set_id)) {
+          quantityMap.set(sp.set_id, sp.quantity || 0)
         }
       })
 
       // 2단계: lego_sets에서 세트 정보 가져오기
-      const { data: setsData, error: setsError } = await supabase
-        .from('lego_sets')
-        .select('id, name, set_num, theme_id, webp_image_url')
-        .in('id', uniqueSetIds)
+      // Supabase의 .in()은 최대 100개까지만 지원하므로 분할 처리
+      // 모든 배치를 병렬로 처리하여 최대 속도 확보
+      const batchSize = 100
+      const totalBatches = Math.ceil(uniqueSetIds.length / batchSize)
+      const maxConcurrent = Math.min(20, totalBatches) // 최대 20개 동시 처리 (3000개면 30배치 → 20개씩 처리)
+      
+      console.log(`[usePartSearch] lego_sets 배치 조회 시작: ${uniqueSetIds.length}개 → ${totalBatches}개 배치 (동시 처리: ${maxConcurrent})`)
+      
+      // 모든 배치를 생성
+      const allBatchPromises = []
+      for (let i = 0; i < uniqueSetIds.length; i += batchSize) {
+        const batch = uniqueSetIds.slice(i, i + batchSize)
+        if (batch.length > 0) {
+          allBatchPromises.push(
+            supabase
+              .from('lego_sets')
+              .select('id, name, set_num, theme_id, webp_image_url')
+              .in('id', batch)
+              .then(({ data: batchData, error: setsError }) => {
+                if (setsError) {
+                  const batchNum = Math.floor(i / batchSize) + 1
+                  console.error(`[usePartSearch] lego_sets 조회 에러 (배치 ${batchNum}/${totalBatches}):`, setsError)
+                  throw setsError
+                }
+                return batchData || []
+              })
+          )
+        }
+      }
+      
+      // 배치를 그룹으로 나누어 병렬 처리 (메모리 부하 방지)
+      const setsData = []
+      for (let i = 0; i < allBatchPromises.length; i += maxConcurrent) {
+        const batchGroup = allBatchPromises.slice(i, i + maxConcurrent)
+        const batchResults = await Promise.all(batchGroup)
+        batchResults.forEach(result => {
+          if (result && result.length > 0) {
+            setsData.push(...result)
+          }
+        })
+        
+        // 진행 상황 로깅 (큰 데이터셋만)
+        if (totalBatches > 10 && (i + maxConcurrent) < allBatchPromises.length) {
+          const processed = Math.min(i + maxConcurrent, allBatchPromises.length)
+          console.log(`[usePartSearch] 진행: ${processed}/${totalBatches} 배치 완료 (${setsData.length}개 세트)`)
+        }
+      }
 
-      if (setsError) throw setsError
+      console.log(`[usePartSearch] lego_sets 조회 완료: ${setsData.length}개 세트`)
 
-      const themeIds = [...new Set((setsData || []).map(set => set.theme_id).filter(Boolean))]
+      if (setsData.length === 0) {
+        console.log('[usePartSearch] lego_sets 결과 없음')
+        return []
+      }
+
+      const themeIds = [...new Set(setsData.map(set => set.theme_id).filter(Boolean))]
       let themeMap = new Map()
 
       if (themeIds.length > 0) {
-        const { data: themesData, error: themesError } = await supabase
-          .from('lego_themes')
-          .select('theme_id, name')
-          .in('theme_id', themeIds)
-
-        if (themesError) throw themesError
-        themeMap = new Map((themesData || []).map(theme => [theme.theme_id, theme.name]))
+        // theme_id도 배치 처리 (전체 병렬 처리)
+        const themeBatchSize = 100
+        const themeTotalBatches = Math.ceil(themeIds.length / themeBatchSize)
+        const themeMaxConcurrent = Math.min(20, themeTotalBatches)
+        
+        // 모든 테마 배치를 생성
+        const allThemeBatchPromises = []
+        for (let i = 0; i < themeIds.length; i += themeBatchSize) {
+          const batch = themeIds.slice(i, i + themeBatchSize)
+          if (batch.length > 0) {
+            allThemeBatchPromises.push(
+              supabase
+                .from('lego_themes')
+                .select('theme_id, name')
+                .in('theme_id', batch)
+                .then(({ data: batchThemes, error: themesError }) => {
+                  if (themesError) {
+                    const batchNum = Math.floor(i / themeBatchSize) + 1
+                    console.error(`[usePartSearch] lego_themes 조회 에러 (배치 ${batchNum}/${themeTotalBatches}):`, themesError)
+                    throw themesError
+                  }
+                  return batchThemes || []
+                })
+            )
+          }
+        }
+        
+        // 테마 배치를 그룹으로 나누어 병렬 처리
+        const themesData = []
+        for (let i = 0; i < allThemeBatchPromises.length; i += themeMaxConcurrent) {
+          const themeBatchGroup = allThemeBatchPromises.slice(i, i + themeMaxConcurrent)
+          const themeBatchResults = await Promise.all(themeBatchGroup)
+          themeBatchResults.forEach(result => {
+            if (result && result.length > 0) {
+              themesData.push(...result)
+            }
+          })
+        }
+        
+        themeMap = new Map(themesData.map(theme => [theme.theme_id, theme.name]))
       }
 
       // 결과 정리
-      const result = (setsData || []).map(set => ({
+      const result = setsData.map(set => ({
         id: set.id,
-        name: set.name,
-        set_num: set.set_num,
+        name: set.name || 'Unknown',
+        set_num: set.set_num || '',
         theme_id: set.theme_id || null,
         theme_name: set.theme_id ? (themeMap.get(set.theme_id) || null) : null,
-        image_url: set.webp_image_url,
+        image_url: set.webp_image_url || null,
         quantity: quantityMap.get(set.id) || 0
       }))
 
+      console.log('[usePartSearch] findSetsByPart 완료:', result.length, '개 세트')
       return result
     } catch (err) {
       error.value = err.message
